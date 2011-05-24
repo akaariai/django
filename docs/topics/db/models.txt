@@ -589,6 +589,62 @@ pass in the :attr:`~django.db.models.Field.primary_key` argument if you like).
 Thus, it's now possible to have multiple fields of type
 :class:`~django.db.models.OneToOneField` on a single model.
 
+.. _multi-column-primary-keys:
+
+Multi-column primary keys
+-------------------------
+
+.. versionadded:: 1.7
+
+There are cases where you want a primary key to span multiple fields. One
+such case might be when specifying an explicit model to represent a
+many-to-many relationship (see :ref:`intermediary-manytomany` above).
+
+Since every model has to have exactly one primary key field, you'll have
+to group all individual fields that make up the primary key into a single
+virtual field. That's exactly what
+:class:`~django.db.models.CompositeField` does.
+
+For example, a model holding a person's name and address where each person
+is distinguished only by their first and last name would look like this::
+
+    class Person(models.Model):
+        first_name = models.CharField(max_length=100)
+        last_name = models.CharField(max_length=100)
+        address = models.CharField(max_length=100)
+
+        full_name = models.CompositeField(first_name, last_name, primary_key=True)
+
+When you reference a model with a composite primary key using a
+:class:`~django.db.models.ForeignKey` or a
+:class:`~django.db.models.OneToOneField`, Django will automatically create
+the required atomic fields that the related field consists of. By default
+their name is composed of the name of the
+:class:`~django.db.models.ForeignKey` or
+:class:`~django.db.models.OneToOneField` and the target field name joined
+by an underscore.
+
+For example, if you create a :class:`~django.db.models.ForeignKey` called
+``person`` to our ``Person`` model, the following fields will be created
+automatically::
+
+    person_first_name = models.CharField(max_length=100)
+    person_last_name = models.CharField(max_length=100)
+
+Of course, you can create these fields by hand, group them in your own
+:class:`~django.db.models.CompositeField` and tell your
+:class:`~django.db.models.ForeignKey` to use that instead of creating
+local fields automatically using the
+:attr:`~django.db.models.ForeignKey.aux_field` option. Be warned though,
+that if you set this option, it is your responsibility to make sure the
+supplied fields have correct types and constraints.
+
+Also be aware that, as with any explicitly set primary key field, as soon
+as you modify the primary key value, even if it is in an already existing
+instance, saving will create a new one or update a different row if that
+value already exists in the database. This may be confusing in the admin
+if you hit “Update” and a new row is added.
+
 Models across files
 -------------------
 

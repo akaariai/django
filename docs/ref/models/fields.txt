@@ -1357,3 +1357,73 @@ accepted by :class:`ForeignKey`, plus one extra argument:
     link back to the parent class, rather than the extra
     ``OneToOneField`` which would normally be implicitly created by
     subclassing.
+
+
+Composite Fields
+================
+
+.. module:: django.db.models.fields.virtual
+   :synopsis: Virtual and composite fields
+
+.. currentmodule:: django.db.models
+
+.. versionadded:: 1.7
+
+Composite fields provide a way to group several regular fields into a
+single one.
+
+``CompositeField``
+------------------
+
+.. class:: CompositeField(*fields[, primary_key=True, unique=True, db_index=True])
+
+A composite field. Requires at least two positional parameters, each
+specifying a single regular field present in the model. The
+``CompositeField`` will then enclose these fields into a single one.
+
+Arguments
+~~~~~~~~~
+
+``CompositeField`` is not a real model field (meaning it does not have a
+direct database representation), as such, it only accepts a small subset
+of options.
+
+.. attribute:: CompositeField.db_index
+
+    If ``True``, the CompositeField will create an index on database
+    columns corresponding to the enclosed fields when running the
+    :djadmin:`sqlindexes` command.
+
+.. attribute:: CompositeField.unique
+
+    If ``True``, the enclosed fields will be checked together for
+    uniqueness. Setting this option is essentially the same as specifying
+    the enclosed fields in the
+    :attr:`~django.db.models.Options.unique_together` model ``Meta``
+    attribute.
+
+.. attribute:: CompositeField.primary_key
+
+    Setting this option to ``True`` creates a primary key composed of
+    multiple database columns. Read more about composite primary keys in
+    the :ref:`multi-column-primary-keys` section of the topic guide.
+
+Any other options passed to the ``CompositeField`` will result in it
+failing model validation.
+
+Value of a ``CompositeField``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When retrieved, the value of a ``CompositeField`` is represented by a
+|namedtuple|_. Each field in the |namedtuple|_ represents the value of
+one model field contained in the ``CompositeField``. The order of values
+in the |namedtuple|_ corresponds to the order in which the individual
+fields were given to the ``CompositeField`` constructor.
+
+When assigning a value to a ``CompositeField``, the value is expected to
+be an iterable (tuple, list) with length equal to the number of enclosed
+fields. Again, the order of values is expected to be the same as the order
+of enclosed fields.
+
+.. |namedtuple| replace:: ``namedtuple``
+.. _namedtuple: http://docs.python.org/library/collections.html#namedtuple-factory-function-for-tuples-with-named-fields
