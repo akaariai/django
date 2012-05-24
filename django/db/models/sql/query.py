@@ -1095,12 +1095,17 @@ class Query(object):
         elif callable(value):
             value = value()
         elif isinstance(value, ExpressionNode):
-            # If value is a query expression, evaluate it
-            value = SQLEvaluator(value, self)
-            having_clause = value.contains_aggregate
+            # If value is a query expression, generate a SQLEvaluator object
+            # of it. But we will not add it to the query just yet - we will first
+            # want to resolve the lookup in case the Expression targets the same
+            # lookup path. Refs #18375.
+            having_clause = value.contains_aggregate(self.aggregate_select.keys())
+            value = SQLEvaluator(value)
 
         for alias, aggregate in self.aggregates.items():
             if alias in (parts[0], LOOKUP_SEP.join(parts)):
+                if isinstance(value, SQLEvaluator):
+                    value.add_to_query(self)
                 entry = self.where_class()
                 entry.add((aggregate, lookup_type, value), AND)
                 if negate:
@@ -1216,6 +1221,8 @@ class Query(object):
             for filter in extra_filters:
                 self.add_filter(filter, negate=negate, can_reuse=can_reuse,
                         process_extras=False)
+        if isinstance(value, SQLEvaluator):
+            value.add_to_query(self)
 
     def add_q(self, q_object, used_aliases=None, force_having=False):
         """
