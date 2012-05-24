@@ -24,7 +24,7 @@ from .models import (Annotation, Article, Author, Celebrity, Child, Cover,
     Node, ObjectA, ObjectB, ObjectC, CategoryItem, SimpleCategory,
     SpecialCategory, OneToOneCategory, NullableName, ProxyCategory,
     SingleObject, RelatedObject, ModelA, ModelD, Responsibility, Job,
-    JobResponsibilities, BaseA)
+    JobResponsibilities, BaseA, Order, OrderItem)
 
 
 class BaseQuerysetTest(TestCase):
@@ -833,7 +833,6 @@ class Queries1Tests(BaseQuerysetTest):
             Note.objects.filter(Q(extrainfo__author=self.a1)|Q(extrainfo=xx)),
             ['<Note: n1>', '<Note: n3>']
         )
-        xx.delete()
         q = Note.objects.filter(Q(extrainfo__author=self.a1)|Q(extrainfo=xx)).query
         self.assertEqual(
             len([x[2] for x in q.alias_map.values() if x[2] == q.LOUTER and q.alias_refcount[x[1]]]),
@@ -879,7 +878,6 @@ class Queries1Tests(BaseQuerysetTest):
             Item.objects.filter(Q(tags__name='t4')),
             [repr(i) for i in Item.objects.filter(~Q(~Q(tags__name='t4')))])
 
-    @unittest.expectedFailure
     def test_exclude_in(self):
         self.assertQuerysetEqual(
             Item.objects.exclude(Q(tags__name__in=['t4', 't3'])),
@@ -2280,6 +2278,103 @@ class ExcludeTest(TestCase):
         self.assertQuerysetEqual(
             Responsibility.objects.exclude(jobs__name='Manager'),
             ['<Responsibility: Programming>'])
+
+class ExcludeTest17600(TestCase):
+    """
+    Some regressiontests for ticket #17600. Some of these likely duplicate
+    other existing tests.
+    """
+
+    def setUp(self):
+        # Create a few Orders.
+        self.o1 = Order.objects.create(pk=1)
+        self.o2 = Order.objects.create(pk=2)
+        self.o3 = Order.objects.create(pk=3)
+
+        # Create some OrderItems for the first order with homogeneous
+        # status_id values
+        self.oi1 = OrderItem.objects.create(order=self.o1, status=1)
+        self.oi2 = OrderItem.objects.create(order=self.o1, status=1)
+        self.oi3 = OrderItem.objects.create(order=self.o1, status=1)
+
+        # Create some OrderItems for the second order with heterogeneous
+        # status_id values
+        self.oi4 = OrderItem.objects.create(order=self.o2, status=1)
+        self.oi5 = OrderItem.objects.create(order=self.o2, status=2)
+        self.oi6 = OrderItem.objects.create(order=self.o2, status=3)
+
+        # Create some OrderItems for the second order with heterogeneous
+        # status_id values
+        self.oi7 = OrderItem.objects.create(order=self.o3, status=2)
+        self.oi8 = OrderItem.objects.create(order=self.o3, status=3)
+        self.oi9 = OrderItem.objects.create(order=self.o3, status=4)
+
+    def test_exclude_plain(self):
+        """
+        This should exclude Orders which have some items with status 1
+
+        """
+        self.assertQuerysetEqual(
+            Order.objects.exclude(items__status=1),
+            ['<Order: 3>'])
+
+    def test_exclude_plain_distinct(self):
+        """
+        This should exclude Orders which have some items with status 1
+
+        """
+        self.assertQuerysetEqual(
+            Order.objects.exclude(items__status=1).distinct(),
+            ['<Order: 3>'])
+
+    def test_exclude_with_q_object_distinct(self):
+        """
+        This should exclude Orders which have some items with status 1
+
+        """
+        self.assertQuerysetEqual(
+            Order.objects.exclude(Q(items__status=1)).distinct(),
+            ['<Order: 3>'])
+
+    def test_exclude_with_q_object_no_distinct(self):
+        """
+        This should exclude Orders which have some items with status 1
+
+        """
+        self.assertQuerysetEqual(
+            Order.objects.exclude(Q(items__status=1)),
+            ['<Order: 3>'])
+
+    def test_exclude_with_q_is_equal_to_plain_exclude(self):
+        """
+        Using exclude(condition) and exclude(Q(condition)) should
+        yield the same QuerySet
+
+        """
+        self.assertEquals(
+            list(Order.objects.exclude(items__status=1).distinct()),
+            list(Order.objects.exclude(Q(items__status=1)).distinct()))
+
+    def test_exclude_with_q_is_equal_to_plain_exclude_variation(self):
+        """
+        Using exclude(condition) and exclude(Q(condition)) should
+        yield the same QuerySet
+
+        """
+        self.assertEquals(
+            list(Order.objects.exclude(items__status=1)),
+            list(Order.objects.exclude(Q(items__status=1)).distinct()))
+
+    @unittest.expectedFailure
+    def test_only_orders_with_all_items_having_status_1(self):
+        """
+        This should only return orders having ALL items set to status 1, or
+        those items not having any orders at all. The correct way to write
+        this query in SQL seems to be using two nested subqueries.
+        """
+        self.assertQuerysetEqual(
+            Order.objects.exclude(~Q(items__status=1)).distinct(),
+            ['<Order: 1>'])
 
 class NullInExcludeTest(TestCase):
     def setUp(self):

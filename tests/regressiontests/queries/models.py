@@ -439,3 +439,25 @@ class BaseA(models.Model):
     a = models.ForeignKey(FK1, null=True)
     b = models.ForeignKey(FK2, null=True)
     c = models.ForeignKey(FK3, null=True)
+
+# Models for #17600 regressions
+@python_2_unicode_compatible
+class Order(models.Model):
+    id = models.IntegerField(primary_key=True)
+
+    class Meta:
+        ordering = ('pk', )
+
+    def __str__(self):
+        return '%s' % self.pk
+
+@python_2_unicode_compatible
+class OrderItem(models.Model):
+    order = models.ForeignKey(Order, related_name='items')
+    status = models.IntegerField()
+
+    class Meta:
+        ordering = ('pk', )
+
+    def __str__(self):
+        return '%s' % self.pk

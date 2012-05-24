@@ -9,6 +9,7 @@ from django.core.exceptions import FieldError
 from django.db.models import Count, Max, Avg, Sum, StdDev, Variance, F, Q
 from django.test import TestCase, Approximate, skipUnlessDBFeature
 from django.utils import six
+from django.utils.unittest import expectedFailure
 
 from .models import Author, Book, Publisher, Clues, Entries, HardbackBook
 
@@ -470,7 +471,7 @@ class AggregationTests(TestCase):
         # Regression for #15709 - Ensure each group_by field only exists once
         # per query
         qs = Book.objects.values('publisher').annotate(max_pages=Max('pages')).order_by()
-        grouping, gb_params = qs.query.get_compiler(qs.db).get_grouping([])
+        grouping, gb_params = qs.query.get_compiler(qs.db).get_grouping([], [])
         self.assertEqual(len(grouping), 1)
 
     def test_duplicate_alias(self):
@@ -845,14 +846,14 @@ class AggregationTests(TestCase):
 
         # The name of the explicitly provided annotation name in this case
         # poses no problem
-        qs = Author.objects.annotate(book_cnt=Count('book')).filter(book_cnt=2)
+        qs = Author.objects.annotate(book_cnt=Count('book')).filter(book_cnt=2).order_by('name')
         self.assertQuerysetEqual(
             qs,
             ['Peter Norvig'],
             lambda b: b.name
         )
         # Neither in this case
-        qs = Author.objects.annotate(book_count=Count('book')).filter(book_count=2)
+        qs = Author.objects.annotate(book_count=Count('book')).filter(book_count=2).order_by('name')
         self.assertQuerysetEqual(
             qs,
             ['Peter Norvig'],
@@ -860,7 +861,7 @@ class AggregationTests(TestCase):
         )
         # This case used to fail because the ORM couldn't resolve the
         # automatically generated annotation name `book__count`
-        qs = Author.objects.annotate(Count('book')).filter(book__count=2)
+        qs = Author.objects.annotate(Count('book')).filter(book__count=2).order_by('name')
         self.assertQuerysetEqual(
             qs,
             ['Peter Norvig'],
@@ -982,3 +983,69 @@ class AggregationTests(TestCase):
     def test_reverse_join_trimming(self):
         qs = Author.objects.annotate(Count('book_contact_set__contact'))
         self.assertIn(' JOIN ', str(qs.query))
+
+    def test_negated_aggregation(self):
+        expected_results = Author.objects.exclude(
+            pk__in=Author.objects.annotate(book_cnt=Count('book')).filter(book_cnt=2)
+        ).order_by('name')
+        expected_results = [a.name for a in expected_results]
+        qs = Author.objects.annotate(book_cnt=Count('book')).exclude(
+            Q(book_cnt=2), Q(book_cnt=2)).order_by('name')
+        self.assertQuerysetEqual(
+            qs,
+            expected_results,
+            lambda b: b.name
+        )
+        expected_results = Author.objects.exclude(
+            pk__in=Author.objects.annotate(book_cnt=Count('book')).filter(book_cnt=2)
+        ).order_by('name')
+        expected_results = [a.name for a in expected_results]
+        qs = Author.objects.annotate(book_cnt=Count('book')).exclude(Q(book_cnt=2)|Q(book_cnt=2)).order_by('name')
+        self.assertQuerysetEqual(
+            qs,
+            expected_results,
+            lambda b: b.name
+        )
+
+    def test_name_filters(self):
+        qs = Author.objects.annotate(Count('book')).filter(
+            Q(book__count__exact=2)|Q(name='Adrian Holovaty')
+        ).order_by('name')
+        self.assertQuerysetEqual(
+            qs,
+            ['Adrian Holovaty', 'Peter Norvig'],
+            lambda b: b.name
+        )
+
+    def test_name_expressions(self):
+        # Test that aggregates are spotted corretly from F objects.
+        # Note that Adrian's age is 34 in the fixtures, and he has one book
+        # so both conditions match one author.
+        qs = Author.objects.annotate(Count('book')).filter(
+            Q(name='Peter Norvig')|Q(age=F('book__count') + 33)
+        ).order_by('name')
+        self.assertQuerysetEqual(
+            qs,
+            ['Adrian Holovaty', 'Peter Norvig'],
+            lambda b: b.name
+        )
+
+    def test_ticket_11293(self):
+        q1 = Q(price__gt=50)
+        q2 = Q(authors__count__gt=1)
+        query = Book.objects.annotate(Count('authors')).filter(
+            q1 | q2).order_by('pk')
+        self.assertQuerysetEqual(
+            query, [1, 4, 5, 6],
+            lambda b: b.pk)
+
+    def test_ticket_11293_q_immutable(self):
+        """
+        Check that splitting a q object to parts for where/having doesn't alter
+        the original q-object.
+        """
+        q1 = Q(isbn='')
+        q2 = Q(authors__count__gt=1)
+        query = Book.objects.annotate(Count('authors'))
+        query.filter(q1 | q2)
+        self.assertEqual(len(q2.children), 1)
