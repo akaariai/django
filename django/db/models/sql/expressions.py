@@ -6,10 +6,8 @@ class SQLEvaluator(object):
     def __init__(self, expression, query, allow_joins=True, reuse=None):
         self.expression = expression
         self.opts = query.get_meta()
-        self.cols = []
-
-        self.contains_aggregate = False
         self.reuse = reuse
+        self.cols = []
         self.expression.prepare(self, query, allow_joins)
 
     def prepare(self):
@@ -43,9 +41,7 @@ class SQLEvaluator(object):
             raise FieldError("Joined field references are not permitted in this query")
 
         field_list = node.name.split(LOOKUP_SEP)
-        if (len(field_list) == 1 and
-            node.name in query.aggregate_select.keys()):
-            self.contains_aggregate = True
+        if node.name in query.aggregates:
             self.cols.append((node, query.aggregate_select[node.name]))
         else:
             try:
