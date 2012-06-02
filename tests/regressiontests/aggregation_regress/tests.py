@@ -6,6 +6,7 @@ from decimal import Decimal
 from operator import attrgetter
 
 from django.core.exceptions import FieldError
+from django.db import connection
 from django.db.models import Count, Max, Avg, Sum, StdDev, Variance, F, Q
 from django.test import TestCase, Approximate, skipUnlessDBFeature
 
@@ -69,11 +70,11 @@ class AggregationTests(TestCase):
         #oracle doesn't support subqueries in group by clause
         shortest_book_sql = """
         SELECT name
-        FROM aggregation_regress_book b
-        WHERE b.publisher_id = aggregation_regress_publisher.id
+        FROM %s b
+        WHERE b.publisher_id = %s.id
         ORDER BY b.pages
         LIMIT 1
-        """
+        """ % (connection.qname(Book), connection.qname(Book))
         # tests that this query does not raise a DatabaseError due to the full
         # subselect being (erroneously) added to the GROUP BY parameters
         qs = Publisher.objects.extra(select={

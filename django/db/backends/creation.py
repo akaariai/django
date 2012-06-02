@@ -2,7 +2,9 @@ import sys
 import time
 
 from django.conf import settings
+from django.db import QName
 from django.db.utils import load_backend
+from django.core.management.color import no_style
 
 # The prefix to put on the default database name when creating
 # the test database.
@@ -28,6 +30,14 @@ class BaseDatabaseCreation(object):
         """
         return '%x' % (abs(hash(args)) % 4294967296L)  # 2**32
 
+    def sql_create_schema(self, schema, style):
+        """
+        Returns the SQL required to create a single schema
+        """
+        qn = self.connection.ops.quote_name
+        output = "%s %s;" % (style.SQL_KEYWORD('CREATE SCHEMA'), qn(schema))
+        return output
+
     def sql_create_model(self, model, style, known_models=set()):
         """
         Returns the SQL required to create a single model, as a tuple of:
@@ -40,6 +50,7 @@ class BaseDatabaseCreation(object):
         table_output = []
         pending_references = {}
         qn = self.connection.ops.quote_name
+        qn3 = self.connection.ops.qualified_name
         for f in opts.local_fields:
             col_type = f.db_type(connection=self.connection)
             tablespace = f.db_tablespace or opts.db_tablespace
@@ -85,7 +96,7 @@ class BaseDatabaseCreation(object):
                      for f in field_constraints]))
 
         full_statement = [style.SQL_KEYWORD('CREATE TABLE') + ' ' +
-                          style.SQL_TABLE(qn(opts.db_table)) + ' (']
+                          style.SQL_TABLE(qn3(opts.qualified_name)) + ' (']
         for i, line in enumerate(table_output): # Combine and add commas.
             full_statement.append(
                 '    %s%s' % (line, i < len(table_output)-1 and ',' or ''))
@@ -102,7 +113,7 @@ class BaseDatabaseCreation(object):
             # Add any extra SQL needed to support auto-incrementing primary
             # keys.
             auto_column = opts.auto_field.db_column or opts.auto_field.name
-            autoinc_sql = self.connection.ops.autoinc_sql(opts.db_table,
+            autoinc_sql = self.connection.ops.autoinc_sql(opts.qualified_name,
                                                           auto_column)
             if autoinc_sql:
                 for stmt in autoinc_sql:
@@ -115,9 +126,12 @@ class BaseDatabaseCreation(object):
         Return the SQL snippet defining the foreign key reference for a field.
         """
         qn = self.connection.ops.quote_name
+        from_qname = field.model._meta.qualified_name
+        to_qname = field.rel.to._meta.qualified_name
+        qname = self.qualified_name_for_ref(from_qname, to_qname)
         if field.rel.to in known_models:
             output = [style.SQL_KEYWORD('REFERENCES') + ' ' +
-                style.SQL_TABLE(qn(field.rel.to._meta.db_table)) + ' (' +
+                style.SQL_TABLE(qname) + ' (' +
                 style.SQL_FIELD(qn(field.rel.to._meta.get_field(
                     field.rel.field_name).column)) + ')' +
                 self.connection.ops.deferrable_sql()
@@ -138,16 +152,24 @@ class BaseDatabaseCreation(object):
         from django.db.backends.util import truncate_name
 
         if not model._meta.managed or model._meta.proxy:
+            # So, we have a reference to either unmanaged model or to
+            # a proxy model. Lets just clear the pending_references
+            # for now.
+            if model in pending_references:
+                del pending_references[model]
             return []
         qn = self.connection.ops.quote_name
+        qn3 = self.connection.ops.qualified_name
         final_output = []
         opts = model._meta
         if model in pending_references:
             for rel_class, f in pending_references[model]:
                 rel_opts = rel_class._meta
                 r_table = rel_opts.db_table
+                r_qname = rel_opts.qualified_name
                 r_col = f.column
                 table = opts.db_table
+                qname = self.qualified_name_for_ref(r_qname, opts.qualified_name)
                 col = opts.get_field(f.rel.field_name).column
                 # For MySQL, r_name must be unique in the first 64 characters.
                 # So we are careful with character usage here.
@@ -155,12 +177,22 @@ class BaseDatabaseCreation(object):
                     r_col, col, self._digest(r_table, table))
                 final_output.append(style.SQL_KEYWORD('ALTER TABLE') +
                     ' %s ADD CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)%s;' %
-                    (qn(r_table), qn(truncate_name(
+                    (qn3(r_qname), qn(truncate_name(
                         r_name, self.connection.ops.max_name_length())),
-                    qn(r_col), qn(table), qn(col),
+                    qn(r_col), qname, qn(col),
                     self.connection.ops.deferrable_sql()))
             del pending_references[model]
         return final_output
+
+    def qualified_name_for_ref(self, from_table, ref_table):
+        """
+        In certain databases if the from_table is in qualified format and
+        ref_table is not, it is assumed the ref_table references a table
+        in the same schema as from_table is from. However, we want the
+        reference to be to default schema, not the same schema the from_table
+        is. This method will fix this issue where that is a problem.
+        """
+        return self.connection.ops.qualified_name(ref_table)
 
     def sql_indexes_for_model(self, model, style):
         """
@@ -177,10 +209,9 @@ class BaseDatabaseCreation(object):
         """
         Return the CREATE INDEX SQL statements for a single model field.
         """
-        from django.db.backends.util import truncate_name
-
         if f.db_index and not f.unique:
             qn = self.connection.ops.quote_name
+            qn3 = self.connection.ops.qualified_name
             tablespace = f.db_tablespace or model._meta.db_tablespace
             if tablespace:
                 tablespace_sql = self.connection.ops.tablespace_sql(tablespace)
@@ -188,17 +219,35 @@ class BaseDatabaseCreation(object):
                     tablespace_sql = ' ' + tablespace_sql
             else:
                 tablespace_sql = ''
-            i_name = '%s_%s' % (model._meta.db_table, self._digest(f.column))
+            qualified_name = self.qualified_index_name(model, f.column) 
             output = [style.SQL_KEYWORD('CREATE INDEX') + ' ' +
-                style.SQL_TABLE(qn(truncate_name(
-                    i_name, self.connection.ops.max_name_length()))) + ' ' +
+                style.SQL_TABLE(qualified_name) + ' ' +
                 style.SQL_KEYWORD('ON') + ' ' +
-                style.SQL_TABLE(qn(model._meta.db_table)) + ' ' +
+                style.SQL_TABLE(qn3(model._meta.qualified_name)) + ' ' +
                 "(%s)" % style.SQL_FIELD(qn(f.column)) +
                 "%s;" % tablespace_sql]
         else:
             output = []
         return output
+
+    def qualified_index_name(self, model, col):
+        """
+        Some databases do support schemas, but indexes can not be placed in a
+        different schema. So, to support those databases, we need to be able
+        to return the index name in different qualified format than the rest
+        of the database identifiers.
+        """
+        from django.db.backends.util import truncate_name
+        i_name = '%s_%s' % (model._meta.db_table, self._digest(col))
+        i_name = truncate_name(i_name, self.connection.ops.max_name_length())
+        return self.connection.ops.qualified_name(
+            QName(model._meta.db_schema, i_name, False))
+
+    def sql_destroy_schema(self, schema, style):
+        """
+        Returns the SQL required to destroy a single schema.
+        """
+        return ""
 
     def sql_destroy_model(self, model, references_to_delete, style):
         """
@@ -208,14 +257,14 @@ class BaseDatabaseCreation(object):
         if not model._meta.managed or model._meta.proxy:
             return []
         # Drop the table now
-        qn = self.connection.ops.quote_name
+        qn3 = self.connection.ops.qualified_name
         output = ['%s %s;' % (style.SQL_KEYWORD('DROP TABLE'),
-                              style.SQL_TABLE(qn(model._meta.db_table)))]
+                              style.SQL_TABLE(qn3(model._meta.qualified_name)))]
         if model in references_to_delete:
             output.extend(self.sql_remove_table_constraints(
                 model, references_to_delete, style))
         if model._meta.has_auto_field:
-            ds = self.connection.ops.drop_sequence_sql(model._meta.db_table)
+            ds = self.connection.ops.drop_sequence_sql(model._meta.qualified_name)
             if ds:
                 output.append(ds)
         return output
@@ -226,8 +275,10 @@ class BaseDatabaseCreation(object):
             return []
         output = []
         qn = self.connection.ops.quote_name
+        qn3 = self.connection.ops.qualified_name
         for rel_class, f in references_to_delete[model]:
             table = rel_class._meta.db_table
+            qname = rel_class._meta.qualified_name
             col = f.column
             r_table = model._meta.db_table
             r_col = model._meta.get_field(f.rel.field_name).column
@@ -235,7 +286,7 @@ class BaseDatabaseCreation(object):
                 col, r_col, self._digest(table, r_table))
             output.append('%s %s %s %s;' % \
                 (style.SQL_KEYWORD('ALTER TABLE'),
-                style.SQL_TABLE(qn(table)),
+                style.SQL_TABLE(qn3(qname)),
                 style.SQL_KEYWORD(self.connection.ops.drop_foreignkey_sql()),
                 style.SQL_FIELD(qn(truncate_name(
                     r_name, self.connection.ops.max_name_length())))))
@@ -246,6 +297,10 @@ class BaseDatabaseCreation(object):
         """
         Creates a test database, prompting the user for confirmation if the
         database already exists. Returns the name of the test database created.
+
+        Also creates needed schemas, which on some backends live in the same
+        namespace than databases. If there are schema name clashes, prompts
+        the user for confirmation.
         """
         # Don't import django.core.management if it isn't needed.
         from django.core.management import call_command
@@ -259,10 +314,15 @@ class BaseDatabaseCreation(object):
             print("Creating test database for alias '%s'%s..." % (
                 self.connection.alias, test_db_repr))
 
-        self._create_test_db(verbosity, autoclobber)
+        schemas = self.get_schemas()
+        self._create_test_db(verbosity, autoclobber, schemas)
 
         self.connection.close()
         self.connection.settings_dict["NAME"] = test_database_name
+
+        # Create the test schemas.
+        schemas = ['%s%s' % (self.connection.test_schema_prefix, s) for s in schemas]
+        created_schemas = self._create_test_schemas(verbosity, schemas, autoclobber)
 
         # Confirm the feature set of the test database
         self.connection.features.confirm()
@@ -298,7 +358,60 @@ class BaseDatabaseCreation(object):
         # the side effect of initializing the test database.
         self.connection.cursor()
 
-        return test_database_name
+        return test_database_name, created_schemas
+
+    def _create_test_schemas(self, verbosity, schemas, autoclobber):
+        style = no_style()
+        cursor = self.connection.cursor()
+        existing_schemas = self.connection.introspection.get_schema_list(cursor)
+        if not self.connection.features.namespaced_schemas:
+            conflicts = [s for s in existing_schemas if s in schemas]
+        else:
+            conflicts = []
+        if conflicts:
+            print 'The following schemas already exists: %s' % ', '.join(conflicts) 
+            if not autoclobber:
+                confirm = raw_input(
+                    "Type 'yes' if you would like to try deleting these schemas "
+                    "or 'no' to cancel: ")
+            if autoclobber or confirm == 'yes':
+                try:
+                    # Some databases (well, MySQL) complain about foreign keys when
+                    # dropping a database. So, disable the constraints temporarily.
+                    self.connection.disable_constraint_checking()
+                    for schema in conflicts:
+                        if verbosity >= 1:
+                            print "Destroying schema %s" % schema
+                        cursor.execute(self.sql_destroy_schema(schema, style))
+                        existing_schemas.remove(schema)
+                finally:
+                    self.connection.enable_constraint_checking()
+            else:
+                print "Tests cancelled."
+                sys.exit(1)
+           
+        to_create = [s for s in schemas if s not in existing_schemas]
+        for schema in to_create:
+            if verbosity >= 1:
+                print "Creating schema %s" % schema
+            cursor.execute(self.sql_create_schema(schema, style))
+            self.connection.settings_dict['TEST_SCHEMAS'].append(schema)
+        return to_create
+
+    def get_schemas(self):
+        from django.db import models
+        apps = models.get_apps()
+        schemas = set()
+        for app in apps:
+            app_models = models.get_models(app, include_auto_created=True)
+            for model in app_models:
+                schema = model._meta.db_schema
+                if schema:
+                    schemas.add(schema)
+        conn_default_schema = self.connection.settings_dict['SCHEMA']
+        if conn_default_schema:
+            schemas.add(conn_default_schema)
+        return schemas
 
     def _get_test_db_name(self):
         """
@@ -311,7 +424,7 @@ class BaseDatabaseCreation(object):
             return self.connection.settings_dict['TEST_NAME']
         return TEST_DATABASE_PREFIX + self.connection.settings_dict['NAME']
 
-    def _create_test_db(self, verbosity, autoclobber):
+    def _create_test_db(self, verbosity, autoclobber, schemas):
         """
         Internal implementation - creates the test db tables.
         """
@@ -341,8 +454,17 @@ class BaseDatabaseCreation(object):
                     if verbosity >= 1:
                         print("Destroying old test database '%s'..."
                               % self.connection.alias)
-                    cursor.execute(
-                        "DROP DATABASE %s" % qn(test_database_name))
+                    # MySQL doesn't have a drop-cascade option, nor does it
+                    # allow dropping a database having foreign key references
+                    # pointing to it. So, we just disable foreign key checks
+                    # and then immediately enable them. MySQL is happy after
+                    # this hack, and other databases simply do not care.
+                    try:
+                        self.connection.disable_constraint_checking()
+                        cursor.execute(
+                            "DROP DATABASE %s" % qn(test_database_name))
+                    finally:
+                        self.connection.enable_constraint_checking()
                     cursor.execute(
                         "CREATE DATABASE %s %s" % (qn(test_database_name),
                                                    suffix))
@@ -354,13 +476,27 @@ class BaseDatabaseCreation(object):
                 print("Tests cancelled.")
                 sys.exit(1)
 
+        self.connection.settings_dict['TEST_SCHEMAS'].append(test_database_name)
         return test_database_name
 
-    def destroy_test_db(self, old_database_name, verbosity=1):
+    def destroy_test_db(self, old_database_name, created_schemas, verbosity=1):
         """
         Destroy a test database, prompting the user for confirmation if the
         database already exists.
         """
+        # On databases where the schemas are not dropped when the database
+        # is dropped we need to destroy the created schemas manually.
+        cursor = self.connection.cursor()
+        style = no_style()
+        if not self.connection.features.namespaced_schemas:
+            try:
+                self.connection.disable_constraint_checking()
+                for schema in created_schemas:
+                    if verbosity >= 1:
+                        print "Destroying schema '%s'..." % schema
+                    cursor.execute(self.sql_destroy_schema(schema, style))
+            finally:
+                self.connection.enable_constraint_checking()
         self.connection.close()
         test_database_name = self.connection.settings_dict['NAME']
         if verbosity >= 1:
@@ -395,8 +531,12 @@ class BaseDatabaseCreation(object):
         self._prepare_for_test_db_ddl()
         # Wait to avoid "database is being accessed by other users" errors.
         time.sleep(1)
-        cursor.execute("DROP DATABASE %s"
-                       % self.connection.ops.quote_name(test_database_name))
+        try:
+            self.connection.disable_constraint_checking()
+            cursor.execute("DROP DATABASE %s"
+                           % self.connection.ops.quote_name(test_database_name))
+        finally:
+            self.connection.enable_constraint_checking()
         self.connection.close()
 
     def set_autocommit(self):
@@ -435,3 +575,11 @@ class BaseDatabaseCreation(object):
             settings_dict['ENGINE'],
             settings_dict['NAME']
         )
+
+    def post_create_pending_references(self, pending_references, as_sql=False):
+        """
+        Create any pending references which need special handling (for example
+        different connections). The as_sql flag tells us if we should return
+        the raw SQL used. This is needed for the "sql" management commands.
+        """
+        raise NotImplementedError

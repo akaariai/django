@@ -3,10 +3,16 @@ from django.core import signals
 from django.core.exceptions import ImproperlyConfigured
 from django.db.utils import (ConnectionHandler, ConnectionRouter,
     load_backend, DEFAULT_DB_ALIAS, DatabaseError, IntegrityError)
+from collections import namedtuple
+
+# All table names must be QNames. The db_format argument
+# tells if the qualified name is in a format that is ready
+# to be used in the database or if the qname needs to be
+# converted first.
+QName = namedtuple("QName", "schema table db_format")
 
 __all__ = ('backend', 'connection', 'connections', 'router', 'DatabaseError',
     'IntegrityError', 'DEFAULT_DB_ALIAS')
-
 
 if DEFAULT_DB_ALIAS not in settings.DATABASES:
     raise ImproperlyConfigured("You must define a '%s' database" % DEFAULT_DB_ALIAS)

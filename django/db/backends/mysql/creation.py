@@ -1,3 +1,4 @@
+from django.db import QName
 from django.db.backends.creation import BaseDatabaseCreation
 
 class DatabaseCreation(BaseDatabaseCreation):
@@ -58,9 +59,41 @@ class DatabaseCreation(BaseDatabaseCreation):
             style.SQL_KEYWORD('NOT NULL'))
         ]
         deferred = [
-            (field.m2m_db_table(), field.m2m_column_name(), opts.db_table,
+            (field.m2m_qualified_table(), field.m2m_column_name(), opts.qualified_name,
                 opts.pk.column),
-            (field.m2m_db_table(), field.m2m_reverse_name(),
-                field.rel.to._meta.db_table, field.rel.to._meta.pk.column)
+            (field.m2m_qualified_table(), field.m2m_reverse_name(),
+                field.rel.to._meta.qualified_name, field.rel.to._meta.pk.column)
             ]
         return table_output, deferred
+
+    def sql_destroy_schema(self, schema, style):
+        qn = self.connection.ops.quote_name
+        return "%s %s;" % (style.SQL_KEYWORD('DROP DATABASE'), qn(schema))
+    
+    def qualified_index_name(self, model, col):
+        """
+        On MySQL we must use the db_schema prefixed to the index name as
+        indexes can not be placed into different schemas.
+        """
+        from django.db.backends.util import truncate_name
+        schema = model._meta.db_schema or self.connection.schema
+        max_len = self.connection.ops.max_name_length()
+        schema_prefix = ''
+        if schema:
+             schema = self.connection.convert_schema(schema)
+             schema_prefix = truncate_name(schema, max_len / 2) + '_'
+        i_name = '%s%s_%s' % (schema_prefix, model._meta.db_table, self._digest(col))
+        i_name = self.connection.ops.quote_name(truncate_name(i_name, max_len))
+        return i_name
+
+    def qualified_name_for_ref(self, from_table, ref_table):
+        """
+        MySQL does not have qualified name format for indexes, so make sure to
+        use qualified names if needed.
+        """
+        from_qn = self.connection.introspection.qname_converter(from_table)
+        to_qn = self.connection.introspection.qname_converter(ref_table)
+        if to_qn.schema is None:
+            to_qn = QName(self.connection.settings_dict['NAME'],
+                          to_qn.table, to_qn.db_format)
+        return super(DatabaseCreation, self).qualified_name_for_ref(from_qn, to_qn)

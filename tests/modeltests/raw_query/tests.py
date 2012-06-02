@@ -2,7 +2,8 @@ from __future__ import absolute_import
 
 from datetime import date
 
-from django.db.models.sql.query import InvalidQuery
+from django.db.models.query_utils import InvalidQuery
+from django.db import connection
 from django.test import TestCase
 
 from .models import Author, Book, Coffee, Reviewer, FriendlyAuthor
@@ -59,7 +60,7 @@ class RawQueryTests(TestCase):
         """
         Basic test of raw query with a simple database query
         """
-        query = "SELECT * FROM raw_query_author"
+        query = "SELECT * FROM %s" % connection.qname(Author)
         authors = Author.objects.all()
         self.assertSuccessfulRawQuery(Author, query, authors)
 
@@ -68,7 +69,7 @@ class RawQueryTests(TestCase):
         Raw queries are lazy: they aren't actually executed until they're
         iterated over.
         """
-        q = Author.objects.raw('SELECT * FROM raw_query_author')
+        q = Author.objects.raw('SELECT * FROM %s' % connection.qname(Author))
         self.assertTrue(q.query.cursor is None)
         list(q)
         self.assertTrue(q.query.cursor is not None)
@@ -77,7 +78,7 @@ class RawQueryTests(TestCase):
         """
         Test of a simple raw query against a model containing a foreign key
         """
-        query = "SELECT * FROM raw_query_book"
+        query = "SELECT * FROM %s" % connection.qname(Book)
         books = Book.objects.all()
         self.assertSuccessfulRawQuery(Book, query, books)
 
@@ -86,7 +87,7 @@ class RawQueryTests(TestCase):
         Test of a simple raw query against a model containing a field with
         db_column defined.
         """
-        query = "SELECT * FROM raw_query_coffee"
+        query = "SELECT * FROM %s" % connection.qname(Coffee)
         coffees = Coffee.objects.all()
         self.assertSuccessfulRawQuery(Coffee, query, coffees)
 
@@ -102,7 +103,7 @@ class RawQueryTests(TestCase):
         )
 
         for select in selects:
-            query = "SELECT %s FROM raw_query_author" % select
+            query = "SELECT %s FROM %s" % (select, connection.qname(Author))
             authors = Author.objects.all()
             self.assertSuccessfulRawQuery(Author, query, authors)
 
@@ -111,7 +112,8 @@ class RawQueryTests(TestCase):
         Test of raw query's optional ability to translate unexpected result
         column names to specific model fields
         """
-        query = "SELECT first_name AS first, last_name AS last, dob, id FROM raw_query_author"
+        query = ("SELECT first_name AS first, last_name AS last, dob, id FROM %s"
+                 % connection.qname(Author))
         translations = {'first': 'first_name', 'last': 'last_name'}
         authors = Author.objects.all()
         self.assertSuccessfulRawQuery(Author, query, authors, translations=translations)
@@ -120,7 +122,7 @@ class RawQueryTests(TestCase):
         """
         Test passing optional query parameters
         """
-        query = "SELECT * FROM raw_query_author WHERE first_name = %s"
+        query = "SELECT * FROM %s WHERE first_name = %%s" % connection.qname(Author)
         author = Author.objects.all()[2]
         params = [author.first_name]
         results = list(Author.objects.raw(query, params=params))
@@ -132,7 +134,7 @@ class RawQueryTests(TestCase):
         """
         Test of a simple raw query against a model containing a m2m field
         """
-        query = "SELECT * FROM raw_query_reviewer"
+        query = "SELECT * FROM %s" % connection.qname(Reviewer)
         reviewers = Reviewer.objects.all()
         self.assertSuccessfulRawQuery(Reviewer, query, reviewers)
 
@@ -140,20 +142,20 @@ class RawQueryTests(TestCase):
         """
         Test to insure that extra translations are ignored.
         """
-        query = "SELECT * FROM raw_query_author"
+        query = "SELECT * FROM %s" % connection.qname(Author)
         translations = {'something': 'else'}
         authors = Author.objects.all()
         self.assertSuccessfulRawQuery(Author, query, authors, translations=translations)
 
     def testMissingFields(self):
-        query = "SELECT id, first_name, dob FROM raw_query_author"
+        query = "SELECT id, first_name, dob FROM %s" % connection.qname(Author)
         for author in Author.objects.raw(query):
             self.assertNotEqual(author.first_name, None)
             # last_name isn't given, but it will be retrieved on demand
             self.assertNotEqual(author.last_name, None)
 
     def testMissingFieldsWithoutPK(self):
-        query = "SELECT first_name, dob FROM raw_query_author"
+        query = "SELECT first_name, dob FROM %s" % connection.qname(Author)
         try:
             list(Author.objects.raw(query))
             self.fail('Query without primary key should fail')
@@ -161,7 +163,7 @@ class RawQueryTests(TestCase):
             pass
 
     def testAnnotations(self):
-        query = "SELECT a.*, count(b.id) as book_count FROM raw_query_author a LEFT JOIN raw_query_book b ON a.id = b.author_id GROUP BY a.id, a.first_name, a.last_name, a.dob ORDER BY a.id"
+        query = "SELECT a.*, count(b.id) as book_count FROM %s a LEFT JOIN %s b ON a.id = b.author_id GROUP BY a.id, a.first_name, a.last_name, a.dob ORDER BY a.id" % (connection.qname(Author), connection.qname(Book))
         expected_annotations = (
             ('book_count', 3),
             ('book_count', 0),
@@ -172,12 +174,12 @@ class RawQueryTests(TestCase):
         self.assertSuccessfulRawQuery(Author, query, authors, expected_annotations)
 
     def testWhiteSpaceQuery(self):
-        query = "    SELECT * FROM raw_query_author"
+        query = "    SELECT * FROM %s" % connection.qname(Author)
         authors = Author.objects.all()
         self.assertSuccessfulRawQuery(Author, query, authors)
 
     def testMultipleIterations(self):
-        query = "SELECT * FROM raw_query_author"
+        query = "SELECT * FROM %s" % connection.qname(Author)
         normal_authors = Author.objects.all()
         raw_authors = Author.objects.raw(query)
 
@@ -197,7 +199,7 @@ class RawQueryTests(TestCase):
 
     def testGetItem(self):
         # Indexing on RawQuerySets
-        query = "SELECT * FROM raw_query_author ORDER BY id ASC"
+        query = "SELECT * FROM %s ORDER BY id ASC" % connection.qname(Author)
         third_author = Author.objects.raw(query)[2]
         self.assertEqual(third_author.first_name, 'Bob')
 
@@ -211,12 +213,12 @@ class RawQueryTests(TestCase):
         # Wesley was bron
         f = FriendlyAuthor.objects.create(first_name="Wesley", last_name="Chun",
             dob=date(1962, 10, 28))
-        query = "SELECT * FROM raw_query_friendlyauthor"
+        query = "SELECT * FROM %s" % connection.qname(FriendlyAuthor)
         self.assertEqual(
             [o.pk for o in FriendlyAuthor.objects.raw(query)], [f.pk]
         )
 
     def test_query_count(self):
         self.assertNumQueries(1,
-            list, Author.objects.raw("SELECT * FROM raw_query_author")
+            list, Author.objects.raw("SELECT * FROM %s" % connection.qname(Author))
         )

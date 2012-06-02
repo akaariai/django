@@ -1,4 +1,5 @@
 import re
+from django.db import QName
 from django.db.backends import BaseDatabaseIntrospection
 
 # This light wrapper "fakes" a dictionary interface, because some SQLite data
@@ -41,26 +42,27 @@ class FlexibleFieldLookupDict(object):
 class DatabaseIntrospection(BaseDatabaseIntrospection):
     data_types_reverse = FlexibleFieldLookupDict()
 
-    def get_table_list(self, cursor):
-        "Returns a list of table names in the current database."
+    def get_visible_tables_list(self, cursor):
+        "Returns a list of table names in the current database"
         # Skip the sqlite_sequence system table used for autoincrement key
         # generation.
         cursor.execute("""
             SELECT name FROM sqlite_master
             WHERE type='table' AND NOT name='sqlite_sequence'
             ORDER BY name""")
-        return [row[0] for row in cursor.fetchall()]
+        return [QName(None, row[0], True) for row in cursor.fetchall()]
 
-    def get_table_description(self, cursor, table_name):
+    def get_table_description(self, cursor, qualified_name):
         "Returns a description of the table, with the DB-API cursor.description interface."
         return [(info['name'], info['type'], None, None, None, None,
-                 info['null_ok']) for info in self._table_info(cursor, table_name)]
+                 info['null_ok']) for info in self._table_info(cursor, qualified_name[1])]
 
-    def get_relations(self, cursor, table_name):
+    def get_relations(self, cursor, qualified_name):
         """
         Returns a dictionary of {field_index: (field_index_other_table, other_table)}
         representing all relationships to the given table. Indexes are 0-based.
         """
+        table_name = qualified_name[1]
 
         # Dictionary of relations to return
         relations = {}
@@ -98,16 +100,18 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
 
                 name = other_desc.split(' ', 1)[0].strip('"')
                 if name == column:
-                    relations[field_index] = (other_index, table)
+                    relations[field_index] = (other_index,
+                                              QName(None, table, True))
                     break
 
         return relations
 
-    def get_key_columns(self, cursor, table_name):
+    def get_key_columns(self, cursor, qname):
         """
         Returns a list of (column_name, referenced_table_name, referenced_column_name) for all
         key columns in given table.
         """
+        table_name = self.qname_converter(qname)[1]
         key_columns = []
 
         # Schema for this table
@@ -128,17 +132,19 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
                 continue
 
             # This will append (column_name, referenced_table_name, referenced_column_name) to key_columns
-            key_columns.append(tuple([s.strip('"') for s in m.groups()]))
+            add = tuple([s.strip('"') for s in m.groups()])
+            add = add[0], (None, add[1], True), add[2]
+            key_columns.append(add)
 
         return key_columns
 
-    def get_indexes(self, cursor, table_name):
+    def get_indexes(self, cursor, qname):
         indexes = {}
-        for info in self._table_info(cursor, table_name):
+        for info in self._table_info(cursor, qname.table):
             if info['pk'] != 0:
                 indexes[info['name']] = {'primary_key': True,
                                          'unique': False}
-        cursor.execute('PRAGMA index_list(%s)' % self.connection.ops.quote_name(table_name))
+        cursor.execute('PRAGMA index_list(%s)' % self.connection.ops.quote_name(qname.table))
         # seq, name, unique
         for index, unique in [(field[1], field[2]) for field in cursor.fetchall()]:
             cursor.execute('PRAGMA index_info(%s)' % self.connection.ops.quote_name(index))
@@ -151,12 +157,13 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
                              'unique': unique}
         return indexes
 
-    def get_primary_key_column(self, cursor, table_name):
+    def get_primary_key_column(self, cursor, qname):
         """
         Get the column name of the primary key for the given table.
         """
+        qname = self.qname_converter(qname)
         # Don't use PRAGMA because that causes issues with some transactions
-        cursor.execute("SELECT sql FROM sqlite_master WHERE tbl_name = %s AND type = %s", [table_name, "table"])
+        cursor.execute("SELECT sql FROM sqlite_master WHERE tbl_name = %s AND type = 'table'", [qname.table])
         results = cursor.fetchone()[0].strip()
         results = results[results.index('(')+1:results.rindex(')')]
         for field_desc in results.split(','):
@@ -174,3 +181,14 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
                  'null_ok': not field[3],
                  'pk': field[5]     # undocumented
                  } for field in cursor.fetchall()]
+
+    def identifier_converter(self, identifier):
+        return identifier
+
+    def qname_converter(self, qname, force_schema=False):
+        # For SQLite force_schema does nothing, as the default schema is
+        # None.
+        assert isinstance(qname, QName)
+        assert not (qname.schema and qname.db_format)
+        return QName(None, self.connection.ops.qualified_name(qname)[1:-1],
+                     True)

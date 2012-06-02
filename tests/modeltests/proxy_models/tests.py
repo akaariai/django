@@ -3,9 +3,9 @@ from __future__ import absolute_import
 from django.contrib.contenttypes.models import ContentType
 from django.core import management
 from django.core.exceptions import FieldError
-from django.db import models, DEFAULT_DB_ALIAS
+from django.db import models, DEFAULT_DB_ALIAS, transaction, IntegrityError
 from django.db.models import signals
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
 
 
 from .models import (MyPerson, Person, StatusPerson, LowerStatusPerson,
@@ -326,3 +326,17 @@ class ProxyModelTests(TestCase):
         management.call_command('loaddata', 'mypeople.json', verbosity=0, commit=False)
         p = MyPerson.objects.get(pk=100)
         self.assertEqual(p.name, 'Elvis Presley')
+
+class TransactionalProxyModelTests(TransactionTestCase):
+    @skipUnlessDBFeature('supports_foreign_keys')
+    def test_proxy_fk(self):
+        """
+        Test that the DB contains proper foreign keys for proxy model references.
+        """
+        @transaction.commit_on_success
+        def create_failing_pk():
+            t = TrackerUser.objects.create(status='bar')
+            Improvement.objects.create(summary='foof', version='foof',
+                                       reporter_id=1, associated_bug_id=1,
+                                       assignee=t)
+        self.assertRaises(IntegrityError, create_failing_pk)

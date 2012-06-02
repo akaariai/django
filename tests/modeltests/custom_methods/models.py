@@ -31,8 +31,9 @@ class Article(models.Model):
         cursor = connection.cursor()
         cursor.execute("""
             SELECT id, headline, pub_date
-            FROM custom_methods_article
-            WHERE pub_date = %s
-                AND id != %s""", [connection.ops.value_to_db_date(self.pub_date),
-                                  self.id])
+            FROM %s
+            WHERE pub_date = %%s
+                AND id != %%s""" % connection.qname(self),
+                       [connection.ops.value_to_db_date(self.pub_date),
+                        self.id])
         return [self.__class__(*row) for row in cursor.fetchall()]

@@ -43,7 +43,9 @@ class DatabaseCreation(BaseDatabaseCreation):
     def sql_indexes_for_field(self, model, f, style):
         if f.db_index and not f.unique:
             qn = self.connection.ops.quote_name
-            db_table = model._meta.db_table
+            qn3 = self.connection.ops.qualified_name
+            qualified_name = model._meta.qualified_name
+            db_table = qualified_name[1]
             tablespace = f.db_tablespace or model._meta.db_tablespace
             if tablespace:
                 tablespace_sql = self.connection.ops.tablespace_sql(tablespace)
@@ -56,7 +58,7 @@ class DatabaseCreation(BaseDatabaseCreation):
                 return (style.SQL_KEYWORD('CREATE INDEX') + ' ' +
                         style.SQL_TABLE(qn(truncate_name(index_name,self.connection.ops.max_name_length()))) + ' ' +
                         style.SQL_KEYWORD('ON') + ' ' +
-                        style.SQL_TABLE(qn(db_table)) + ' ' +
+                        style.SQL_TABLE(qn3(qualified_name)) + ' ' +
                         "(%s%s)" % (style.SQL_FIELD(qn(f.column)), opclass) +
                         "%s;" % tablespace_sql)
 
@@ -85,3 +87,7 @@ class DatabaseCreation(BaseDatabaseCreation):
         self.connection.connection.rollback()
         self.connection.connection.set_isolation_level(
                 psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+
+    def sql_destroy_schema(self, schema, style):
+        qn = self.connection.ops.quote_name
+        return "%s %s CASCADE;" % (style.SQL_KEYWORD('DROP SCHEMA'), qn(schema))

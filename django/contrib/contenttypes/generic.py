@@ -173,6 +173,12 @@ class GenericRelation(RelatedField, Field):
     def m2m_db_table(self):
         return self.rel.to._meta.db_table
 
+    def m2m_qualified_name(self):
+        return self.rel.to._meta.qualified_name
+
+    def m2m_db_schema(self):
+        return self.rel.to._meta.db_schema
+
     def m2m_column_name(self):
         return self.object_id_field_name
 

@@ -1,6 +1,6 @@
 from operator import attrgetter
 
-from django.db import connection, router
+from django.db import connection, router, QName
 from django.db.backends import util
 from django.db.models import signals, get_model
 from django.db.models.fields import (AutoField, Field, IntegerField,
@@ -585,11 +585,11 @@ def create_many_related_manager(superclass, rel):
             # dealing with PK values.
             fk = self.through._meta.get_field(self.source_field_name)
             source_col = fk.column
-            join_table = self.through._meta.db_table
             connection = connections[db]
             qn = connection.ops.quote_name
+            join_alias = connection.qname(self.through)
             qs = qs.extra(select={'_prefetch_related_val':
-                                      '%s.%s' % (qn(join_table), qn(source_col))})
+                                      '%s.%s' % (join_alias, qn(source_col))})
             select_attname = fk.rel.get_related_field().get_attname()
             return (qs,
                     attrgetter('_prefetch_related_val'),
@@ -1102,6 +1102,7 @@ def create_many_to_many_intermediary_model(field, klass):
         to = to.lower()
     meta = type('Meta', (object,), {
         'db_table': field._get_m2m_db_table(klass._meta),
+        'db_schema': field._get_m2m_db_schema(klass._meta),
         'managed': managed,
         'auto_created': klass,
         'app_label': klass._meta.app_label,
@@ -1138,8 +1139,12 @@ class ManyToManyField(RelatedField, Field):
             through=kwargs.pop('through', None))
 
         self.db_table = kwargs.pop('db_table', None)
+        self.db_schema = kwargs.pop('db_schema', None)
         if kwargs['rel'].through is not None:
             assert self.db_table is None, "Cannot specify a db_table if an intermediary model is used."
+            assert self.db_schema is None, "Cannot specify a db_schema if an intermediary model is used."
+        # TODO: by default use the containing model's db_schema
+            
 
         Field.__init__(self, **kwargs)
 
@@ -1158,6 +1163,22 @@ class ManyToManyField(RelatedField, Field):
         else:
             return util.truncate_name('%s_%s' % (opts.db_table, self.name),
                                       connection.ops.max_name_length())
+
+    def _get_m2m_db_schema(self, opts):
+        "Function that can be curried to provide the m2m schema name for this relation"
+        if self.rel.through is not None and self.rel.through._meta.db_schema:
+            return self.rel.through._meta.db_schema
+        elif self.db_schema:
+            return self.db_schema
+        else:
+            return opts.db_schema
+
+
+    def _get_m2m_qualified_name(self, opts):
+        "Function that can be curried to provide the qualified m2m table name for this relation"
+        schema = self._get_m2m_db_schema(opts)
+        table = self._get_m2m_db_table(opts)
+        return QName(schema, table, False)
 
     def _get_m2m_attr(self, related, attr):
         "Function that can be curried to provide the source accessor or DB column name for the m2m table"
@@ -1229,6 +1250,9 @@ class ManyToManyField(RelatedField, Field):
 
         # Set up the accessor for the m2m table name for the relation
         self.m2m_db_table = curry(self._get_m2m_db_table, cls._meta)
+        self.m2m_db_schema = curry(self._get_m2m_db_schema, cls._meta)
+        self.m2m_qualified_name = curry(self._get_m2m_qualified_name,
+                                        cls._meta)
 
         # Populate some necessary rel arguments so that cross-app relations
         # work correctly.
@@ -1240,7 +1264,7 @@ class ManyToManyField(RelatedField, Field):
         if isinstance(self.rel.to, basestring):
             target = self.rel.to
         else:
-            target = self.rel.to._meta.db_table
+            target = self.rel.to._meta.qualified_name
         cls._meta.duplicate_targets[self.column] = (target, "m2m")
 
     def contribute_to_related_class(self, cls, related):

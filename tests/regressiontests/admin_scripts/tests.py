@@ -3,7 +3,6 @@ A series of tests to establish that the command-line managment tools work as
 advertised - especially with regards to the handling of the DJANGO_SETTINGS_MODULE
 and default settings.py files.
 """
-
 import os
 import re
 import shutil
@@ -17,6 +16,8 @@ from django.db import connection
 from django.test.simple import DjangoTestSuiteRunner
 from django.utils import unittest
 from django.test import LiveServerTestCase
+
+from .models import Article
 
 test_dir = os.path.dirname(os.path.dirname(__file__))
 
@@ -843,6 +844,8 @@ class ManageAlternateSettings(AdminScriptTestCase):
     """
     def setUp(self):
         self.write_settings('alternate_settings.py')
+        tblname = connection.qname(Article)
+        self.expected_query_re = re.compile(r'CREATE TABLE %s' % tblname, re.IGNORECASE)
 
     def tearDown(self):
         self.remove_settings('alternate_settings.py')
@@ -859,7 +862,7 @@ class ManageAlternateSettings(AdminScriptTestCase):
         args = ['sqlall', '--settings=alternate_settings', 'admin_scripts']
         out, err = self.run_manage(args)
         expected = ('create table %s'
-                    % connection.ops.quote_name('admin_scripts_article'))
+                    % connection.qname(Article))
         self.assertTrue(expected.lower() in out.lower())
         self.assertNoOutput(err)
 
@@ -868,7 +871,7 @@ class ManageAlternateSettings(AdminScriptTestCase):
         args = ['sqlall', 'admin_scripts']
         out, err = self.run_manage(args, 'alternate_settings')
         expected = ('create table %s'
-                    % connection.ops.quote_name('admin_scripts_article'))
+                    % connection.qname(Article))
         self.assertTrue(expected.lower() in out.lower())
         self.assertNoOutput(err)
 

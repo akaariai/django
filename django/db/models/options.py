@@ -2,6 +2,7 @@ import re
 from bisect import bisect
 
 from django.conf import settings
+from django.db import QName
 from django.db.models.related import RelatedObject
 from django.db.models.fields.related import ManyToManyRel
 from django.db.models.fields import AutoField, FieldDoesNotExist
@@ -17,7 +18,7 @@ get_verbose_name = lambda class_name: re.sub('(((?<=[a-z])[A-Z])|([A-Z](?![A-Z]|
 DEFAULT_NAMES = ('verbose_name', 'verbose_name_plural', 'db_table', 'ordering',
                  'unique_together', 'permissions', 'get_latest_by',
                  'order_with_respect_to', 'app_label', 'db_tablespace',
-                 'abstract', 'managed', 'proxy', 'auto_created')
+                 'abstract', 'managed', 'proxy', 'auto_created', 'db_schema')
 
 class Options(object):
     def __init__(self, meta, app_label=None):
@@ -26,6 +27,8 @@ class Options(object):
         self.module_name, self.verbose_name = None, None
         self.verbose_name_plural = None
         self.db_table = ''
+        self.db_schema = ''
+        self.qualified_name = QName(schema=None, table='', db_format=False)
         self.ordering = []
         self.unique_together =  []
         self.permissions =  []
@@ -112,7 +115,12 @@ class Options(object):
         # If the db_table wasn't provided, use the app_label + module_name.
         if not self.db_table:
             self.db_table = "%s_%s" % (self.app_label, self.module_name)
+            # TODO: Using connection.ops is wrong: in multidb setup this doesn't work
+            # correctly except if different connections happen to have the same
+            # max_name_length.
             self.db_table = truncate_name(self.db_table, connection.ops.max_name_length())
+        self.qualified_name = QName(schema=self.db_schema, table=self.db_table,
+                                    db_format=False)
 
     def _prepare(self, model):
         if self.order_with_respect_to:
@@ -193,6 +201,8 @@ class Options(object):
         self.pk = target._meta.pk
         self.proxy_for_model = target
         self.db_table = target._meta.db_table
+        self.db_schema = target._meta.db_schema
+        self.qualified_name = target._meta.qualified_name
 
     def __repr__(self):
         return '<Options for %s>' % self.object_name

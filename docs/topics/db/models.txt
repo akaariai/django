@@ -636,7 +636,8 @@ Give your model metadata by using an inner ``class Meta``, like so::
             verbose_name_plural = "oxen"
 
 Model metadata is "anything that's not a field", such as ordering options
-(:attr:`~Options.ordering`), database table name (:attr:`~Options.db_table`), or
+(:attr:`~Options.ordering`), database table name (:attr:`~Options.db_table`),
+or custom schema for the tables (:attr:`~Options.db_schema`), or
 human-readable singular and plural names (:attr:`~Options.verbose_name` and
 :attr:`~Options.verbose_name_plural`). None are required, and adding ``class
 Meta`` to a model is completely optional.

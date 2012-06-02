@@ -78,10 +78,17 @@ class ConnectionHandler(object):
             conn['ENGINE'] = 'django.db.backends.dummy'
         conn.setdefault('OPTIONS', {})
         conn.setdefault('TIME_ZONE', 'UTC' if settings.USE_TZ else settings.TIME_ZONE)
-        for setting in ['NAME', 'USER', 'PASSWORD', 'HOST', 'PORT']:
+        conn.setdefault('SCHEMA', settings.DEFAULT_SCHEMA)
+        for setting in ['NAME', 'USER', 'PASSWORD', 'HOST', 'PORT', 'SCHEMA']:
             conn.setdefault(setting, '')
         for setting in ['TEST_CHARSET', 'TEST_COLLATION', 'TEST_NAME', 'TEST_MIRROR']:
             conn.setdefault(setting, None)
+        # Some databases need a unique prefix for schemas to avoid name
+        # collisions between production database or another testing database
+        # in the same instance. This needs to be a string unlike the other
+        # TEST_ settings above.
+        conn.setdefault('TEST_SCHEMA_PREFIX', '')
+        conn.setdefault('TEST_SCHEMAS', [])
 
     def __getitem__(self, alias):
         if hasattr(self._connections, alias):

@@ -83,6 +83,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     has_bulk_insert = True
     supports_tablespaces = True
     can_distinct_on_fields = True
+    namespaced_schemas = True
 
 class DatabaseWrapper(BaseDatabaseWrapper):
     vendor = 'postgresql'
@@ -120,6 +121,10 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         self.introspection = DatabaseIntrospection(self)
         self.validation = BaseDatabaseValidation(self)
         self._pg_version = None
+
+    def _get_test_schema_prefix(self):
+        return ''
+    test_schema_prefix = property(_get_test_schema_prefix)
 
     def check_constraints(self, table_names=None):
         """

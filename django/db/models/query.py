@@ -1569,7 +1569,7 @@ class RawQuerySet(object):
         A dict mapping column names to model field names.
         """
         if not hasattr(self, '_model_fields'):
-            converter = connections[self.db].introspection.table_name_converter
+            converter = connections[self.db].introspection.identifier_converter
             self._model_fields = {}
             for field in self.model._meta.fields:
                 name, column = field.get_attname_column()

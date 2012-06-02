@@ -3,6 +3,7 @@ from __future__ import absolute_import
 import datetime
 
 from django.contrib.auth.models import User
+from django.db import connection
 from django.test import TestCase
 from django.utils.datastructures import SortedDict
 
@@ -42,7 +43,7 @@ class ExtraRegressTests(TestCase):
         # Queryset to match most recent revision:
         qs = RevisionableModel.objects.extra(
                 where=["%(table)s.id IN (SELECT MAX(rev.id) FROM %(table)s rev GROUP BY rev.base_id)" % {
-                    'table': RevisionableModel._meta.db_table,
+                    'table': connection.qname(RevisionableModel),
                 }]
         )
 

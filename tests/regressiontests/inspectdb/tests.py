@@ -1,8 +1,13 @@
+from __future__ import absolute_import
+
 from StringIO import StringIO
 
 from django.core.management import call_command
 from django.test import TestCase, skipUnlessDBFeature
+from .models import People
 
+def qname_filter(qn):
+    return 'inspectdb_' in qn.table
 
 class InspectDBTestCase(TestCase):
 
@@ -11,7 +16,7 @@ class InspectDBTestCase(TestCase):
         # Lets limit the introspection to tables created for models of this
         # application
         call_command('inspectdb',
-                     table_name_filter=lambda tn:tn.startswith('inspectdb_'),
+                     qname_filter=qname_filter,
                      stdout=out)
         error_message = "inspectdb has examined a table that should have been filtered out."
         # contrib.contenttypes is one of the apps always installed when running
@@ -22,19 +27,23 @@ class InspectDBTestCase(TestCase):
 
     @skipUnlessDBFeature('can_introspect_foreign_keys')
     def test_attribute_name_not_python_keyword(self):
+        from django.db import connection
+        _, tbl, _ = connection.introspection.qname_converter(
+            People._meta.qualified_name)
+        mname = ''.join(t.title() for t in tbl.split('_'))
         out = StringIO()
         # Lets limit the introspection to tables created for models of this
         # application
         call_command('inspectdb',
-                     table_name_filter=lambda tn:tn.startswith('inspectdb_'),
+                     qname_filter=qname_filter,
                      stdout=out)
         error_message = "inspectdb generated an attribute name which is a python keyword"
-        self.assertNotIn("from = models.ForeignKey(InspectdbPeople)", out.getvalue(), msg=error_message)
+        self.assertNotIn("from = models.ForeignKey(%s)" % mname, out.getvalue(), msg=error_message)
         # As InspectdbPeople model is defined after InspectdbMessage, it should be quoted
-        self.assertIn("from_field = models.ForeignKey('InspectdbPeople')", out.getvalue())
-        self.assertIn("people_pk = models.ForeignKey(InspectdbPeople, primary_key=True)",
+        self.assertIn("from_field = models.ForeignKey('%s')" % mname, out.getvalue())
+        self.assertIn("people_pk = models.ForeignKey(%s, primary_key=True)" % mname,
             out.getvalue())
-        self.assertIn("people_unique = models.ForeignKey(InspectdbPeople, unique=True)",
+        self.assertIn("people_unique = models.ForeignKey(%s, unique=True)" % mname,
             out.getvalue())
         out.close()
 
@@ -44,7 +53,7 @@ class InspectDBTestCase(TestCase):
         # Lets limit the introspection to tables created for models of this
         # application
         call_command('inspectdb',
-                     table_name_filter=lambda tn:tn.startswith('inspectdb_'),
+                     qname_filter=qname_filter,
                      stdout=out)
         error_message = "inspectdb generated a model field name which is a number"
         self.assertNotIn("    123 = models.CharField", out.getvalue(), msg=error_message)

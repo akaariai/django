@@ -33,11 +33,17 @@ class DatabaseCreation(BaseDatabaseCreation):
 
     def sql_for_pending_references(self, model, style, pending_references):
         "SQLite3 doesn't support constraints"
+        if model in pending_references:
+            del pending_references[model]
         return []
 
     def sql_remove_table_constraints(self, model, references_to_delete, style):
         "SQLite3 doesn't support constraints"
         return []
+
+    def sql_create_schema(self, schema, verbosity):
+        "SQLite3 doesn't support schemas"
+        return
 
     def _get_test_db_name(self):
         test_database_name = self.connection.settings_dict['TEST_NAME']
@@ -45,7 +51,7 @@ class DatabaseCreation(BaseDatabaseCreation):
             return test_database_name
         return ':memory:'
 
-    def _create_test_db(self, verbosity, autoclobber):
+    def _create_test_db(self, verbosity, autoclobber, schemas):
         test_database_name = self._get_test_db_name()
         if test_database_name != ':memory:':
             # Erase the old test database
@@ -65,6 +71,9 @@ class DatabaseCreation(BaseDatabaseCreation):
                     sys.exit(1)
         return test_database_name
 
+    def _create_test_schemas(self, verbosity, schemas, cursor):
+        return []
+
     def _destroy_test_db(self, test_database_name, verbosity):
         if test_database_name and test_database_name != ":memory:":
             # Remove the SQLite database file
@@ -81,7 +90,6 @@ class DatabaseCreation(BaseDatabaseCreation):
         SQLite since the databases will be distinct despite having the same
         TEST_NAME. See http://www.sqlite.org/inmemorydb.html
         """
-        settings_dict = self.connection.settings_dict
         test_dbname = self._get_test_db_name()
         sig = [self.connection.settings_dict['NAME']]
         if test_dbname == ':memory:':

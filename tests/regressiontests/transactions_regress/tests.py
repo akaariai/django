@@ -25,7 +25,8 @@ class TestTransactionClosing(TransactionTestCase):
         def raw_sql():
             "Write a record using raw sql under a commit_on_success decorator"
             cursor = connection.cursor()
-            cursor.execute("INSERT into transactions_regress_mod (id,fld) values (17,18)")
+            tbl = connection.qname(Mod)
+            cursor.execute("INSERT into %s (id,fld) values (17,18)" % tbl)
 
         raw_sql()
         # Rollback so that if the decorator didn't commit, the record is unwritten
@@ -116,9 +117,10 @@ class TestTransactionClosing(TransactionTestCase):
             be committed.
             """
             cursor = connection.cursor()
-            cursor.execute("INSERT into transactions_regress_mod (id,fld) values (1,2)")
+            tbl = connection.qname(Mod)
+            cursor.execute("INSERT into %s (id,fld) values (1,2)" % tbl)
             transaction.rollback()
-            cursor.execute("INSERT into transactions_regress_mod (id,fld) values (1,2)")
+            cursor.execute("INSERT into %s (id,fld) values (1,2)" % tbl)
 
         reuse_cursor_ref()
         # Rollback so that if the decorator didn't commit, the record is unwritten

@@ -275,6 +275,8 @@ class DjangoTestSuiteRunner(object):
         dependencies = {}
         for alias in connections:
             connection = connections[alias]
+            if not connection.settings_dict['TEST_SCHEMA_PREFIX'] is None:
+                connection.settings_dict['TEST_SCHEMA_PREFIX'] = '%s_' % alias
             if connection.settings_dict['TEST_MIRROR']:
                 # If the database is marked as a test mirror, save
                 # the alias.
@@ -306,15 +308,19 @@ class DjangoTestSuiteRunner(object):
             test_databases.items(), dependencies):
             test_db_name = None
             # Actually create the database for the first connection
-
+            #connection = connections[aliases[0]]
+            #test_db_name, created_schemas = connection.creation.create_test_db(
+            #    self.verbosity, autoclobber=not self.interactive)
+            #old_names.append((connection, db_name, True, created_schemas))
             for alias in aliases:
                 connection = connections[alias]
-                old_names.append((connection, db_name, True))
+                schemas = []
                 if test_db_name is None:
-                    test_db_name = connection.creation.create_test_db(
-                            self.verbosity, autoclobber=not self.interactive)
+                    test_db_name, schemas = connection.creation.create_test_db(
+                        self.verbosity, autoclobber=not self.interactive)
                 else:
                     connection.settings_dict['NAME'] = test_db_name
+                old_names.append((connection, db_name, True, schemas))
 
         for alias, mirror_alias in mirrored_aliases.items():
             mirrors.append((alias, connections[alias].settings_dict['NAME']))
@@ -333,9 +339,9 @@ class DjangoTestSuiteRunner(object):
         Destroys all the non-mirror databases.
         """
         old_names, mirrors = old_config
-        for connection, old_name, destroy in old_names:
+        for connection, old_name, destroy, created_schemas in old_names:
             if destroy:
-                connection.creation.destroy_test_db(old_name, self.verbosity)
+                connection.creation.destroy_test_db(old_name, created_schemas, self.verbosity)
 
     def teardown_test_environment(self, **kwargs):
         unittest.removeHandler()

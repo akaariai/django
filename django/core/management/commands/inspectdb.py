@@ -27,9 +27,9 @@ class Command(NoArgsCommand):
     def handle_inspection(self, options):
         connection = connections[options.get('database')]
         # 'table_name_filter' is a stealth option
-        table_name_filter = options.get('table_name_filter')
+        qname_filter = options.get('qname_filter')
 
-        table2model = lambda table_name: table_name.title().replace('_', '').replace(' ', '').replace('-', '')
+        table2model = lambda qname: qname[1].title().replace('_', '').replace(' ', '').replace('-', '')
 
         cursor = connection.cursor()
         yield "# This is an auto-generated Django model module."
@@ -44,21 +44,22 @@ class Command(NoArgsCommand):
         yield 'from %s import models' % self.db_module
         yield ''
         known_models = []
-        for table_name in connection.introspection.table_names(cursor):
-            if table_name_filter is not None and callable(table_name_filter):
-                if not table_name_filter(table_name):
+        inspect = connection.introspection
+        for qname in inspect.table_names(cursor):
+            if qname_filter is not None and callable(qname_filter):
+                if not qname_filter(qname):
                     continue
-            yield 'class %s(models.Model):' % table2model(table_name)
-            known_models.append(table2model(table_name))
+            yield 'class %s(models.Model):' % table2model(qname)
+            known_models.append(table2model(qname))
             try:
-                relations = connection.introspection.get_relations(cursor, table_name)
+                relations = inspect.get_relations(cursor, qname)
             except NotImplementedError:
                 relations = {}
             try:
-                indexes = connection.introspection.get_indexes(cursor, table_name)
+                indexes = inspect.get_indexes(cursor, qname)
             except NotImplementedError:
                 indexes = {}
-            for i, row in enumerate(connection.introspection.get_table_description(cursor, table_name)):
+            for i, row in enumerate(inspect.get_table_description(cursor, qname)):
                 column_name = row[0]
                 att_name = column_name.lower()
                 comment_notes = [] # Holds Field notes, to be displayed in a Python comment.
@@ -89,8 +90,7 @@ class Command(NoArgsCommand):
                     comment_notes.append('Field name made lowercase.')
 
                 if i in relations:
-                    rel_to = relations[i][1] == table_name and "'self'" or table2model(relations[i][1])
-
+                    rel_to = relations[i][1] == qname and "'self'" or table2model(relations[i][1])
                     if rel_to in known_models:
                         field_type = 'ForeignKey(%s' % rel_to
                     else:
@@ -103,7 +103,7 @@ class Command(NoArgsCommand):
                 else:
                     # Calling `get_field_type` to get the field type string and any
                     # additional paramters and notes.
-                    field_type, field_params, field_notes = self.get_field_type(connection, table_name, row)
+                    field_type, field_params, field_notes = self.get_field_type(connection, qname, row)
                     extra_params.update(field_params)
                     comment_notes.extend(field_notes)
 
@@ -130,7 +130,6 @@ class Command(NoArgsCommand):
                     extra_params['blank'] = True
                     if not field_type in ('TextField(', 'CharField('):
                         extra_params['null'] = True
-
                 field_desc = '%s = models.%s' % (att_name, field_type)
                 if extra_params:
                     if not field_desc.endswith('('):
@@ -140,10 +139,10 @@ class Command(NoArgsCommand):
                 if comment_notes:
                     field_desc += ' # ' + ' '.join(comment_notes)
                 yield '    %s' % field_desc
-            for meta_line in self.get_meta(table_name):
+            for meta_line in self.get_meta(qname):
                 yield meta_line
 
-    def get_field_type(self, connection, table_name, row):
+    def get_field_type(self, connection, qname, row):
         """
         Given the database connection, the table name, and the cursor row
         description, this routine will return the given field type name, as
@@ -174,12 +173,13 @@ class Command(NoArgsCommand):
 
         return field_type, field_params, field_notes
 
-    def get_meta(self, table_name):
+    def get_meta(self, qname):
         """
         Return a sequence comprising the lines of code necessary
         to construct the inner Meta class for the model corresponding
         to the given database table name.
         """
         return ['    class Meta:',
-                '        db_table = %r' % table_name,
+                '        db_table = %r' % qname[1],
+                '        db_schema = %r' % qname[0] or 'None',
                 '']

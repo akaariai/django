@@ -36,7 +36,6 @@ class SelectForUpdateTests(TransactionTestCase):
         # issuing a SELECT ... FOR UPDATE will block.
         new_connections = ConnectionHandler(settings.DATABASES)
         self.new_connection = new_connections[DEFAULT_DB_ALIAS]
-
         # We need to set settings.DEBUG to True so we can capture
         # the output SQL to examine.
         self._old_debug = settings.DEBUG
@@ -62,11 +61,11 @@ class SelectForUpdateTests(TransactionTestCase):
         # end_blocking_transaction() should be called.
         self.cursor = self.new_connection.cursor()
         sql = 'SELECT * FROM %(db_table)s %(for_update)s;' % {
-            'db_table': Person._meta.db_table,
+            'db_table': self.new_connection.qname(Person),
             'for_update': self.new_connection.ops.for_update_sql(),
             }
         self.cursor.execute(sql, ())
-        result = self.cursor.fetchone()
+        self.cursor.fetchone()
 
     def end_blocking_transaction(self):
         # Roll back the blocking transaction.
@@ -239,7 +238,7 @@ class SelectForUpdateTests(TransactionTestCase):
                 list(
                     Person.objects.raw(
                         'SELECT * FROM %s %s' % (
-                            Person._meta.db_table,
+                            connection.qname(Person),
                             connection.ops.for_update_sql(nowait=True)
                         )
                     )

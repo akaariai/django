@@ -16,7 +16,6 @@ from django.db import connections, DEFAULT_DB_ALIAS
 from django.db.models import signals
 from django.db.models.expressions import ExpressionNode
 from django.db.models.fields import FieldDoesNotExist
-from django.db.models.query_utils import InvalidQuery
 from django.db.models.sql import aggregates as base_aggregates_module
 from django.db.models.sql.constants import *
 from django.db.models.sql.datastructures import EmptyResultSet, Empty, MultiJoin
@@ -59,7 +58,7 @@ class RawQuery(object):
     def get_columns(self):
         if self.cursor is None:
             self._execute_query()
-        converter = connections[self.using].introspection.table_name_converter
+        converter = connections[self.using].introspection.identifier_converter
         return [converter(column_meta[0])
                 for column_meta in self.cursor.description]
 
@@ -640,7 +639,7 @@ class Query(object):
         Callback used by deferred_to_columns(). The "target" parameter should
         be a set instance.
         """
-        table = model._meta.db_table
+        table = model._meta.qualified_name
         if table not in target:
             target[table] = set()
         for field in fields:
@@ -661,10 +660,13 @@ class Query(object):
             self.alias_refcount[alias] += 1
             return alias, False
 
-        # Create a new alias for this table.
-        if current:
+        # Create a new alias for this table if this table is already used
+        # in the query, or if there is the same table name used in the query
+        # under different schema qualified name.
+        if current or table_name[1] in [t[1] for t in self.tables]:
             alias = '%s%d' % (self.alias_prefix, len(self.alias_map) + 1)
-            current.append(alias)
+            if current:
+                current.append(alias)
         else:
             # The first occurence of a table uses the table name directly.
             alias = table_name
@@ -833,7 +835,7 @@ class Query(object):
             alias = self.tables[0]
             self.ref_alias(alias)
         else:
-            alias = self.join((None, self.model._meta.db_table, None, None))
+            alias = self.join((None, self.model._meta.qualified_name, None, None))
         return alias
 
     def count_active_tables(self):
@@ -941,7 +943,7 @@ class Query(object):
         for field, model in opts.get_fields_with_model():
             if model not in seen:
                 link_field = opts.get_ancestor_link(model)
-                seen[model] = self.join((root_alias, model._meta.db_table,
+                seen[model] = self.join((root_alias, model._meta.qualified_name,
                         link_field.column, model._meta.pk.column))
         self.included_inherited_models = seen
 
@@ -1326,7 +1328,7 @@ class Query(object):
                                     (id(opts), lhs_col), ()))
                             dupe_set.add((opts, lhs_col))
                         opts = int_model._meta
-                        alias = self.join((alias, opts.db_table, lhs_col,
+                        alias = self.join((alias, opts.qualified_name, lhs_col,
                                 opts.pk.column), exclusions=exclusions)
                         joins.append(alias)
                         exclusions.add(alias)
@@ -1352,12 +1354,12 @@ class Query(object):
                         (table1, from_col1, to_col1, table2, from_col2,
                                 to_col2, opts, target) = cached_data
                     else:
-                        table1 = field.m2m_db_table()
+                        table1 = field.m2m_qualified_name()
                         from_col1 = opts.get_field_by_name(
                             field.m2m_target_field_name())[0].column
                         to_col1 = field.m2m_column_name()
                         opts = field.rel.to._meta
-                        table2 = opts.db_table
+                        table2 = opts.qualified_name
                         from_col2 = field.m2m_reverse_name()
                         to_col2 = opts.get_field_by_name(
                             field.m2m_reverse_target_field_name())[0].column
@@ -1385,7 +1387,7 @@ class Query(object):
                     else:
                         opts = field.rel.to._meta
                         target = field.rel.get_related_field()
-                        table = opts.db_table
+                        table = opts.qualified_name
                         from_col = field.column
                         to_col = target.column
                         orig_opts._join_cache[name] = (table, from_col, to_col,
@@ -1408,12 +1410,12 @@ class Query(object):
                         (table1, from_col1, to_col1, table2, from_col2,
                                 to_col2, opts, target) = cached_data
                     else:
-                        table1 = field.m2m_db_table()
+                        table1 = field.m2m_qualified_name()
                         from_col1 = opts.get_field_by_name(
                             field.m2m_reverse_target_field_name())[0].column
                         to_col1 = field.m2m_reverse_name()
                         opts = orig_field.opts
-                        table2 = opts.db_table
+                        table2 = opts.qualified_name
                         from_col2 = field.m2m_column_name()
                         to_col2 = opts.get_field_by_name(
                             field.m2m_target_field_name())[0].column
@@ -1437,7 +1439,7 @@ class Query(object):
                         local_field = opts.get_field_by_name(
                                 field.rel.field_name)[0]
                         opts = orig_field.opts
-                        table = opts.db_table
+                        table = opts.qualified_name
                         from_col = local_field.column
                         to_col = field.column
                         # In case of a recursive FK, use the to_field for
@@ -1720,7 +1722,7 @@ class Query(object):
         else:
             opts = self.model._meta
             if not self.select:
-                count = self.aggregates_module.Count((self.join((None, opts.db_table, None, None)), opts.pk.column),
+                count = self.aggregates_module.Count((self.join((None, opts.qualified_name, None, None)), opts.pk.column),
                                          is_summary=True, distinct=True)
             else:
                 # Because of SQL portability issues, multi-column, distinct

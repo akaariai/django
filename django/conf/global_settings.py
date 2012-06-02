@@ -407,6 +407,9 @@ TRANSACTIONS_MANAGED = False
 DEFAULT_TABLESPACE = ''
 DEFAULT_INDEX_TABLESPACE = ''
 
+# The default database schema to use for tables
+DEFAULT_SCHEMA = None
+
 # Default X-Frame-Options header value
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 

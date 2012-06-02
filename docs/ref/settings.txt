@@ -512,6 +512,23 @@ Default: ``''`` (Empty string)
 
 The username to use when connecting to the database. Not used with SQLite.
 
+.. setting:: SCHEMA
+
+SCHEMA
+~~~~~~
+
+.. versionadded:: 1.5
+
+Default: ``''`` (Empty string)
+
+The name of the database schema to use for models. If the backend
+doesn't support multiple schemas, this option is ignored. An empty
+string means that schema qualified table names are not used by default.
+
+If this is used then Django will prefix any table names with the schema name.
+The schema can be overriden on a per-model basis, for details see
+:ref:`db_schema`.
+
 .. setting:: TEST_CHARSET
 
 TEST_CHARSET

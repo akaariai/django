@@ -1,7 +1,7 @@
 from future_builtins import zip
 
 from django.core.exceptions import FieldError
-from django.db import transaction
+from django.db import transaction, QName
 from django.db.backends.util import truncate_name
 from django.db.models.query_utils import select_related_descend
 from django.db.models.sql.constants import *
@@ -27,7 +27,7 @@ class SQLCompiler(object):
         # cleaned. We are not using a clone() of the query here.
         """
         if not self.query.tables:
-            self.query.join((None, self.query.model._meta.db_table, None, None))
+            self.query.join((None, self.query.model._meta.qualified_name, None, None))
         if (not self.query.select and self.query.default_cols and not
                 self.query.included_inherited_models):
             self.query.setup_inherited_models()
@@ -42,11 +42,13 @@ class SQLCompiler(object):
         """
         if name in self.quote_cache:
             return self.quote_cache[name]
-        if ((name in self.query.alias_map and name not in self.query.table_map) or
-                name in self.query.extra_select):
+        if name in self.query.alias_map and not isinstance(name, tuple):
             self.quote_cache[name] = name
             return name
-        r = self.connection.ops.quote_name(name)
+        if isinstance(name, tuple):
+            r = self.connection.ops.qualified_name(name)
+        else:
+            r = self.connection.ops.quote_name(name)
         self.quote_cache[name] = r
         return r
 
@@ -278,8 +280,9 @@ class SQLCompiler(object):
                     alias = seen[model]
                 except KeyError:
                     link_field = opts.get_ancestor_link(model)
-                    alias = self.query.join((start_alias, model._meta.db_table,
-                            link_field.column, model._meta.pk.column))
+                    alias = self.query.join(
+                        (start_alias, model._meta.qualified_name,
+                         link_field.column, model._meta.pk.column))
                     seen[model] = alias
             else:
                 # If we're starting from the base model of the queryset, the
@@ -509,15 +512,12 @@ class SQLCompiler(object):
         qn2 = self.connection.ops.quote_name
         first = True
         for alias in self.query.tables:
-            if not self.query.alias_refcount[alias]:
+            # Extra tables can end up in self.tables, but not in the
+            # alias_map if they aren't in a join. That's OK. We skip them.
+            if not self.query.alias_refcount[alias] or alias not in self.query.alias_map:
                 continue
-            try:
-                name, alias, join_type, lhs, lhs_col, col, nullable = self.query.alias_map[alias]
-            except KeyError:
-                # Extra tables can end up in self.tables, but not in the
-                # alias_map if they aren't in a join. That's OK. We skip them.
-                continue
-            alias_str = (alias != name and ' %s' % alias or '')
+            name, alias, join_type, lhs, lhs_col, col, nullable = self.query.alias_map[alias]
+            alias_str = alias != name and ' %s' % qn(alias) or ''
             if join_type and not first:
                 result.append('%s %s%s ON (%s.%s = %s.%s)'
                         % (join_type, qn(name), alias_str, qn(lhs),
@@ -527,13 +527,17 @@ class SQLCompiler(object):
                 result.append('%s%s%s' % (connector, qn(name), alias_str))
             first = False
         for t in self.query.extra_tables:
-            alias, unused = self.query.table_alias(t)
-            # Only add the alias if it's not already present (the table_alias()
-            # calls increments the refcount, so an alias refcount of one means
-            # this is the only reference.
-            if alias not in self.query.alias_map or self.query.alias_refcount[alias] == 1:
+            # Plain string table names are assumed to be in default schema
+            if not isinstance(t, QName):
+                t = QName(self.connection.schema, t, False)
+            # Only add the table if it is not already in the query.
+            if t not in self.query.table_map or self.query.alias_refcount[t] == 0:
+                # This will add the table into the query properly, however we
+                # are not interested in the alias it gets, we add it as a
+                # plain table.
+                self.query.table_alias(t)
                 connector = not first and ', ' or ''
-                result.append('%s%s' % (connector, qn(alias)))
+                result.append('%s%s' % (connector, qn(t)))
                 first = False
         return result, []
 
@@ -547,7 +551,7 @@ class SQLCompiler(object):
             if (len(self.query.model._meta.fields) == len(self.query.select) and
                 self.connection.features.allows_group_by_pk):
                 self.query.group_by = [
-                    (self.query.model._meta.db_table, self.query.model._meta.pk.column)
+                    (self.query.model._meta.qualified_name, self.query.model._meta.pk.column)
                 ]
 
             group_by = self.query.group_by or []
@@ -615,7 +619,7 @@ class SQLCompiler(object):
             # what "used" specifies).
             avoid = avoid_set.copy()
             dupe_set = orig_dupe_set.copy()
-            table = f.rel.to._meta.db_table
+            table = f.rel.to._meta.qualified_name
             promote = nullable or f.null
             if model:
                 int_opts = opts
@@ -636,7 +640,7 @@ class SQLCompiler(object):
                                 ()))
                         dupe_set.add((opts, lhs_col))
                     int_opts = int_model._meta
-                    alias = self.query.join((alias, int_opts.db_table, lhs_col,
+                    alias = self.query.join((alias, int_opts.qualified_name, lhs_col,
                             int_opts.pk.column), exclusions=used,
                             promote=promote)
                     alias_chain.append(alias)
@@ -688,7 +692,7 @@ class SQLCompiler(object):
                 # what "used" specifies).
                 avoid = avoid_set.copy()
                 dupe_set = orig_dupe_set.copy()
-                table = model._meta.db_table
+                table = model._meta.qualified_name
 
                 int_opts = opts
                 alias = root_alias
@@ -711,7 +715,7 @@ class SQLCompiler(object):
                             dupe_set.add((opts, lhs_col))
                         int_opts = int_model._meta
                         alias = self.query.join(
-                            (alias, int_opts.db_table, lhs_col, int_opts.pk.column),
+                            (alias, int_opts.qualified_name, lhs_col, int_opts.pk.column),
                             exclusions=used, promote=True, reuse=used
                         )
                         alias_chain.append(alias)
@@ -776,7 +780,7 @@ class SQLCompiler(object):
                         # into `resolve_columns` because it wasn't selected.
                         only_load = self.deferred_to_columns()
                         if only_load:
-                            db_table = self.query.model._meta.db_table
+                            db_table = self.query.model._meta.qualified_name
                             fields = [f for f in fields if db_table in only_load and
                                       f.column in only_load[db_table]]
                     row = self.resolve_columns(row, fields)
@@ -857,8 +861,9 @@ class SQLInsertCompiler(SQLCompiler):
         # We don't need quote_name_unless_alias() here, since these are all
         # going to be column names (so we can avoid the extra overhead).
         qn = self.connection.ops.quote_name
+        qn3 = self.connection.ops.qualified_name
         opts = self.query.model._meta
-        result = ['INSERT INTO %s' % qn(opts.db_table)]
+        result = ['INSERT INTO %s' % qn3(opts.qualified_name)]
 
         has_fields = bool(self.query.fields)
         fields = self.query.fields if has_fields else [opts.pk]
@@ -888,7 +893,7 @@ class SQLInsertCompiler(SQLCompiler):
             ]
         if self.return_id and self.connection.features.can_return_id_from_insert:
             params = params[0]
-            col = "%s.%s" % (qn(opts.db_table), qn(opts.pk.column))
+            col = "%s.%s" % (qn3(opts.qualified_name), qn(opts.pk.column))
             result.append("VALUES (%s)" % ", ".join(placeholders[0]))
             r_fmt, r_params = self.connection.ops.return_insert_id()
             result.append(r_fmt % col)
@@ -914,7 +919,7 @@ class SQLInsertCompiler(SQLCompiler):
         if self.connection.features.can_return_id_from_insert:
             return self.connection.ops.fetch_returned_insert_id(cursor)
         return self.connection.ops.last_insert_id(cursor,
-                self.query.model._meta.db_table, self.query.model._meta.pk.column)
+                self.query.model._meta.qualified_name, self.query.model._meta.pk.column)
 
 
 class SQLDeleteCompiler(SQLCompiler):
@@ -940,9 +945,15 @@ class SQLUpdateCompiler(SQLCompiler):
         self.pre_sql_setup()
         if not self.query.values:
             return '', ()
-        table = self.query.tables[0]
+        opts = self.query.model._meta
+        table = self.connection.ops.qualified_name(opts.qualified_name)
         qn = self.quote_name_unless_alias
-        result = ['UPDATE %s' % qn(table)]
+        alias = qn(self.query.tables[0])
+        if table == alias:
+            alias = ''
+        else:
+            alias = ' %s' % alias
+        result = ['UPDATE %s%s' % (table, alias)]
         result.append('SET')
         values, update_params = [], []
         for field, model, val in self.query.values:

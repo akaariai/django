@@ -17,6 +17,8 @@ class DeleteLockingTest(TransactionTestCase):
     def setUp(self):
         # Create a second connection to the default database
         conn_settings = settings.DATABASES[DEFAULT_DB_ALIAS]
+        # TODO: there must be a better way to do this copying. .deepcopy()
+        # perhaps?
         self.conn2 = backend.DatabaseWrapper({
             'HOST': conn_settings['HOST'],
             'NAME': conn_settings['NAME'],
@@ -25,6 +27,9 @@ class DeleteLockingTest(TransactionTestCase):
             'PORT': conn_settings['PORT'],
             'USER': conn_settings['USER'],
             'TIME_ZONE': settings.TIME_ZONE,
+            'SCHEMA': conn_settings['SCHEMA'],
+            'TEST_SCHEMA_PREFIX': conn_settings['TEST_SCHEMA_PREFIX'],
+            'TEST_SCHEMAS': conn_settings['TEST_SCHEMAS'],
         })
 
         # Put both DB connections into managed transaction mode
@@ -55,7 +60,7 @@ class DeleteLockingTest(TransactionTestCase):
 
         # Delete something using connection 2.
         cursor2 = self.conn2.cursor()
-        cursor2.execute('DELETE from delete_regress_book WHERE id=1')
+        cursor2.execute('DELETE from %s WHERE id=1' % self.conn2.qname(Book))
         self.conn2._commit()
 
         # Now perform a queryset delete that covers the object

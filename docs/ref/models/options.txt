@@ -67,6 +67,22 @@ Django quotes column and table names behind the scenes.
     the table name via ``db_table``, particularly if you are using the MySQL
     backend. See the :ref:`MySQL notes <mysql-notes>` for more details.
 
+.. _db_schema:
+
+``db_schema``
+-------------
+
+.. attribute:: Options.db_schema
+
+.. versionadded:: 1.5
+
+The name of the database schema to use for the model. If the backend
+doesn't support multiple schemas, this option is ignored.
+
+If this is used then Django will place the table in the given schema.
+Usually this means turning the pair db_schema, db_table into a fully
+qualified name. For example: "db_schema"."db_table".
+
 
 ``db_tablespace``
 -----------------

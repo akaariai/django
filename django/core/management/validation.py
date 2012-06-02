@@ -19,7 +19,6 @@ def get_validation_errors(outfile, app=None):
     validates all models of all installed apps. Writes errors, if any, to outfile.
     Returns number of errors.
     """
-    from django.conf import settings
     from django.db import models, connection
     from django.db.models.loading import get_app_errors
     from django.db.models.fields.related import RelatedObject
@@ -32,7 +31,7 @@ def get_validation_errors(outfile, app=None):
 
     for cls in models.get_models(app):
         opts = cls._meta
-
+        
         # Do field-specific validation.
         for f in opts.local_fields:
             if f.name == 'id' and not f.primary_key and opts.pk.name == 'id':

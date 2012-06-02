@@ -11,7 +11,7 @@ import warnings
 import re
 import sys
 
-from django.db import utils
+from django.db import utils, QName
 from django.db.backends import *
 from django.db.backends.signals import connection_created
 from django.db.backends.sqlite3.client import DatabaseClient
@@ -84,6 +84,11 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     supports_mixed_date_datetime_comparisons = False
     has_bulk_insert = True
     can_combine_inserts_with_and_without_auto_increment_pk = True
+    supports_foreign_keys = False
+    # SQLite doesn't support schemas at all, but our hack of appending
+    # the schema name to table name creates namespaced schemas from
+    # Django's perspective
+    namespaced_schemas = True
 
     def _supports_stddev(self):
         """Confirm support for STDDEV and related stats functions
@@ -139,6 +144,22 @@ class DatabaseOperations(BaseDatabaseOperations):
             return name # Quoting once is enough.
         return '"%s"' % name
 
+    def qualified_name(self, qname):
+        # Fake schema support by using the schema as a prefix to the
+        # table name. Keep record of what names are already qualified
+        # to avoid double-qualifying.
+        assert isinstance(qname, QName)
+        if qname.db_format:
+            # A name from DB must not have a schema (no schema support)
+            assert not qname.schema
+            schema = None
+        else:
+            schema = qname.schema or self.connection.schema
+        if schema:
+            return self.quote_name('%s_%s' % (schema, qname.table))
+        else:
+            return self.quote_name(qname.table)
+
     def no_limit_value(self):
         return -1
 
@@ -146,11 +167,13 @@ class DatabaseOperations(BaseDatabaseOperations):
         # NB: The generated SQL below is specific to SQLite
         # Note: The DELETE FROM... SQL generated below works for SQLite databases
         # because constraints don't exist
-        sql = ['%s %s %s;' % \
+        sql = []
+        for table in tables:
+            sql.append('%s %s %s;' % \
                 (style.SQL_KEYWORD('DELETE'),
                  style.SQL_KEYWORD('FROM'),
-                 style.SQL_FIELD(self.quote_name(table))
-                 ) for table in tables]
+                 style.SQL_FIELD(self.qualified_name(table))
+                 ))
         # Note: No requirement for reset of auto-incremented indices (cf. other
         # sql_flush() implementations). Just return SQL at this point
         return sql
@@ -243,6 +266,10 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         self.introspection = DatabaseIntrospection(self)
         self.validation = BaseDatabaseValidation(self)
 
+    def convert_schema(self, schema):
+        # No real schema support.
+        return None
+
     def _sqlite_create_connection(self):
         settings_dict = self.settings_dict
         if not settings_dict['NAME']:
@@ -295,7 +322,9 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         """
         cursor = self.cursor()
         if table_names is None:
-            table_names = self.introspection.table_names(cursor)
+            table_names = self.introspection.get_visible_tables_list(cursor)
+        else:
+            table_names = [self.introspection.qname_converter(t) for t in table_names]
         for table_name in table_names:
             primary_key_column_name = self.introspection.get_primary_key_column(cursor, table_name)
             if not primary_key_column_name:
@@ -307,12 +336,12 @@ class DatabaseWrapper(BaseDatabaseWrapper):
                     LEFT JOIN `%s` as REFERRED
                     ON (REFERRING.`%s` = REFERRED.`%s`)
                     WHERE REFERRING.`%s` IS NOT NULL AND REFERRED.`%s` IS NULL"""
-                    % (primary_key_column_name, column_name, table_name, referenced_table_name,
+                    % (primary_key_column_name, column_name, table_name[1], referenced_table_name[1],
                     column_name, referenced_column_name, column_name, referenced_column_name))
                 for bad_row in cursor.fetchall():
                     raise utils.IntegrityError("The row in table '%s' with primary key '%s' has an invalid "
                         "foreign key: %s.%s contains a value '%s' that does not have a corresponding value in %s.%s."
-                        % (table_name, bad_row[0], table_name, column_name, bad_row[1],
+                        % (table_name, bad_row[0], table_name[1], column_name, bad_row[1],
                         referenced_table_name, referenced_column_name))
 
     def close(self):

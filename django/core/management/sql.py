@@ -3,12 +3,11 @@ import re
 
 from django.conf import settings
 from django.core.management.base import CommandError
-from django.db import models
+from django.db import models, QName
 from django.db.models import get_models
 
 def sql_create(app, style, connection):
     "Returns a list of the CREATE TABLE SQL statements for the given app."
-
     if connection.settings_dict['ENGINE'] == 'django.db.backends.dummy':
         # This must be the "dummy" database backend, which means the user
         # hasn't set ENGINE for the database.
@@ -23,11 +22,16 @@ def sql_create(app, style, connection):
     # we can be conservative).
     app_models = models.get_models(app, include_auto_created=True)
     final_output = []
-    tables = connection.introspection.table_names()
+    tables = connection.introspection.all_qualified_names()
     known_models = set([model for model in connection.introspection.installed_models(tables) if model not in app_models])
     pending_references = {}
 
     for model in app_models:
+        schema = connection.convert_schema(model._meta.db_schema)
+        if schema:
+            output = connection.creation.sql_create_schema(schema, style)
+            if output:
+                final_output.append(output)
         output, references = connection.creation.sql_create_model(model, style, known_models)
         final_output.extend(output)
         for refto, refs in references.items():
@@ -63,7 +67,7 @@ def sql_delete(app, style, connection):
 
     # Figure out which tables already exist
     if cursor:
-        table_names = connection.introspection.table_names(cursor)
+        table_names = connection.introspection.all_qualified_names(converted=True)
     else:
         table_names = []
 
@@ -75,7 +79,7 @@ def sql_delete(app, style, connection):
     references_to_delete = {}
     app_models = models.get_models(app, include_auto_created=True)
     for model in app_models:
-        if cursor and connection.introspection.table_name_converter(model._meta.db_table) in table_names:
+        if cursor and connection.introspection.qname_converter(model._meta.qualified_name) in table_names:
             # The table exists, so it needs to be dropped
             opts = model._meta
             for f in opts.local_fields:
@@ -85,7 +89,7 @@ def sql_delete(app, style, connection):
             to_delete.add(model)
 
     for model in app_models:
-        if connection.introspection.table_name_converter(model._meta.db_table) in table_names:
+        if connection.introspection.qname_converter(model._meta.qualified_name) in table_names:
             output.extend(connection.creation.sql_destroy_model(model, references_to_delete, style))
 
     # Close database connection explicitly, in case this output is being piped
@@ -106,7 +110,9 @@ def sql_flush(style, connection, only_django=False):
     if only_django:
         tables = connection.introspection.django_table_names(only_existing=True)
     else:
-        tables = connection.introspection.table_names()
+        tables = connection.introspection.all_qualified_names()
+    if [t for t in tables if not isinstance(t, QName)]:
+        import ipdb; ipdb.set_trace()
     statements = connection.ops.sql_flush(
         style, tables, connection.introspection.sequence_list()
     )
@@ -145,7 +151,7 @@ def custom_sql_for_model(model, style, connection):
     if opts.managed:
         post_sql_fields = [f for f in opts.local_fields if hasattr(f, 'post_create_sql')]
         for f in post_sql_fields:
-            output.extend(f.post_create_sql(style, model._meta.db_table))
+            output.extend(f.post_create_sql(style, model._meta.qualified_name))
 
     # Some backends can't execute more than one SQL statement at a time,
     # so split into separate statements.
