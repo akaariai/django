@@ -409,6 +409,25 @@ class SessionMiddlewareTests(unittest.TestCase):
         self.assertNotIn('httponly',
                          str(response.cookies[settings.SESSION_COOKIE_NAME]))
 
+    def test_session_save_on_500(self):
+        request = RequestFactory().get('/')
+        response = HttpResponse('Horrible error')
+        response.status_code = 500
+        middleware = SessionMiddleware()
+
+        # Simulate a request the modifies the session
+        middleware.process_request(request)
+        request.session['hello'] = 'world'
+
+        # Handle the response through the middleware
+        response = middleware.process_response(request, response)
+
+        # Create another request, check that the value wasn't saved
+        # above.
+        request = RequestFactory().get('/')
+        middleware.process_request(request)
+        self.assertNotIn('hello', request.session)
+
 
 class CookieSessionTests(SessionTestsMixin, TestCase):
 
