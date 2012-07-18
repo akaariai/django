@@ -41,6 +41,13 @@ class ModelBase(type):
         # Create the class.
         module = attrs.pop('__module__')
         new_class = super_new(cls, name, bases, {'__module__': module})
+        if sys.JDUNCK_NEW:
+            # special case hook for model-coupled hooks.
+            #  Used because method calls are faster than signal
+            #  dispatch and the pre/post_init signals are called often.
+            new_class._pre_inits = []
+            new_class._post_inits = []
+        
         attr_meta = attrs.pop('Meta', None)
         abstract = getattr(attr_meta, 'abstract', False)
         if not attr_meta:
@@ -261,7 +268,6 @@ class ModelBase(type):
         if hasattr(cls, 'get_absolute_url'):
             cls.get_absolute_url = update_wrapper(curry(get_absolute_url, opts, cls.get_absolute_url),
                                                   cls.get_absolute_url)
-
         signals.class_prepared.send(sender=cls)
 
 class ModelState(object):
@@ -281,6 +287,12 @@ class Model(object):
 
     def __init__(self, *args, **kwargs):
         signals.pre_init.send(sender=self.__class__, args=args, kwargs=kwargs)
+        
+        # special case pre_init and post_init since direct calls are
+        #  faster than signal dispatch.
+        if sys.JDUNCK_NEW:
+            for callable_ in type(self)._pre_inits:
+                callable_(args, kwargs)
 
         # Set up the storage for instance state
         self._state = ModelState()
@@ -370,6 +382,10 @@ class Model(object):
             if kwargs:
                 raise TypeError("'%s' is an invalid keyword argument for this function" % kwargs.keys()[0])
         super(Model, self).__init__()
+        
+        if sys.JDUNCK_NEW:
+            for callable_ in type(self)._post_inits:
+                callable_(self)
         signals.post_init.send(sender=self.__class__, instance=self)
 
     def __repr__(self):
