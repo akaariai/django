@@ -357,10 +357,7 @@ class ImageField(FileField):
         # Attach update_dimension_fields so that dimension fields declared
         # after their corresponding image field don't stay cleared by
         # Model.__init__, see bug #11196.
-        if sys.JDUNCK_NEW:
-            cls._post_inits.append(self.update_dimension_fields)            
-        else:
-            signals.post_init.connect(self.update_dimension_fields, sender=cls)
+        cls._post_inits.append(self.update_dimension_fields)            
 
     def update_dimension_fields(self, instance, force=False, *args, **kwargs):
         """

@@ -1,8 +1,5 @@
 VERSION = (1, 5, 0, 'alpha', 0)
 
-import sys
-sys.JDUNCK_NEW = True
-
 def get_version(*args, **kwargs):
     # Don't litter django/__init__.py with all the get_version stuff.
     # Only import if it's actually called.

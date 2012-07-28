@@ -6,10 +6,6 @@ from __future__ import unicode_literals
 from collections import defaultdict
 from functools import partial
 from operator import attrgetter
-import warnings
-
-#>>>
-import sys
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection
@@ -39,17 +35,12 @@ class GenericForeignKey(object):
         self.cache_attr = "_%s_cache" % name
         cls._meta.add_virtual_field(self)
 
-        # For some reason I don't totally understand, using weakrefs here doesn't work.
-        if sys.JDUNCK_NEW:
-            cls._pre_inits.append(self._instance_pre_init)
-        else:
-            signals.pre_init.connect(self.instance_pre_init, sender=cls, weak=False)
-            
+        cls._pre_inits.append(self.instance_pre_init)
 
         # Connect myself as the descriptor for this field
         setattr(cls, name, self)
 
-    def _instance_pre_init(self, args, kwargs):
+    def instance_pre_init(self, args, kwargs):
         """
         Handles initializing an object with the generic FK instaed of
         content-type/object-id fields.
@@ -58,11 +49,6 @@ class GenericForeignKey(object):
             value = kwargs.pop(self.name)
             kwargs[self.ct_field] = self.get_content_type(obj=value)
             kwargs[self.fk_field] = value._get_pk_val()
-
-    def instance_pre_init(self, signal, sender, args, kwargs, **_kwargs):
-        warnings.warn("The instance_pre_init method has been deprecated; "
-              "use _instance_pre_init instead.", DeprecationWarning)
-        self._instance_pre_init(args, kwargs)
 
     def get_content_type(self, obj=None, id=None, using=None):
         # Convenience function using get_model avoids a circular import when
