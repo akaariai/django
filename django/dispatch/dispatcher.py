@@ -9,6 +9,7 @@ def _make_id(target):
     if hasattr(target, '__func__'):
         return (id(target.__self__), id(target.__func__))
     return id(target)
+NONE_ID = _make_id(None)
 
 class Signal(object):
     """
@@ -20,7 +21,7 @@ class Signal(object):
             { receriverkey (id) : weakref(receiver) }
     """
     
-    def __init__(self, providing_args=None):
+    def __init__(self, providing_args=None, use_caching=False):
         """
         Create a new signal.
         
@@ -32,6 +33,10 @@ class Signal(object):
             providing_args = []
         self.providing_args = set(providing_args)
         self.lock = threading.Lock()
+        self.use_caching = use_caching
+        # For convenience we create empty caches even if they are not used
+        self.sender_no_receivers_cache = set()
+        self.sender_receivers_cache = {}
 
     def connect(self, receiver, sender=None, weak=True, dispatch_uid=None):
         """
@@ -105,6 +110,9 @@ class Signal(object):
                     break
             else:
                 self.receivers.append((lookup_key, receiver))
+            if self.use_caching:
+                self.sender_no_receivers_cache = set()
+                self.sender_receivers_cache = {}
 
     def disconnect(self, receiver=None, sender=None, weak=True, dispatch_uid=None):
         """
@@ -139,6 +147,9 @@ class Signal(object):
                 if r_key == lookup_key:
                     del self.receivers[index]
                     break
+            if self.use_caching:
+                self.sender_no_receivers_cache = set()
+                self.sender_receivers_cache = {}
 
     def send(self, sender, **named):
         """
@@ -159,10 +170,10 @@ class Signal(object):
         Returns a list of tuple pairs [(receiver, response), ... ].
         """
         responses = []
-        if not self.receivers:
+        if not self.receivers or (self.use_caching and sender in self.sender_no_receivers_cache):
             return responses
 
-        for receiver in self._live_receivers(_make_id(sender)):
+        for receiver in self._live_receivers(sender):
             response = receiver(signal=self, sender=sender, **named)
             responses.append((receiver, response))
         return responses
@@ -191,12 +202,12 @@ class Signal(object):
         receiver.
         """
         responses = []
-        if not self.receivers:
+        if not self.receivers or (self.use_caching and sender in self.sender_no_receivers_cache):
             return responses
 
         # Call each receiver with whatever arguments it can accept.
         # Return a list of tuple pairs [(receiver, response), ... ].
-        for receiver in self._live_receivers(_make_id(sender)):
+        for receiver in self._live_receivers(sender):
             try:
                 response = receiver(signal=self, sender=sender, **named)
             except Exception as err:
@@ -205,26 +216,38 @@ class Signal(object):
                 responses.append((receiver, response))
         return responses
 
-    def _live_receivers(self, senderkey):
+    def _live_receivers(self, sender):
         """
         Filter sequence of receivers to get resolved, live receivers.
 
         This checks for weak references and resolves them, then returning only
         live receivers.
         """
-        none_senderkey = _make_id(None)
-        receivers = []
-
-        for (receiverkey, r_senderkey), receiver in self.receivers:
-            if r_senderkey == none_senderkey or r_senderkey == senderkey:
-                if isinstance(receiver, WEAKREF_TYPES):
-                    # Dereference the weak reference.
-                    receiver = receiver()
-                    if receiver is not None:
+        receivers = None
+        if self.use_caching:
+            receivers = self.sender_receivers_cache.get(sender)
+        if receivers is None:
+            with self.lock:
+                senderkey = _make_id(sender)
+                receivers = []
+                for (receiverkey, r_senderkey), receiver in self.receivers:
+                    if r_senderkey == NONE_ID or r_senderkey == senderkey:
                         receivers.append(receiver)
-                else:
-                    receivers.append(receiver)
-        return receivers
+                if self.use_caching:
+                    if not receivers:
+                        self.sender_no_receivers_cache.add(sender)
+                    # Note, we must cache the weakref versions.
+                    self.sender_receivers_cache[sender] = receivers
+        non_weak_receivers = [] 
+        for receiver in receivers:
+            if isinstance(receiver, WEAKREF_TYPES):
+                # Dereference the weak reference.
+                receiver = receiver()
+                if receiver is not None:
+                    non_weak_receivers.append(receiver)
+            else:
+                non_weak_receivers.append(receiver)
+        return non_weak_receivers
 
     def _remove_receiver(self, receiver):
         """
@@ -243,7 +266,9 @@ class Signal(object):
                 for idx, (r_key, _) in enumerate(reversed(self.receivers)):
                     if r_key == key:
                         del self.receivers[last_idx-idx]
-
+            if self.use_caching:
+                self.sender_no_receivers_cache = set()
+                self.sender_receivers_cache = {}
 
 def receiver(signal, **kwargs):
     """
