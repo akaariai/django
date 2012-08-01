@@ -481,6 +481,27 @@ parameters. For example::
 
 ``SQLite`` users need to check and update such queries.
 
+QuerySet iteration
+~~~~~~~~~~~~~~~~~~
+
+The ``QuerySet`` iteration has been changed to immediately convert all
+fetched rows to ``Model`` objects. In Django 1.5 and earlier the rows
+fetched from database were converted to ``Model`` objects in chunks of
+100.
+
+Most databases already fetched all the rows at once, so the amount of
+fetched rows haven't changed for these databases, only when the rows are
+converted to ``Model`` objects. Of the core databases only Oracle
+supported fetching rows in chunks.
+
+In practice the change can affect queryset usage when the whole queryset
+isn't used. Such usages include partial looping over the queryset or any
+usage which ends up doing ``__bool__`` or ``__contains__``.
+
+It is still possible to convert the fetched rows to ``Model`` objects
+lazily by using the :meth:`~django.db.models.query.QuerySet.iterator()`
+method.
+
 Miscellaneous
 ~~~~~~~~~~~~~
 
