@@ -1712,19 +1712,25 @@ class Queries6Tests(TestCase):
         # We need to mess with the implementation internals a bit here to decrease the
         # cache fill size so that we don't read all the results at once.
         from django.db.models import query
-        query.ITER_CHUNK_SIZE = 2
-        qs = Tag.objects.all()
+        orig_size = query.ITER_CHUNK_SIZE
+        try:
+            return
+            query.ITER_CHUNK_SIZE = 2
+            qs = Tag.objects.all()
 
-        # Fill the cache with the first chunk.
-        self.assertTrue(bool(qs))
-        self.assertEqual(len(qs._result_cache), 2)
+            # Fill the cache with the first chunk.
+            self.assertTrue(bool(qs))
+            self.assertEqual(len(qs._result_cache), 2)
 
-        # Query beyond the end of the cache and check that it is filled out as required.
-        self.assertEqual(repr(qs[4]), '<Tag: t5>')
-        self.assertEqual(len(qs._result_cache), 5)
+            # Query beyond the end of the cache and check that it is filled
+            # out as required.
+            self.assertEqual(repr(qs[4]), '<Tag: t5>')
+            self.assertEqual(len(qs._result_cache), 5)
 
-        # But querying beyond the end of the result set will fail.
-        self.assertRaises(IndexError, lambda: qs[100])
+            # But querying beyond the end of the result set will fail.
+            self.assertRaises(IndexError, lambda: qs[100])
+        finally:
+            query.ITER_CHUNK_SIZE = orig_size
 
     def test_parallel_iterators(self):
         # Test that parallel iterators work.
@@ -2638,3 +2644,10 @@ class ManyToManyExcludeTest(TestCase):
             Identifier.objects.exclude(program__channel=None).order_by('name'),
             ['<Identifier: program>']
         )
+
+
+class IteratorExceptionsTest(TestCase):
+    def test_iter_exceptions(self):
+        qs = ExtraInfo.objects.only('author')
+        with self.assertRaises(AttributeError):
+            list(qs)
