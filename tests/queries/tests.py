@@ -1700,31 +1700,6 @@ class Queries6Tests(TestCase):
         ann1.notes.add(n1)
         ann2 = Annotation.objects.create(name='a2', tag=t4)
 
-    # This next test used to cause really weird PostgreSQL behavior, but it was
-    # only apparent much later when the full test suite ran.
-    #  - Yeah, it leaves global ITER_CHUNK_SIZE to 2 instead of 100...
-    #@unittest.expectedFailure
-    def test_slicing_and_cache_interaction(self):
-        # We can do slicing beyond what is currently in the result cache,
-        # too.
-
-        # We need to mess with the implementation internals a bit here to decrease the
-        # cache fill size so that we don't read all the results at once.
-        from django.db.models import query
-        query.ITER_CHUNK_SIZE = 2
-        qs = Tag.objects.all()
-
-        # Fill the cache with the first chunk.
-        self.assertTrue(bool(qs))
-        self.assertEqual(len(qs._result_cache), 2)
-
-        # Query beyond the end of the cache and check that it is filled out as required.
-        self.assertEqual(repr(qs[4]), '<Tag: t5>')
-        self.assertEqual(len(qs._result_cache), 5)
-
-        # But querying beyond the end of the result set will fail.
-        self.assertRaises(IndexError, lambda: qs[100])
-
     def test_parallel_iterators(self):
         # Test that parallel iterators work.
         qs = Tag.objects.all()
@@ -2808,3 +2783,9 @@ class RelabelCloneTest(TestCase):
         # not change results for the parents query.
         self.assertEqual(list(children), [my2])
         self.assertEqual(list(parents), [my1])
+
+class IteratorExceptionsTest(TestCase):
+    def test_iter_exceptions(self):
+        qs = ExtraInfo.objects.only('author')
+        with self.assertRaises(AttributeError):
+            list(qs)
