@@ -44,7 +44,7 @@ class SQLEvaluator(object):
             self.cols[node] = query.aggregate_select[node.name]
         else:
             try:
-                field, source, opts, join_list, last, _ = query.setup_joins(
+                field, source, opts, join_list, last, _, _ = query.setup_joins(
                     field_list, query.get_meta(),
                     query.get_initial_alias(), False)
                 col, _, join_list = query.trim_joins(source, join_list, last, False)

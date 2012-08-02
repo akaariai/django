@@ -20,7 +20,7 @@ LOOKUP_SEP = '__'
 # dictionary in the Query class).
 JoinInfo = namedtuple('JoinInfo',
                       'table_name rhs_alias join_type lhs_alias '
-                      'lhs_join_col rhs_join_col nullable')
+                      'lhs_join_col rhs_join_col nullable demoted_join')
 
 # How many results to expect from a cursor.execute call
 MULTI = 'multi'

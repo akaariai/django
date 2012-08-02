@@ -453,7 +453,7 @@ class SQLCompiler(object):
         """
         if not alias:
             alias = self.query.get_initial_alias()
-        field, target, opts, joins, _, _ = self.query.setup_joins(pieces,
+        field, target, opts, joins, _, _, _ = self.query.setup_joins(pieces,
                 opts, alias, False)
         # We will later on need to promote those joins that were added to the
         # query afresh above.
@@ -512,7 +512,7 @@ class SQLCompiler(object):
             if not self.query.alias_refcount[alias]:
                 continue
             try:
-                name, alias, join_type, lhs, lhs_col, col, nullable = self.query.alias_map[alias]
+                name, alias, join_type, lhs, lhs_col, col, nullable, _ = self.query.alias_map[alias]
             except KeyError:
                 # Extra tables can end up in self.tables, but not in the
                 # alias_map if they aren't in a join. That's OK. We skip them.

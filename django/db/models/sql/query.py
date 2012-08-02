@@ -469,7 +469,7 @@ class Query(object):
             if not rhs.alias_refcount[alias]:
                 # An unused alias.
                 continue
-            table, _, join_type, lhs, lhs_col, col, _ = rhs.alias_map[alias]
+            table, _, join_type, lhs, lhs_col, col, _, _ = rhs.alias_map[alias]
             promote = join_type == self.LOUTER
             # If the left side of the join was already relabeled, use the
             # updated alias.
@@ -504,6 +504,13 @@ class Query(object):
                 # Again, some of the tables won't have aliases due to
                 # the trimming of unnecessary tables.
                 if self.alias_refcount.get(alias) or rhs.alias_refcount.get(alias):
+                    self.promote_alias(alias, True)
+            # Find aliases that are contained both in rhs and lhs
+            # if one ofthem is demoted then promote lhs alias to LOUTER.
+            common_tables = (l_tables & r_tables)
+            for alias in common_tables:
+                if alias in self.alias_map and alias in rhs.alias_map and \
+                   self.alias_map[alias].demoted_join != rhs.alias_map[alias].demoted_join:
                     self.promote_alias(alias, True)
 
         # Now relabel a copy of the rhs where-clause and add it to the current
@@ -693,10 +700,21 @@ class Query(object):
         if ((unconditional or self.alias_map[alias].nullable) and
                 self.alias_map[alias].join_type != self.LOUTER):
             data = self.alias_map[alias]
-            data = data._replace(join_type=self.LOUTER)
+            data = data._replace(join_type=self.LOUTER, demoted_join=False)
             self.alias_map[alias] = data
             return True
         return False
+
+    def demote_alias(self, alias, change_join_type=False):
+        """
+        Demotes the join type of an alias to an inner join.
+        """
+        data = self.alias_map[alias]
+        if change_join_type:
+            data = data._replace(join_type=self.INNER, demoted_join=True)
+        else:
+            data = data._replace(demoted_join=True)
+        self.alias_map[alias] = data
 
     def promote_alias_chain(self, chain, must_promote=False):
         """
@@ -911,9 +929,14 @@ class Query(object):
             join_type = None
         elif promote or outer_if_first:
             join_type = self.LOUTER
+        elif lhs in self.alias_map and self.alias_map[lhs].demoted_join:
+            # If the lhs alias was demoted to INNER
+            # promote it to LOUTER and change join_type for rhs to LOUTER
+            self.promote_alias(lhs, True)
+            join_type = self.LOUTER
         else:
             join_type = self.INNER
-        join = JoinInfo(table, alias, join_type, lhs, lhs_col, col, nullable)
+        join = JoinInfo(table, alias, join_type, lhs, lhs_col, col, nullable, False)
         self.alias_map[alias] = join
         if t_ident in self.join_map:
             self.join_map[t_ident] += (alias,)
@@ -994,7 +1017,7 @@ class Query(object):
             #   - this is an annotation over a model field
             # then we need to explore the joins that are required.
 
-            field, source, opts, join_list, last, _ = self.setup_joins(
+            field, source, opts, join_list, last, _, _ = self.setup_joins(
                 field_list, opts, self.get_initial_alias(), False)
 
             # Process the join chain to see if it can be trimmed
@@ -1106,7 +1129,7 @@ class Query(object):
         allow_many = trim or not negate
 
         try:
-            field, target, opts, join_list, last, extra_filters = self.setup_joins(
+            field, target, opts, join_list, last, extra_filters, allow_trim_join = self.setup_joins(
                     parts, opts, alias, True, allow_many, allow_explicit_fk=True,
                     can_reuse=can_reuse, negate=negate,
                     process_extras=process_extras)
@@ -1126,11 +1149,24 @@ class Query(object):
             self.promote_alias_chain(join_list)
             join_promote = True
 
+        # If we have a one2one or many2one field, we can trim the left outer
+        # join from the end of a list of joins.
+        # In order to do this, we convert alias join type back to INNER, if possible,
+        # and trim_joins called later will do the strip for us.
+        # We have to be carefull when changing the join type to INNER, because
+        # the alias_map may already contain LOUTER join for this alias setup
+        # by some earlier applied filter.
+        # The join type can be changed to INNER by the demote_alias method only if
+        # it was set to LOUTER by a call to the promote_alias_chain above.
+        null_comparison = lookup_type == 'isnull'
+        if null_comparison and allow_trim_join and field.rel:
+            self.demote_alias(join_list[-1], change_join_type=join_promote)
+            null_comparison = False
+
         # Process the join list to see if we can remove any inner joins from
         # the far end (fewer tables in a query is better).
-        nonnull_comparison = (lookup_type == 'isnull' and value is False)
         col, alias, join_list = self.trim_joins(target, join_list, last, trim,
-                nonnull_comparison)
+                null_comparison)
 
         if connector == OR:
             # Some joins may need to be promoted when adding a new filter to a
@@ -1283,8 +1319,10 @@ class Query(object):
         dupe_set = set()
         exclusions = set()
         extra_filters = []
+        allow_trim_join = True
         int_alias = None
         for pos, name in enumerate(names):
+            allow_trim_join = True
             if int_alias is not None:
                 exclusions.add(int_alias)
             exclusions.add(alias)
@@ -1305,6 +1343,10 @@ class Query(object):
                     names = opts.get_all_field_names() + self.aggregate_select.keys()
                     raise FieldError("Cannot resolve keyword %r into field. "
                             "Choices are: %s" % (name, ", ".join(names)))
+            # Precense of indirect field in the filter requires
+            # left outer join for isnull
+            if not direct and allow_trim_join:
+                allow_trim_join = False
 
             if not allow_many and (m2m or not direct):
                 for alias in joins:
@@ -1468,9 +1510,9 @@ class Query(object):
             else:
                 raise FieldError("Join on field %r not permitted." % name)
 
-        return field, target, opts, joins, last, extra_filters
+        return field, target, opts, joins, last, extra_filters, allow_trim_join
 
-    def trim_joins(self, target, join_list, last, trim, nonnull_check=False):
+    def trim_joins(self, target, join_list, last, trim, null_check=False):
         """
         Sometimes joins at the end of a multi-table sequence can be trimmed. If
         the final join is against the same column as we are comparing against,
@@ -1491,7 +1533,7 @@ class Query(object):
         trimmed before anything. See the documentation of add_filter() for
         details about this.
 
-        The 'nonnull_check' parameter is True when we are using inner joins
+        The 'null_check' parameter is True when we are using inner joins
         between tables explicitly to exclude NULL entries. In that case, the
         tables shouldn't be trimmed, because the very action of joining to them
         alters the result set.
@@ -1517,7 +1559,7 @@ class Query(object):
         while final > 1:
             join = self.alias_map[alias]
             if (col != join.rhs_join_col or join.join_type != self.INNER or
-                    nonnull_check):
+                    null_check):
                 break
             self.unref_alias(alias)
             alias = join.lhs_alias
@@ -1637,7 +1679,7 @@ class Query(object):
 
         try:
             for name in field_names:
-                field, target, u2, joins, u3, u4 = self.setup_joins(
+                field, target, u2, joins, u3, u4, _ = self.setup_joins(
                         name.split(LOOKUP_SEP), opts, alias, False, allow_m2m,
                         True)
                 final_alias = joins[-1]
@@ -1930,7 +1972,7 @@ class Query(object):
         """
         opts = self.model._meta
         alias = self.get_initial_alias()
-        field, col, opts, joins, last, extra = self.setup_joins(
+        field, col, opts, joins, last, extra, _ = self.setup_joins(
                 start.split(LOOKUP_SEP), opts, alias, False)
         select_col = self.alias_map[joins[1]].lhs_join_col
         select_alias = alias
