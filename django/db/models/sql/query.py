@@ -117,7 +117,6 @@ class Query(object):
         self.ordering_aliases = []
         self.select_fields = []
         self.related_select_fields = []
-        self.dupe_avoidance = {}
         self.used_aliases = set()
         self.filter_is_sticky = False
         self.included_inherited_models = {}
@@ -256,7 +255,6 @@ class Query(object):
         obj.ordering_aliases = []
         obj.select_fields = self.select_fields[:]
         obj.related_select_fields = self.related_select_fields[:]
-        obj.dupe_avoidance = self.dupe_avoidance.copy()
         obj.select = self.select[:]
         obj.tables = self.tables[:]
         obj.where = copy.deepcopy(self.where, memo=memo)
@@ -844,7 +842,7 @@ class Query(object):
         """
         return len([1 for count in six.itervalues(self.alias_refcount) if count])
 
-    def join(self, connection, always_create=False, exclusions=(),
+    def join(self, connection, always_create=False,
             promote=False, outer_if_first=False, nullable=False, reuse=None):
         """
         Returns an alias for the join in 'connection', either reusing an
@@ -889,8 +887,10 @@ class Query(object):
         if reuse and always_create and table in self.table_map:
             # Convert the 'reuse' to case to be "exclude everything but the
             # reusable set, minus exclusions, for this table".
-            exclusions = set(self.table_map[table]).difference(reuse).union(set(exclusions))
+            exclusions = set(self.table_map[table]).difference(reuse)
             always_create = False
+        else:
+            exclusions = set()
         t_ident = (lhs_table, table, lhs_col, col)
         if not always_create:
             for alias in self.join_map.get(t_ident, ()):
@@ -1287,14 +1287,9 @@ class Query(object):
         """
         joins = [alias]
         last = [0]
-        dupe_set = set()
-        exclusions = set()
         extra_filters = []
         int_alias = None
         for pos, name in enumerate(names):
-            if int_alias is not None:
-                exclusions.add(int_alias)
-            exclusions.add(alias)
             last.append(len(joins))
             if name == 'pk':
                 name = opts.pk.name
@@ -1327,28 +1322,12 @@ class Query(object):
                         opts = int_model._meta
                     else:
                         lhs_col = opts.parents[int_model].column
-                        dedupe = lhs_col in opts.duplicate_targets
-                        if dedupe:
-                            exclusions.update(self.dupe_avoidance.get(
-                                    (id(opts), lhs_col), ()))
-                            dupe_set.add((opts, lhs_col))
                         opts = int_model._meta
                         alias = self.join((alias, opts.db_table, lhs_col,
-                                opts.pk.column), exclusions=exclusions)
+                                opts.pk.column))
                         joins.append(alias)
-                        exclusions.add(alias)
-                        for (dupe_opts, dupe_col) in dupe_set:
-                            self.update_dupe_avoidance(dupe_opts, dupe_col,
-                                    alias)
             cached_data = opts._join_cache.get(name)
             orig_opts = opts
-            dupe_col = direct and field.column or field.field.column
-            dedupe = dupe_col in opts.duplicate_targets
-            if dupe_set or dedupe:
-                if dedupe:
-                    dupe_set.add((opts, dupe_col))
-                exclusions.update(self.dupe_avoidance.get((id(opts), dupe_col),
-                        ()))
 
             if process_extras and hasattr(field, 'extra_filters'):
                 extra_filters.extend(field.extra_filters(names, pos, negate))
@@ -1374,7 +1353,7 @@ class Query(object):
                                 target)
 
                     int_alias = self.join((alias, table1, from_col1, to_col1),
-                            dupe_multis, exclusions, nullable=True,
+                            dupe_multis, nullable=True,
                             reuse=can_reuse)
                     if int_alias == table2 and from_col2 == to_col2:
                         joins.append(int_alias)
@@ -1382,7 +1361,7 @@ class Query(object):
                     else:
                         alias = self.join(
                                 (int_alias, table2, from_col2, to_col2),
-                                dupe_multis, exclusions, nullable=True,
+                                dupe_multis, nullable=True,
                                 reuse=can_reuse)
                         joins.extend([int_alias, alias])
                 elif field.rel:
@@ -1399,7 +1378,6 @@ class Query(object):
                                 opts, target)
 
                     alias = self.join((alias, table, from_col, to_col),
-                                      exclusions=exclusions,
                                       nullable=self.is_nullable(field))
                     joins.append(alias)
                 else:
@@ -1430,10 +1408,10 @@ class Query(object):
                                 target)
 
                     int_alias = self.join((alias, table1, from_col1, to_col1),
-                            dupe_multis, exclusions, nullable=True,
+                            dupe_multis, nullable=True,
                             reuse=can_reuse)
                     alias = self.join((int_alias, table2, from_col2, to_col2),
-                            dupe_multis, exclusions, nullable=True,
+                            dupe_multis, nullable=True,
                             reuse=can_reuse)
                     joins.extend([int_alias, alias])
                 else:
@@ -1458,16 +1436,9 @@ class Query(object):
                                 opts, target)
 
                     alias = self.join((alias, table, from_col, to_col),
-                            dupe_multis, exclusions, nullable=True,
+                            dupe_multis, nullable=True,
                             reuse=can_reuse)
                     joins.append(alias)
-
-            for (dupe_opts, dupe_col) in dupe_set:
-                if int_alias is None:
-                    to_avoid = alias
-                else:
-                    to_avoid = int_alias
-                self.update_dupe_avoidance(dupe_opts, dupe_col, to_avoid)
 
         if pos != len(names) - 1:
             if pos == len(names) - 2:
@@ -1534,19 +1505,6 @@ class Query(object):
             if final == penultimate:
                 penultimate = last.pop()
         return col, alias, join_list
-
-    def update_dupe_avoidance(self, opts, col, alias):
-        """
-        For a column that is one of multiple pointing to the same table, update
-        the internal data structures to note that this alias shouldn't be used
-        for those other columns.
-        """
-        ident = id(opts)
-        for name in opts.duplicate_targets[col]:
-            try:
-                self.dupe_avoidance[ident, name].add(alias)
-            except KeyError:
-                self.dupe_avoidance[ident, name] = set([alias])
 
     def split_exclude(self, filter_expr, prefix, can_reuse):
         """
