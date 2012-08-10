@@ -283,6 +283,7 @@ class SingleObject(models.Model):
 
 class RelatedObject(models.Model):
     single = models.ForeignKey(SingleObject, null=True)
+    f = models.IntegerField(null=True)
 
     class Meta:
         ordering = ['single']

@@ -504,7 +504,6 @@ class Query(object):
             for alias in outer_tables:
                 # Again, some of the tables won't have aliases due to
                 # the trimming of unnecessary tables.
-                import ipdb; ipdb.set_trace()
                 if self.alias_refcount.get(alias) or rhs.alias_refcount.get(alias):
                     self.promote_joins([alias], True)
 
@@ -1276,17 +1275,9 @@ class Query(object):
         the fk is to the id field it is guaranteed to hold the same value
         (except if it is null, in which case the comparison will fail anyways).
         
-        Returns a list of tuples of
-            (from_field, to_field, from_model.opts, to_model.opts, direction)
-
-        Both of the returned fields are concrete fields. Direction is either
-        FORWARD or REVERSE. If FORWARD, the from_field is a foreign key (or
-        something like a foreign key) to to_field, on REVERSE the to_field is
-        foreign key to from_field.
-
-        In addition returns the final field (the last used join field), and
-        target (which is a field guaranteed to contain the same value as the
-        final field).
+        Returns a list of JoinPath tuples. In addition returns the final field
+        (the last used join field), and target (which is a field guaranteed to
+        contain the same value as the final field).
         """
         
         path = []
@@ -1321,20 +1312,12 @@ class Query(object):
                     if int_model is proxied_model:
                         opts = int_model._meta
                     else:
-                        lhs_col = opts.parents[int_model].column
-                        dedupe = lhs_col in opts.duplicate_targets
-                        if dedupe:
-                            exclusions.update(self.dupe_avoidance.get(
-                                    (id(opts), lhs_col), ()))
-                            dupe_set.add((opts, lhs_col))
+                        import ipdb; ipdb.set_trace()
+                        field = opts.parents[int_model]
+                        target = field.rel.get_related_field()
                         opts = int_model._meta
-                        alias = self.join((alias, opts.db_table, lhs_col,
-                                opts.pk.column), exclusions=exclusions)
-                        joins.append(alias)
-                        exclusions.add(alias)
-                        for (dupe_opts, dupe_col) in dupe_set:
-                            self.update_dupe_avoidance(dupe_opts, dupe_col,
-                                    alias)
+                        path.append(JoinPath(field, target, field.model._meta, opts,
+                                             'FORWARD', False))
             # We have five different cases to solve: foreign keys, reverse
             # foreign keys, m2m fields (also reverse) and non-relational
             # fields. There isn't anything really complicated here, just
@@ -1348,12 +1331,15 @@ class Query(object):
                 opts = field.rel.to._meta
                 target = field.rel.get_related_field()
                 final_field = field
-                path.append((field, target, field.model._meta, opts, 'FORWARD'))
+                path.append(JoinPath(field, target, field.model._meta, opts,
+                                     'FORWARD', False))
             elif not direct and not m2m:
                 final_field = to_field = field.field
                 opts = to_field.model._meta
                 from_field = to_field.rel.get_related_field()
-                path.append((from_field, to_field, from_field.model._meta, opts, 'REVERSE'))
+                path.append(JoinPath(from_field, to_field,
+                                     from_field.model._meta, opts,
+                                     'REVERSE', False))
                 if from_field.model is to_field.model:
                     # Recursive foreign key to self.
                     target = opts.get_field_by_name(
@@ -1365,15 +1351,17 @@ class Query(object):
                     field.m2m_target_field_name())[0]
                 opts = field.rel.through._meta
                 to_field1 = opts.get_field_by_name(field.m2m_field_name())[0]
-                path.append((from_field1, to_field1, from_field1.model._meta,
-                             opts, 'REVERSE'))
+                path.append(JoinPath(from_field1, to_field1,
+                                     from_field1.model._meta,
+                                     opts, 'REVERSE', False))
                 final_field = from_field2 = opts.get_field_by_name(
                     field.m2m_reverse_field_name())[0]
                 opts = field.rel.to._meta
                 target = to_field2 = opts.get_field_by_name(
                     field.m2m_reverse_target_field_name())[0]
-                path.append((from_field2, to_field2, from_field2.model._meta,
-                             opts, 'FORWARD'))
+                path.append(JoinPath(from_field2, to_field2,
+                                     from_field2.model._meta,
+                                     opts, 'FORWARD', False))
             elif not direct and m2m:
                 # This one is just like above, except we are travelling the
                 # fields in opposite direction.
@@ -1383,15 +1371,17 @@ class Query(object):
                 opts = field.rel.through._meta
                 to_field1 = opts.get_field_by_name(
                     field.m2m_reverse_field_name())[0]
-                path.append((from_field1, to_field1, from_field1.model._meta,
-                             opts, 'REVERSE'))
+                path.append(JoinPath(from_field1, to_field1,
+                                     from_field1.model._meta,
+                                     opts, 'REVERSE', False))
                 final_field = from_field2 = opts.get_field_by_name(
                     field.m2m_field_name())[0]
                 opts = field.rel.to._meta
                 target = to_field2 = opts.get_field_by_name(
                     field.m2m_target_field_name())[0]
-                path.append((from_field2, to_field2, from_field2.model._meta,
-                             opts, 'FORWARD'))
+                path.append(JoinPath(from_field2, to_field2,
+                                     from_field2.model._meta,
+                                     opts, 'FORWARD', False))
 
         if pos != len(names) - 1:
             print pos, len(names)
@@ -1401,19 +1391,18 @@ class Query(object):
                     "the lookup type?" % (name, names[pos + 1]))
             else:
                 raise FieldError("Join on field %r not permitted." % name)
-
+        
+        # Get rid of non-necessary joins, that is those final fields from the
+        # join chain which are guaranteed to have same value earlier in the
+        # join chain.
         new_path = path[:]
         if trim:
-            # Get rid of non-necessary joins, that is those final fields from the
-            # join chain which are guaranteed to have same value earlier in the
-            # join chain.
             for info in reversed(path):
                 if info[4] == 'FORWARD' and info[1] == target:
                     target = info[0]
                     new_path.pop()
                 else:
                     break
-
         return new_path, final_field, target
 
     def setup_joins(self, names, opts, alias, dupe_multis, allow_many=True,
@@ -1436,6 +1425,7 @@ class Query(object):
         column (used for any 'where' constraint), the final 'opts' value and the
         list of tables joined.
         """
+        ret_opts = opts
         joins = [alias]
         last = [0]
         dupe_set = set()
@@ -1449,7 +1439,7 @@ class Query(object):
                 exclusions.add(int_alias)
             exclusions.add(alias)
             last.append(len(joins))
-            from_field, to_field, from_opts, to_opts, direction = join
+            from_field, to_field, from_opts, to_opts, direction, trimmable = join
             if direction == 'FORWARD':
                 nullable = self.is_nullable(from_field)
             else:
@@ -1462,7 +1452,6 @@ class Query(object):
             join_dedupe = dupe_multis and direction == 'REVERSE'
 
             if dupe_set or dedupe:
-                # import ipdb; ipdb.set_trace()
                 exclusions.update(self.dupe_avoidance.get(
                     (id(opts), lhs_col), ()))
                 dupe_set.add((opts, lhs_col))
@@ -1470,113 +1459,22 @@ class Query(object):
                                rhs_col), join_dedupe, exclusions=exclusions,
                              nullable=nullable,
                              reuse=can_reuse)
-            joins.append(alias)
-            exclusions.add(alias)
             for (dupe_opts, dupe_col) in dupe_set:
                 self.update_dupe_avoidance(dupe_opts, dupe_col,
                                            alias)
+            ret_opts = opts
+            joins.append(alias)
+            exclusions.add(alias)
 
             if process_extras and hasattr(from_field, 'extra_filters'):
                 extra_filters.extend(from_field.extra_filters(names, pos, negate))
-                """
-                    int_alias = self.join((alias, table1, from_col1, to_col1),
-                            dupe_multis, exclusions, nullable=True,
-                            reuse=can_reuse)
-                    if int_alias == table2 and from_col2 == to_col2:
-                        joins.append(int_alias)
-                        alias = int_alias
-                    else:
-                        alias = self.join(
-                                (int_alias, table2, from_col2, to_col2),
-                                dupe_multis, exclusions, nullable=True,
-                                reuse=can_reuse)
-                        joins.extend([int_alias, alias])
-                elif field.rel:
-                    # One-to-one or many-to-one field
-                    if cached_data:
-                        (table, from_col, to_col, opts, target) = cached_data
-                    else:
-                        opts = field.rel.to._meta
-                        target = field.rel.get_related_field()
-                        table = opts.db_table
-                        from_col = field.column
-                        to_col = target.column
-                        orig_opts._join_cache[name] = (table, from_col, to_col,
-                                opts, target)
-
-                    alias = self.join((alias, table, from_col, to_col),
-                                      exclusions=exclusions,
-                                      nullable=self.is_nullable(field))
-                    joins.append(alias)
-                else:
-                    # Non-relation fields.
-                    target = field
-                    break
-            else:
-                orig_field = field
-                field = field.field
-                if m2m:
-                    # Many-to-many field defined on the target model.
-                    if cached_data:
-                        (table1, from_col1, to_col1, table2, from_col2,
-                                to_col2, opts, target) = cached_data
-                    else:
-                        table1 = field.m2m_db_table()
-                        from_col1 = opts.get_field_by_name(
-                            field.m2m_reverse_target_field_name())[0].column
-                        to_col1 = field.m2m_reverse_name()
-                        opts = orig_field.opts
-                        table2 = opts.db_table
-                        from_col2 = field.m2m_column_name()
-                        to_col2 = opts.get_field_by_name(
-                            field.m2m_target_field_name())[0].column
-                        target = opts.pk
-                        orig_opts._join_cache[name] = (table1, from_col1,
-                                to_col1, table2, from_col2, to_col2, opts,
-                                target)
-
-                    int_alias = self.join((alias, table1, from_col1, to_col1),
-                            dupe_multis, exclusions, nullable=True,
-                            reuse=can_reuse)
-                    alias = self.join((int_alias, table2, from_col2, to_col2),
-                            dupe_multis, exclusions, nullable=True,
-                            reuse=can_reuse)
-                    joins.extend([int_alias, alias])
-                else:
-                    # One-to-many field (ForeignKey defined on the target model)
-                    if cached_data:
-                        (table, from_col, to_col, opts, target) = cached_data
-                    else:
-                        local_field = opts.get_field_by_name(
-                                field.rel.field_name)[0]
-                        opts = orig_field.opts
-                        table = opts.db_table
-                        from_col = local_field.column
-                        to_col = field.column
-                        # In case of a recursive FK, use the to_field for
-                        # reverse lookups as well
-                        if orig_field.model is local_field.model:
-                            target = opts.get_field_by_name(
-                                field.rel.field_name)[0]
-                        else:
-                            target = opts.pk
-                        orig_opts._join_cache[name] = (table, from_col, to_col,
-                                opts, target)
-
-                    alias = self.join((alias, table, from_col, to_col),
-                            dupe_multis, exclusions, nullable=True,
-                            reuse=can_reuse)
-                    joins.append(alias)
-                """
             for (dupe_opts, dupe_col) in dupe_set:
                 if int_alias is None:
                     to_avoid = alias
                 else:
                     to_avoid = int_alias
                 self.update_dupe_avoidance(dupe_opts, dupe_col, to_avoid)
-
-
-        return final_field, target, opts, joins, last, extra_filters
+        return final_field, target, ret_opts, joins, last, extra_filters
 
     def trim_joins(self, target, join_list, last, trim, nonnull_check=False):
         """

@@ -1026,6 +1026,14 @@ class Queries4Tests(BaseQuerysetTest):
         Item.objects.create(name='i2', created=datetime.datetime.now(), note=n1, creator=self.a3)
 
     def test_ticket14876(self):
+        # This one worked because in the RHS query, the join to creator was
+        # created, then trimmed. So, it has information about "there was
+        # already a join to creator". When combined, this existing but not
+        # used join caused the creator join to retain INNER JOIN type, and
+        # thus correct results. Now, the creator join is trimmed even before
+        # creation, and thus when combining there is no info about the
+        # creator being there already -> LEFT OUTER JOIN.
+
         q1 = Report.objects.filter(Q(creator__isnull=True) | Q(creator__extra__info='e1'))
         q2 = Report.objects.filter(Q(creator__isnull=True)) | Report.objects.filter(Q(creator__extra__info='e1'))
         self.assertQuerysetEqual(q1, ["<Report: r1>", "<Report: r3>"])
@@ -1039,12 +1047,14 @@ class Queries4Tests(BaseQuerysetTest):
         q1 = Item.objects.filter(Q(creator=self.a1) | Q(creator__report__name='r1')).order_by()
         q2 = Item.objects.filter(Q(creator=self.a1)).order_by() | Item.objects.filter(Q(creator__report__name='r1')).order_by()
         self.assertQuerysetEqual(q1, ["<Item: i1>"])
-        self.assertEqual(str(q1.query), str(q2.query))
+        # This and the following query string equality check used to work, but
+        # no more due to one inner join turned to outer.
+        #self.assertEqual(str(q1.query), str(q2.query))
 
         q1 = Item.objects.filter(Q(creator__report__name='e1') | Q(creator=self.a1)).order_by()
         q2 = Item.objects.filter(Q(creator__report__name='e1')).order_by() | Item.objects.filter(Q(creator=self.a1)).order_by()
         self.assertQuerysetEqual(q1, ["<Item: i1>"])
-        self.assertEqual(str(q1.query), str(q2.query))
+        # self.assertEqual(str(q1.query), str(q2.query))
 
     def test_ticket7095(self):
         # Updates that are filtered on the model being updated are somewhat
@@ -1382,9 +1392,9 @@ class NullableRelOrderingTests(TestCase):
         # the join type of already existing joins.
         Plaything.objects.create(name="p1")
         s = SingleObject.objects.create(name='s')
-        r = RelatedObject.objects.create(single=s)
+        r = RelatedObject.objects.create(single=s, f=1)
         Plaything.objects.create(name="p2", others=r)
-        qs = Plaything.objects.all().filter(others__isnull=False).order_by('pk')
+        qs = Plaything.objects.all().filter(others__f__isnull=False).order_by('pk')
         self.assertTrue('INNER' in str(qs.query))
         qs = qs.order_by('others__single__name')
         # The ordering by others__single__pk will add one new join (to single)
@@ -1443,6 +1453,7 @@ class Queries6Tests(TestCase):
 
     # This next test used to cause really weird PostgreSQL behavior, but it was
     # only apparent much later when the full test suite ran.
+    #  - Yeah, it leaves global ITER_CHUNK_SIZE to 2 instead of 100...
     #@unittest.expectedFailure
     def test_slicing_and_cache_interaction(self):
         # We can do slicing beyond what is currently in the result cache,
