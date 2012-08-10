@@ -455,7 +455,7 @@ class SQLCompiler(object):
         if not alias:
             alias = self.query.get_initial_alias()
         field, target, opts, joins, _, _ = self.query.setup_joins(pieces,
-                opts, alias, False)
+                opts, alias, False, trim=False)
         # We will later on need to promote those joins that were added to the
         # query afresh above.
         joins_to_promote = [j for j in joins if self.query.alias_refcount[j] < 2]

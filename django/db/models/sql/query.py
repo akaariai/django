@@ -504,6 +504,7 @@ class Query(object):
             for alias in outer_tables:
                 # Again, some of the tables won't have aliases due to
                 # the trimming of unnecessary tables.
+                import ipdb; ipdb.set_trace()
                 if self.alias_refcount.get(alias) or rhs.alias_refcount.get(alias):
                     self.promote_alias(alias, True)
 
@@ -1259,37 +1260,33 @@ class Query(object):
         if self.filter_is_sticky:
             self.used_aliases = used_aliases
 
-    def setup_joins(self, names, opts, alias, dupe_multis, allow_many=True,
-            allow_explicit_fk=False, can_reuse=None, negate=False,
-            process_extras=True):
+    def names_to_path(self, names, opts, allow_many=False,
+                      allow_explicit_fk=True, trim=True):
         """
-        Compute the necessary table joins for the passage through the fields
-        given in 'names'. 'opts' is the Options class for the current model
-        (which gives the table we are joining to), 'alias' is the alias for the
-        table we are joining to. If dupe_multis is True, any many-to-many or
-        many-to-one joins will always create a new alias (necessary for
-        disjunctive filters). If can_reuse is not None, it's a list of aliases
-        that can be reused in these joins (nothing else can be reused in this
-        case). Finally, 'negate' is used in the same sense as for add_filter()
-        -- it indicates an exclude() filter, or something similar. It is only
-        passed in here so that it can be passed to a field's extra_filter() for
-        customized behavior.
+        Walks the names path and turns them into joins.
 
-        Returns the final field involved in the join, the target database
-        column (used for any 'where' constraint), the final 'opts' value and the
-        list of tables joined.
+        Removes non-needed joins from the end of the name chain. This is
+        possible when there is a chain of joins which all contain the same
+        value, for example doing 'fk__id=1' would generate join through
+        the fk, fetch the id field and do comparisons against it. However, if
+        the fk is to the id field it is guaranteed to hold the same value
+        (except if it is null, in which case the comparison will fail anyways).
+        
+        Returns a list of tuples of
+            (from_field, to_field, from_model.opts, to_model.opts, direction)
+
+        Both of the returned fields are concrete fields. Direction is either
+        FORWARD or REVERSE. If FORWARD, the from_field is a foreign key (or
+        something like a foreign key) to to_field, on REVERSE the to_field is
+        foreign key to from_field.
+
+        In addition returns the final field (the last used join field), and
+        target (which is a field guaranteed to contain the same value as the
+        final field).
         """
-        joins = [alias]
-        last = [0]
-        dupe_set = set()
-        exclusions = set()
-        extra_filters = []
-        int_alias = None
+        
+        path = []
         for pos, name in enumerate(names):
-            if int_alias is not None:
-                exclusions.add(int_alias)
-            exclusions.add(alias)
-            last.append(len(joins))
             if name == 'pk':
                 name = opts.pk.name
             try:
@@ -1303,14 +1300,14 @@ class Query(object):
                         field, model, direct, m2m = opts.get_field_by_name(f.name)
                         break
                 else:
-                    names = opts.get_all_field_names() + list(self.aggregate_select)
+                    available = opts.get_all_field_names() + list(self.aggregate_select)
                     raise FieldError("Cannot resolve keyword %r into field. "
-                            "Choices are: %s" % (name, ", ".join(names)))
-
+                            "Choices are: %s" % (name, ", ".join(available)))
             if not allow_many and (m2m or not direct):
-                for alias in joins:
-                    self.unref_alias(alias)
                 raise MultiJoin(pos + 1)
+            # Check if we need any joins for concrete inheritance cases (the
+            # field lives in parent, but we are currently in one of its
+            # children)
             if model:
                 # The field lives on a base class of the current model.
                 # Skip the chain of proxy to the concrete proxied model
@@ -1334,39 +1331,150 @@ class Query(object):
                         for (dupe_opts, dupe_col) in dupe_set:
                             self.update_dupe_avoidance(dupe_opts, dupe_col,
                                     alias)
-            cached_data = opts._join_cache.get(name)
-            orig_opts = opts
-            dupe_col = direct and field.column or field.field.column
-            dedupe = dupe_col in opts.duplicate_targets
+            # We have five different cases to solve: foreign keys, reverse
+            # foreign keys, m2m fields (also reverse) and non-relational
+            # fields. There isn't anything really complicated here, just
+            # exercise the related fields API and fetch the from and to
+            # fields. The m2m fields are handled as two foreign keys,
+            # first one reverse, the second one direct.
+            if direct and not field.rel and not m2m:
+                final_field = target = field
+                break
+            elif direct and not m2m:
+                opts = field.rel.to._meta
+                target = field.rel.get_related_field()
+                final_field = field
+                path.append((field, target, field.model._meta, opts, 'FORWARD'))
+            elif not direct and not m2m:
+                final_field = to_field = field.field
+                opts = to_field.model._meta
+                from_field = to_field.rel.get_related_field()
+                path.append((from_field, to_field, from_field.model._meta, opts, 'REVERSE'))
+                if from_field.model is to_field.model:
+                    # Recursive foreign key to self.
+                    target = opts.get_field_by_name(
+                                field.field.rel.field_name)[0]
+                else:
+                    target = opts.pk
+            elif direct and m2m:
+                from_field1 = opts.get_field_by_name(
+                    field.m2m_target_field_name())[0]
+                opts = field.rel.through._meta
+                to_field1 = opts.get_field_by_name(field.m2m_field_name())[0]
+                path.append((from_field1, to_field1, from_field1.model._meta,
+                             opts, 'REVERSE'))
+                final_field = from_field2 = opts.get_field_by_name(
+                    field.m2m_reverse_field_name())[0]
+                opts = field.rel.to._meta
+                target = to_field2 = opts.get_field_by_name(
+                    field.m2m_reverse_target_field_name())[0]
+                path.append((from_field2, to_field2, from_field2.model._meta,
+                             opts, 'FORWARD'))
+            elif not direct and m2m:
+                # This one is just like above, except we are travelling the
+                # fields in opposite direction.
+                field = field.field
+                from_field1 = opts.get_field_by_name(
+                    field.m2m_reverse_target_field_name())[0]
+                opts = field.rel.through._meta
+                to_field1 = opts.get_field_by_name(
+                    field.m2m_reverse_field_name())[0]
+                path.append((from_field1, to_field1, from_field1.model._meta,
+                             opts, 'REVERSE'))
+                final_field = from_field2 = opts.get_field_by_name(
+                    field.m2m_field_name())[0]
+                opts = field.rel.to._meta
+                target = to_field2 = opts.get_field_by_name(
+                    field.m2m_target_field_name())[0]
+                path.append((from_field2, to_field2, from_field2.model._meta,
+                             opts, 'FORWARD'))
+
+        if pos != len(names) - 1:
+            print pos, len(names)
+            if pos == len(names) - 2:
+                raise FieldError(
+                    "Join on field %r not permitted. Did you misspell %r for "
+                    "the lookup type?" % (name, names[pos + 1]))
+            else:
+                raise FieldError("Join on field %r not permitted." % name)
+
+        new_path = path[:]
+        if trim:
+            # Get rid of non-necessary joins, that is those final fields from the
+            # join chain which are guaranteed to have same value earlier in the
+            # join chain.
+            for info in reversed(path):
+                if info[4] == 'FORWARD' and info[1] == target:
+                    target = info[0]
+                    new_path.pop()
+                else:
+                    break
+
+        return new_path, final_field, target
+
+    def setup_joins(self, names, opts, alias, dupe_multis, allow_many=True,
+            allow_explicit_fk=False, can_reuse=None, negate=False,
+            process_extras=True, trim=True):
+        """
+        Compute the necessary table joins for the passage through the fields
+        given in 'names'. 'opts' is the Options class for the current model
+        (which gives the table we are joining to), 'alias' is the alias for the
+        table we are joining to. If dupe_multis is True, any many-to-many or
+        many-to-one joins will always create a new alias (necessary for
+        disjunctive filters). If can_reuse is not None, it's a list of aliases
+        that can be reused in these joins (nothing else can be reused in this
+        case). Finally, 'negate' is used in the same sense as for add_filter()
+        -- it indicates an exclude() filter, or something similar. It is only
+        passed in here so that it can be passed to a field's extra_filter() for
+        customized behavior.
+
+        Returns the final field involved in the join, the target database
+        column (used for any 'where' constraint), the final 'opts' value and the
+        list of tables joined.
+        """
+        joins = [alias]
+        last = [0]
+        dupe_set = set()
+        exclusions = set()
+        extra_filters = []
+        int_alias = None
+        path, final_field, target = self.names_to_path(
+            names, opts, allow_many, allow_explicit_fk, trim)
+        for pos, join in enumerate(path):
+            if int_alias is not None:
+                exclusions.add(int_alias)
+            exclusions.add(alias)
+            last.append(len(joins))
+            from_field, to_field, from_opts, to_opts, direction = join
+            if direction == 'FORWARD':
+                nullable = self.is_nullable(from_field)
+            else:
+                nullable = True
+            opts = to_opts
+            lhs_col = from_field.column
+            rhs_col = to_field.column
+            rhs_table = to_opts.db_table
+            dedupe = lhs_col in opts.duplicate_targets
+            join_dedupe = dupe_multis and direction == 'REVERSE'
+
             if dupe_set or dedupe:
-                if dedupe:
-                    dupe_set.add((opts, dupe_col))
-                exclusions.update(self.dupe_avoidance.get((id(opts), dupe_col),
-                        ()))
+                # import ipdb; ipdb.set_trace()
+                exclusions.update(self.dupe_avoidance.get(
+                    (id(opts), lhs_col), ()))
+                dupe_set.add((opts, lhs_col))
+            alias = self.join((alias, rhs_table, lhs_col,
+                               rhs_col), join_dedupe, exclusions=exclusions,
+                             nullable=nullable,
+                             reuse=can_reuse)
+            joins.append(alias)
+            exclusions.add(alias)
+            for (dupe_opts, dupe_col) in dupe_set:
+                self.update_dupe_avoidance(dupe_opts, dupe_col,
+                                           alias)
 
-            if process_extras and hasattr(field, 'extra_filters'):
-                extra_filters.extend(field.extra_filters(names, pos, negate))
-            if direct:
-                if m2m:
-                    # Many-to-many field defined on the current model.
-                    if cached_data:
-                        (table1, from_col1, to_col1, table2, from_col2,
-                                to_col2, opts, target) = cached_data
-                    else:
-                        table1 = field.m2m_db_table()
-                        from_col1 = opts.get_field_by_name(
-                            field.m2m_target_field_name())[0].column
-                        to_col1 = field.m2m_column_name()
-                        opts = field.rel.to._meta
-                        table2 = opts.db_table
-                        from_col2 = field.m2m_reverse_name()
-                        to_col2 = opts.get_field_by_name(
-                            field.m2m_reverse_target_field_name())[0].column
-                        target = opts.pk
-                        orig_opts._join_cache[name] = (table1, from_col1,
-                                to_col1, table2, from_col2, to_col2, opts,
-                                target)
-
+            if process_extras and hasattr(from_field, 'extra_filters'):
+                extra_filters.extend(from_field.extra_filters(names, pos, negate))
+                """
                     int_alias = self.join((alias, table1, from_col1, to_col1),
                             dupe_multis, exclusions, nullable=True,
                             reuse=can_reuse)
@@ -1455,7 +1563,7 @@ class Query(object):
                             dupe_multis, exclusions, nullable=True,
                             reuse=can_reuse)
                     joins.append(alias)
-
+                """
             for (dupe_opts, dupe_col) in dupe_set:
                 if int_alias is None:
                     to_avoid = alias
@@ -1463,13 +1571,8 @@ class Query(object):
                     to_avoid = int_alias
                 self.update_dupe_avoidance(dupe_opts, dupe_col, to_avoid)
 
-        if pos != len(names) - 1:
-            if pos == len(names) - 2:
-                raise FieldError("Join on field %r not permitted. Did you misspell %r for the lookup type?" % (name, names[pos + 1]))
-            else:
-                raise FieldError("Join on field %r not permitted." % name)
 
-        return field, target, opts, joins, last, extra_filters
+        return final_field, target, opts, joins, last, extra_filters
 
     def trim_joins(self, target, join_list, last, trim, nonnull_check=False):
         """
