@@ -21,6 +21,13 @@ LOOKUP_SEP = '__'
 JoinInfo = namedtuple('JoinInfo',
                       'table_name rhs_alias join_type lhs_alias '
                       'lhs_join_col rhs_join_col nullable')
+# JoinPath is used when converting lookups (fk__somecol). The contents
+# describe the join in Model terms (model Options and Fields for both
+# sides of the join. In addition contains info if the join is
+# trimmable, and if the join is along a direct foreign key or not.
+JoinPath = namedtuple('JoinPath',
+                      'from_field to_field from_opts to_opts direction '
+                      'trimmable')
 
 # How many results to expect from a cursor.execute call
 MULTI = 'multi'
