@@ -1112,12 +1112,17 @@ def create_many_to_many_intermediary_model(field, klass):
         'verbose_name_plural': '%(from)s-%(to)s relationships' % {'from': from_, 'to': to},
     })
     # Construct and return the new class.
-    return type(name, (models.Model,), {
+    ret = type(name, (models.Model,), {
         'Meta': meta,
         '__module__': klass.__module__,
         from_: models.ForeignKey(klass, related_name='%s+' % name, db_tablespace=field.db_tablespace),
         to: models.ForeignKey(to_model, related_name='%s+' % name, db_tablespace=field.db_tablespace)
     })
+    # Make the new class pickleable by placing it into its module so that
+    # pickle can found it when unpickling.
+    tmp = __import__(klass.__module__, globals(), locals(), ['models'], -1)
+    setattr(tmp, name, ret)
+    return ret
 
 class ManyToManyField(RelatedField, Field):
     description = _("Many-to-many relationship")
