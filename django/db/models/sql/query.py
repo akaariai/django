@@ -505,7 +505,7 @@ class Query(object):
                 # Again, some of the tables won't have aliases due to
                 # the trimming of unnecessary tables.
                 if self.alias_refcount.get(alias) or rhs.alias_refcount.get(alias):
-                    self.promote_alias(alias, True)
+                    self.promote_joins([alias], True)
 
         # Now relabel a copy of the rhs where-clause and add it to the current
         # one.
@@ -682,32 +682,31 @@ class Query(object):
         """ Decreases the reference count for this alias. """
         self.alias_refcount[alias] -= amount
 
-    def promote_alias(self, alias, unconditional=False):
+    def promote_joins(self, aliases, unconditional=False):
         """
-        Promotes the join type of an alias to an outer join if it's possible
-        for the join to contain NULL values on the left. If 'unconditional' is
-        False, the join is only promoted if it is nullable, otherwise it is
-        always promoted.
-
-        Returns True if the join was promoted by this call.
+        Promotes recursively the join type of given aliases and its children to
+        an outer join if it's possible for the join to contain NULL values on
+        the left.  If 'unconditional' is False, the join is only promoted if it
+        is nullable or the parent join is an outer join, otherwise it is always
+        promoted.
         """
-        if ((unconditional or self.alias_map[alias].nullable) and
-                self.alias_map[alias].join_type != self.LOUTER):
-            data = self.alias_map[alias]
-            data = data._replace(join_type=self.LOUTER)
-            self.alias_map[alias] = data
-            return True
-        return False
-
-    def promote_alias_chain(self, chain, must_promote=False):
-        """
-        Walks along a chain of aliases, promoting the first nullable join and
-        any joins following that. If 'must_promote' is True, all the aliases in
-        the chain are promoted.
-        """
-        for alias in chain:
-            if self.promote_alias(alias, must_promote):
-                must_promote = True
+        aliases = list(aliases)
+        while aliases:
+            alias = aliases.pop(0)
+            parent_alias = self.alias_map[alias].lhs_alias
+            parent_louter = (parent_alias
+                and self.alias_map[parent_alias].join_type == self.LOUTER)
+            if ((unconditional or self.alias_map[alias].nullable
+                 or parent_louter)
+                and self.alias_map[alias].join_type != self.LOUTER):
+                data = self.alias_map[alias]._replace(join_type=self.LOUTER)
+                self.alias_map[alias] = data
+                # Join type of 'alias' changed, so re-examine all aliases that
+                # refer to this one (and, in turn, their children).
+                aliases.extend(
+                    child for child in self.alias_map.iterkeys()
+                    if (self.alias_map[child].lhs_alias == alias
+                        and child not in aliases))
 
     def reset_refcounts(self, to_counts):
         """
@@ -726,19 +725,10 @@ class Query(object):
         then and which ones haven't been used and promotes all of those
         aliases, plus any children of theirs in the alias tree, to outer joins.
         """
-        # FIXME: There's some (a lot of!) overlap with the similar OR promotion
-        # in add_filter(). It's not quite identical, but is very similar. So
-        # pulling out the common bits is something for later.
-        considered = {}
         for alias in self.tables:
-            if alias not in used_aliases:
-                continue
-            if (alias not in initial_refcounts or
+            if alias in used_aliases and (alias not in initial_refcounts or
                     self.alias_refcount[alias] == initial_refcounts[alias]):
-                parent = self.alias_map[alias].lhs_alias
-                must_promote = considered.get(parent, False)
-                promoted = self.promote_alias(alias, must_promote)
-                considered[alias] = must_promote or promoted
+                self.promote_joins([alias])
 
     def change_aliases(self, change_map):
         """
@@ -901,7 +891,7 @@ class Query(object):
                         continue
                     self.ref_alias(alias)
                     if promote:
-                        self.promote_alias(alias)
+                        self.promote_joins([alias])
                     return alias
 
         # No reuse is possible, so we need a new alias.
@@ -1004,8 +994,7 @@ class Query(object):
             # If the aggregate references a model or field that requires a join,
             # those joins must be LEFT OUTER - empty join rows must be returned
             # in order for zeros to be returned for those aggregates.
-            for column_alias in join_list:
-                self.promote_alias(column_alias, unconditional=True)
+            self.promote_joins(join_list, True)
 
             col = (join_list[-1], col)
         else:
@@ -1124,7 +1113,7 @@ class Query(object):
             # If the comparison is against NULL, we may need to use some left
             # outer joins when creating the join chain. This is only done when
             # needed, as it's less efficient at the database level.
-            self.promote_alias_chain(join_list)
+            self.promote_joins(join_list)
             join_promote = True
 
         # Process the join list to see if we can remove any inner joins from
@@ -1155,16 +1144,16 @@ class Query(object):
                     # This means that we are dealing with two different query
                     # subtrees, so we don't need to do any join promotion.
                     continue
-                join_promote = join_promote or self.promote_alias(join, unconditional)
+                join_promote = join_promote or self.promote_joins([join], unconditional)
                 if table != join:
-                    table_promote = self.promote_alias(table)
+                    table_promote = self.promote_joins([table])
                 # We only get here if we have found a table that exists
                 # in the join list, but isn't on the original tables list.
                 # This means we've reached the point where we only have
                 # new tables, so we can break out of this promotion loop.
                 break
-            self.promote_alias_chain(join_it, join_promote)
-            self.promote_alias_chain(table_it, table_promote or join_promote)
+            self.promote_joins(join_it, join_promote)
+            self.promote_joins(table_it, table_promote or join_promote)
 
         if having_clause or force_having:
             if (alias, col) not in self.group_by:
@@ -1176,7 +1165,7 @@ class Query(object):
                 connector)
 
         if negate:
-            self.promote_alias_chain(join_list)
+            self.promote_joins(join_list)
             if lookup_type != 'isnull':
                 if len(join_list) > 1:
                     for alias in join_list:
@@ -1650,7 +1639,7 @@ class Query(object):
                         final_alias = join.lhs_alias
                         col = join.lhs_join_col
                         joins = joins[:-1]
-                self.promote_alias_chain(joins[1:])
+                self.promote_joins(joins[1:])
                 self.select.append((final_alias, col))
                 self.select_fields.append(field)
         except MultiJoin:
