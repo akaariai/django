@@ -1105,55 +1105,26 @@ class Query(object):
                     can_reuse)
             return
 
-        table_promote = False
-        join_promote = False
-
         if (lookup_type == 'isnull' and value is True and not negate and
                 len(join_list) > 1):
             # If the comparison is against NULL, we may need to use some left
             # outer joins when creating the join chain. This is only done when
             # needed, as it's less efficient at the database level.
             self.promote_joins(join_list)
-            join_promote = True
-
         # Process the join list to see if we can remove any inner joins from
         # the far end (fewer tables in a query is better).
         nonnull_comparison = (lookup_type == 'isnull' and value is False)
         col, alias, join_list = self.trim_joins(target, join_list, last, trim,
                 nonnull_comparison)
-
         if connector == OR:
             # Some joins may need to be promoted when adding a new filter to a
             # disjunction. We walk the list of new joins and where it diverges
             # from any previous joins (ref count is 1 in the table list), we
             # make the new additions (and any existing ones not used in the new
             # join list) an outer join.
-            join_it = iter(join_list)
-            table_it = iter(self.tables)
-            next(join_it), next(table_it)
-            unconditional = False
-            for join in join_it:
-                table = next(table_it)
-                # Once we hit an outer join, all subsequent joins must
-                # also be promoted, regardless of whether they have been
-                # promoted as a result of this pass through the tables.
-                unconditional = (unconditional or
-                    self.alias_map[join].join_type == self.LOUTER)
-                if join == table and self.alias_refcount[join] > 1:
-                    # We have more than one reference to this join table.
-                    # This means that we are dealing with two different query
-                    # subtrees, so we don't need to do any join promotion.
-                    continue
-                join_promote = join_promote or self.promote_joins([join], unconditional)
-                if table != join:
-                    table_promote = self.promote_joins([table])
-                # We only get here if we have found a table that exists
-                # in the join list, but isn't on the original tables list.
-                # This means we've reached the point where we only have
-                # new tables, so we can break out of this promotion loop.
-                break
-            self.promote_joins(join_it, join_promote)
-            self.promote_joins(table_it, table_promote or join_promote)
+            joins_to_promote = [j for j in join_list
+                                if self.alias_refcount[j] == 1]
+            self.promote_joins(joins_to_promote)
 
         if having_clause or force_having:
             if (alias, col) not in self.group_by:
