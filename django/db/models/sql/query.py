@@ -470,13 +470,14 @@ class Query(object):
             if not rhs.alias_refcount[alias]:
                 # An unused alias.
                 continue
-            table, _, join_type, lhs, lhs_col, col, _ = rhs.alias_map[alias]
+            table, _, join_type, lhs, lhs_col, col, _, extra = rhs.alias_map[alias]
             promote = join_type == self.LOUTER
             # If the left side of the join was already relabeled, use the
             # updated alias.
             lhs = change_map.get(lhs, lhs)
             new_alias = self.join((lhs, table, lhs_col, col),
-                    conjunction and not first, used, promote, not conjunction)
+                    conjunction and not first, used, promote, not conjunction,
+                    extra=extra)
             used.add(new_alias)
             change_map[alias] = new_alias
             first = False
@@ -843,7 +844,8 @@ class Query(object):
         return len([1 for count in six.itervalues(self.alias_refcount) if count])
 
     def join(self, connection, always_create=False, exclusions=(),
-            promote=False, outer_if_first=False, nullable=False, reuse=None):
+            promote=False, outer_if_first=False, nullable=False, reuse=None,
+            extra=None):
         """
         Returns an alias for the join in 'connection', either reusing an
         existing alias for that join or creating a new one. 'connection' is a
@@ -877,6 +879,9 @@ class Query(object):
 
         If 'nullable' is True, the join can potentially involve NULL values and
         is a candidate for promotion (to "left outer") when combining querysets.
+
+        Extra is a condition (col, someval) added to the rhs side of the join.
+        This is needed for generic relations.
         """
         lhs, table, lhs_col, col = connection
         if lhs in self.alias_map:
@@ -919,7 +924,8 @@ class Query(object):
             join_type = self.LOUTER
         else:
             join_type = self.INNER
-        join = JoinInfo(table, alias, join_type, lhs, lhs_col, col, nullable)
+        join = JoinInfo(table, alias, join_type, lhs, lhs_col, col, nullable,
+                        extra)
         self.alias_map[alias] = join
         if t_ident in self.join_map:
             self.join_map[t_ident] += (alias,)
@@ -1023,7 +1029,7 @@ class Query(object):
         aggregate.add_to_query(self, alias, col=col, source=source, is_summary=is_summary)
 
     def add_filter(self, filter_expr, connector=AND, negate=False, trim=False,
-            can_reuse=None, process_extras=True, force_having=False):
+            can_reuse=None, force_having=False):
         """
         Add a single filter to the query. The 'filter_expr' is a pair:
         (filter_string, value). E.g. ('name__contains', 'fred')
@@ -1043,10 +1049,6 @@ class Query(object):
         will be a set of table aliases that can be reused in this filter, even
         if we would otherwise force the creation of new aliases for a join
         (needed for nested Q-filters). The set is updated by this method.
-
-        If 'process_extras' is set, any extra filters returned from the table
-        joining process will be processed. This parameter is set to False
-        during the processing of extra filters to avoid infinite recursion.
         """
         arg, value = filter_expr
         parts = arg.split(LOOKUP_SEP)
@@ -1113,8 +1115,7 @@ class Query(object):
         try:
             field, target, opts, join_list, last, extra_filters = self.setup_joins(
                     parts, opts, alias, True, allow_many, allow_explicit_fk=True,
-                    can_reuse=can_reuse, negate=negate,
-                    process_extras=process_extras)
+                    can_reuse=can_reuse, negate=negate)
         except MultiJoin as e:
             self.split_exclude(filter_expr, LOOKUP_SEP.join(parts[:e.level]),
                     can_reuse)
@@ -1207,10 +1208,6 @@ class Query(object):
 
         if can_reuse is not None:
             can_reuse.update(join_list)
-        if process_extras:
-            for filter in extra_filters:
-                self.add_filter(filter, negate=negate, can_reuse=can_reuse,
-                        process_extras=False)
 
     def add_q(self, q_object, used_aliases=None, force_having=False):
         """
@@ -1316,7 +1313,7 @@ class Query(object):
                         target = final_field.rel.get_related_field()
                         opts = int_model._meta
                         path.append(JoinPath(final_field, target, final_field.model._meta,
-                                             opts, 'FORWARD', False))
+                                             opts, 'FORWARD', None))
             # We have five different cases to solve: foreign keys, reverse
             # foreign keys, m2m fields (also reverse) and non-relational
             # fields. There isn't anything really complicated here, just
@@ -1331,14 +1328,14 @@ class Query(object):
                 target = field.rel.get_related_field()
                 final_field = field
                 path.append(JoinPath(field, target, field.model._meta, opts,
-                                     'FORWARD', False))
+                                     'FORWARD', None))
             elif not direct and not m2m:
                 final_field = to_field = field.field
                 opts = to_field.model._meta
                 from_field = to_field.rel.get_related_field()
                 path.append(JoinPath(from_field, to_field,
                                      from_field.model._meta, opts,
-                                     'REVERSE', False))
+                                     'REVERSE', None))
                 if from_field.model is to_field.model:
                     # Recursive foreign key to self.
                     target = opts.get_field_by_name(
@@ -1346,21 +1343,33 @@ class Query(object):
                 else:
                     target = opts.pk
             elif direct and m2m:
-                from_field1 = opts.get_field_by_name(
-                    field.m2m_target_field_name())[0]
-                opts = field.rel.through._meta
-                to_field1 = opts.get_field_by_name(field.m2m_field_name())[0]
-                path.append(JoinPath(from_field1, to_field1,
+                if not field.rel.through:
+                    # Gotcha! This is just a fake m2m field (a generic relation
+                    # field).
+                    from_field = opts.pk
+                    opts = field.rel.to._meta
+                    target = opts.get_field_by_name(field.object_id_field_name)[0]
+                    final_field = field
+                    extra_col = opts.get_field_by_name(field.content_type_field_name)[0].column
+                    contenttype = field.get_content_type().pk
+                    path.append(JoinPath(from_field, target, field.model._meta, opts,
+                                         'FORWARD', (extra_col, contenttype)))
+                else:
+                    from_field1 = opts.get_field_by_name(
+                        field.m2m_target_field_name())[0]
+                    opts = field.rel.through._meta
+                    to_field1 = opts.get_field_by_name(field.m2m_field_name())[0]
+                    path.append(JoinPath(from_field1, to_field1,
                                      from_field1.model._meta,
-                                     opts, 'REVERSE', False))
-                final_field = from_field2 = opts.get_field_by_name(
-                    field.m2m_reverse_field_name())[0]
-                opts = field.rel.to._meta
-                target = to_field2 = opts.get_field_by_name(
-                    field.m2m_reverse_target_field_name())[0]
-                path.append(JoinPath(from_field2, to_field2,
-                                     from_field2.model._meta,
-                                     opts, 'FORWARD', False))
+                                     opts, 'REVERSE', None))
+                    final_field = from_field2 = opts.get_field_by_name(
+                        field.m2m_reverse_field_name())[0]
+                    opts = field.rel.to._meta
+                    target = to_field2 = opts.get_field_by_name(
+                        field.m2m_reverse_target_field_name())[0]
+                    path.append(JoinPath(from_field2, to_field2,
+                                         from_field2.model._meta,
+                                         opts, 'FORWARD', None))
             elif not direct and m2m:
                 # This one is just like above, except we are travelling the
                 # fields in opposite direction.
@@ -1372,7 +1381,7 @@ class Query(object):
                     field.m2m_reverse_field_name())[0]
                 path.append(JoinPath(from_field1, to_field1,
                                      from_field1.model._meta,
-                                     int_opts, 'REVERSE', False))
+                                     int_opts, 'REVERSE', None))
                 final_field = from_field2 = int_opts.get_field_by_name(
                     field.m2m_field_name())[0]
                 opts = field.opts
@@ -1380,10 +1389,9 @@ class Query(object):
                     field.m2m_target_field_name())[0]
                 path.append(JoinPath(from_field2, to_field2,
                                      from_field2.model._meta,
-                                     opts, 'FORWARD', False))
+                                     opts, 'FORWARD', None))
 
         if pos != len(names) - 1:
-            print pos, len(names)
             if pos == len(names) - 2:
                 raise FieldError(
                     "Join on field %r not permitted. Did you misspell %r for "
@@ -1397,16 +1405,15 @@ class Query(object):
         new_path = path[:]
         if trim:
             for info in reversed(path):
-                if info[4] == 'FORWARD' and info[1] == target:
-                    target = info[0]
+                if info.direction == 'FORWARD' and info.to_field == target:
+                    target = info.from_field
                     new_path.pop()
                 else:
                     break
         return new_path, final_field, target
 
     def setup_joins(self, names, opts, alias, dupe_multis, allow_many=True,
-            allow_explicit_fk=False, can_reuse=None, negate=False,
-            process_extras=True, trim=True):
+            allow_explicit_fk=False, can_reuse=None, negate=False, trim=True):
         """
         Compute the necessary table joins for the passage through the fields
         given in 'names'. 'opts' is the Options class for the current model
@@ -1432,7 +1439,7 @@ class Query(object):
             names, opts, allow_many, allow_explicit_fk, trim)
         for pos, join in enumerate(path):
             last.append(len(joins))
-            from_field, to_field, from_opts, to_opts, direction, trimmable = join
+            from_field, to_field, from_opts, to_opts, direction, extra = join
             if direction == 'FORWARD':
                 nullable = self.is_nullable(from_field)
             else:
@@ -1442,14 +1449,11 @@ class Query(object):
             rhs_col = to_field.column
             rhs_table = to_opts.db_table
             alias = self.join((alias, rhs_table, lhs_col,
-                               rhs_col),
+                               rhs_col), dupe_multis,
                              nullable=nullable,
-                             reuse=can_reuse)
+                             reuse=can_reuse, extra=extra)
             ret_opts = opts
             joins.append(alias)
-
-            if process_extras and hasattr(from_field, 'extra_filters'):
-                extra_filters.extend(from_field.extra_filters(names, pos, negate))
         return final_field, target, ret_opts, joins, last, extra_filters
 
     def trim_joins(self, target, join_list, last, trim, nonnull_check=False):
@@ -1913,7 +1917,7 @@ class Query(object):
         opts = self.model._meta
         alias = self.get_initial_alias()
         field, col, opts, joins, last, extra = self.setup_joins(
-                start.split(LOOKUP_SEP), opts, alias, False)
+                start.split(LOOKUP_SEP), opts, alias, False, trim=False)
         select_col = self.alias_map[joins[1]].lhs_join_col
         select_alias = alias
 
