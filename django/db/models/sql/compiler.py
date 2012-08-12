@@ -509,20 +509,26 @@ class SQLCompiler(object):
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
         first = True
+        from_params = []
         for alias in self.query.tables:
             if not self.query.alias_refcount[alias]:
                 continue
             try:
-                name, alias, join_type, lhs, lhs_col, col, nullable = self.query.alias_map[alias]
+                name, alias, join_type, lhs, lhs_col, col, nullable, extra = self.query.alias_map[alias]
             except KeyError:
                 # Extra tables can end up in self.tables, but not in the
                 # alias_map if they aren't in a join. That's OK. We skip them.
                 continue
             alias_str = (alias != name and ' %s' % alias or '')
             if join_type and not first:
-                result.append('%s %s%s ON (%s.%s = %s.%s)'
+                if extra:
+                    extra_cond = " AND %s.%s = %%s" % (qn(alias), qn2(extra[0]))
+                    from_params.append(extra[1])
+                else:
+                    extra_cond = ""
+                result.append('%s %s%s ON (%s.%s = %s.%s%s)'
                         % (join_type, qn(name), alias_str, qn(lhs),
-                           qn2(lhs_col), qn(alias), qn2(col)))
+                           qn2(lhs_col), qn(alias), qn2(col), extra_cond))
             else:
                 connector = not first and ', ' or ''
                 result.append('%s%s%s' % (connector, qn(name), alias_str))
@@ -536,7 +542,7 @@ class SQLCompiler(object):
                 connector = not first and ', ' or ''
                 result.append('%s%s' % (connector, qn(alias)))
                 first = False
-        return result, []
+        return result, from_params
 
     def get_grouping(self):
         """
