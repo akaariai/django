@@ -1353,7 +1353,7 @@ class Query(object):
                     extra_col = opts.get_field_by_name(field.content_type_field_name)[0].column
                     contenttype = field.get_content_type().pk
                     path.append(JoinPath(from_field, target, field.model._meta, opts,
-                                         'FORWARD', (extra_col, contenttype)))
+                                         'REVERSE', (extra_col, contenttype)))
                 else:
                     from_field1 = opts.get_field_by_name(
                         field.m2m_target_field_name())[0]
