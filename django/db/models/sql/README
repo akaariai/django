@@ -1,0 +1,101 @@
+This file contains various pieces of information about the sql/query.py and the
+ORM in general.
+
+The ORM can be divided to 4 logical pieces, the frontend API (models/query.py),
+the sql/query.py class which contains the bulk of the logic, sql/compiler.py
+which is reponsible for turning a sql.query.Query into SQL, executing the SQL
+and then returning the rows from the DB. Finally there is the backends
+(django.db.backends.*) which contain the information needed to generate the
+queries on different backends. This contains both SQL-level differences, as
+well as backend library differences.
+
+In addition, there are various supporting classes, for example sql/where.py
+represents general WHERE (or HAVING) clauses. Most interesting of these are
+the above mentioned where.py, aggregation stuff (models/aggregates.py and
+sql/aggregates.py) and expressions (models/expressions.py). These wont be
+described here in detail.
+
+ * How queryset filtering works *
+
+Queryset filtering is based on Q-objects. A Q-object contains a lookup
+('somemodel__somecol__exact'), and a value ('somevalue'). The lookup in turn
+contains two parts, the lookup path (the related models we want to travel and
+the final column), and the lookup type (if missing, 'exact' is most commonly
+the lookup type. In addition, the Q-objects can form boolean trees
+(django.utils.tree).
+
+When a filter is added to query, it is first turned into Q-objects by
+models/query.py, then added to the query by sql/query.py add_q(). The add_q
+is responsible for managing things that can't be managed on single filtering
+call level. These include information about when we are in a negated query,
+information if we are inside a OR branch of the query (this will affect the
+join type we need to create), and finally if the filter condition needs to
+target the HAVING clause or the WHERE clause. Any OR branch containing a
+reference to aggregate must be pushed to HAVING, as one can't have ORed
+condition partly in WHERE, parly in HAVING.
+
+Adding a single filter is done by add_filter(). Add filter needs to sort out
+a lot of details:
+  * which joins are needed, which column we are targeting (setup_joins())
+  * can we trim extra joins (trim_joins())
+  * what kind of joins do we need to use (promote_alias, promote_alias_chain())
+  * can we reuse joins (used_aliases passed from add_q to setup_joins() to
+    join()).
+  * do we need subqueries (MultiJoin, split_exclude()).
+  * various details about specific lookup types (like removing NULL values for
+    __in lookups etc).
+
+Once the add_filter() has managed to find the join path and the target column
+it will add the filtering condition to the query's where or having clause.
+
+Checking which joins are needed and which column we are targeting in
+setup_joins() looks complicated, but actually it is mostly just using the
+model._meta API and traveling the found fields.
+
+trim_joins() is currently hard to understand and it is suspicious if it is
+actually doing the right thing for the right reasons. It is made somewhat more
+complicated by split_exclude's special need to trim unconditionally first part
+of the joins away.
+
+The join promotion logic is also somewhat suspectible. Here the way join
+promotion should work is explained, the logic in add_filter() doesn't
+necessarily match what is explained here.
+
+When we create a join it is usually first created as inner join. Then, it is
+promoted to left outer join if we know such a join is needed. This is the case
+if:
+  - We are doing a isnull lookup
+  - We are on different branches of an OR lookup, and the joins aren't reused
+    previously.
+  - Joins for aggregates, select_related and ordering columns.
+  - Negated filter conditions
+
+I don't know of a situation where we _must_ use a inner join. It is just better
+to use inner joins, as those are more efficient for the backend.
+
+Together with queryset combining and join trimming there will be some
+complications. For an example, if we have a query like this
+  qs.filter(fkcol__isnull=True)
+we will first find the join path in setup_joins(), this will involve one join
+and the related primary key column. As this is a isnull filter, we must use
+left outer joins. Then, we see that we can trim one join from the joins, as
+the fkcol already contains the information if there is any nonnull value. So,
+we trim the join away.
+
+However, we can't get totally rid of the information about the join. If we
+later on add another filter(fkcol__somecol=someval) we would normally create
+inner joins. However, in this case if we create an inner join between the base
+table and the fkcol's relation, the isnull check can't work. Currently Django
+uses logic where the join is first added, then turned to left outer join, and
+then trimmed from the query. When the new join is added, it sees the existing
+but not used join, and knows to use left outer join based on that.
+
+A similar situation can be encountered in ORed combine. Assume we have two
+filters: qs.filter(fkcol=1)|qs.ffilter(fkcol__somecol=2). If the information
+about the first fkcol join is missing, we will do left join for the fkcol join,
+as in ORed queries the joins must be outer joins. However, this is not correct
+as the first join could be INNER as both sides of the query use the same join.
+
+Join reuse is mostly simple: we can reuse direct foreign key joins always. We
+can reuse m2m joins inside one filter call, otherwise we must create new joins.
+The information about reusable joins is passed from add_q all the way to join().
