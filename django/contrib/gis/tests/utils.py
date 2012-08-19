@@ -4,6 +4,8 @@ from django.db import DEFAULT_DB_ALIAS
 # function that will pass a test.
 def pass_test(*args): return
 
+from django.utils import six
+
 def no_backend(test_func, backend):
     "Use this decorator to disable test on specified backend."
     if settings.DATABASES[DEFAULT_DB_ALIAS]['ENGINE'].rsplit('.')[-1] == backend:
@@ -26,7 +28,7 @@ mysql   = _default_db == 'mysql'
 spatialite = _default_db == 'spatialite'
 
 HAS_SPATIALREFSYS = True
-if oracle:
+if oracle and not six.PY3:
     from django.contrib.gis.db.backends.oracle.models import SpatialRefSys
 elif postgis:
     from django.contrib.gis.db.backends.postgis.models import SpatialRefSys
