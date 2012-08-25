@@ -889,3 +889,7 @@ class AggregationTests(TestCase):
         self.assertIs(qs.query.alias_map['aggregation_regress_book'].join_type, None)
         # Check that the query executes without problems.
         self.assertEqual(len(qs.exclude(publisher=-1)), 6)
+
+    def test_reverse_join_trimming(self):
+        qs = Author.objects.annotate(Count('book_contact_set__contact'))
+        self.assertIn(' JOIN ', str(qs.query))
