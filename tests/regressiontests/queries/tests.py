@@ -23,7 +23,8 @@ from .models import (Annotation, Article, Author, Celebrity, Child, Cover,
     Ranking, Related, Report, ReservedName, Tag, TvChef, Valid, X, Food, Eaten,
     Node, ObjectA, ObjectB, ObjectC, CategoryItem, SimpleCategory,
     SpecialCategory, OneToOneCategory, NullableName, ProxyCategory,
-    SingleObject, RelatedObject, ModelA, ModelD)
+    SingleObject, RelatedObject, ModelA, ModelD, Responsibility, Job,
+    JobResponsibilities)
 
 
 class BaseQuerysetTest(TestCase):
@@ -2210,6 +2211,29 @@ class DefaultValuesInsertTest(TestCase):
             DumbCategory.objects.create()
         except TypeError:
             self.fail("Creation of an instance of a model with only the PK field shouldn't error out after bulk insert refactoring (#17056)")
+
+class ExcludeTest(TestCase):
+    def setUp(self):
+        f1 = Food.objects.create(name='apples')
+        Food.objects.create(name='oranges')
+        Eaten.objects.create(food=f1, meal='dinner')
+        j1 = Job.objects.create(name='Manager')
+        r1 = Responsibility.objects.create(description='Playing golf')
+        j2 = Job.objects.create(name='Programmer')
+        r2 = Responsibility.objects.create(description='Programming')
+        JobResponsibilities.objects.create(job=j1, responsibility=r1)
+        JobResponsibilities.objects.create(job=j2, responsibility=r2)
+
+    def test_to_field(self):
+        self.assertQuerysetEqual(
+            Food.objects.exclude(eaten__meal='dinner'),
+            ['<Food: oranges>'])
+        self.assertQuerysetEqual(
+            Job.objects.exclude(responsibilities__description='Playing golf'),
+            ['<Job: Programmer>'])
+        self.assertQuerysetEqual(
+            Responsibility.objects.exclude(jobs__name='Manager'),
+            ['<Responsibility: Programming>'])
 
 class NullInExcludeTest(TestCase):
     def setUp(self):
