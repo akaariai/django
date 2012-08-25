@@ -23,7 +23,16 @@ GET_ITERATOR_CHUNK_SIZE = 100
 # dictionary in the Query class).
 JoinInfo = namedtuple('JoinInfo',
                       'table_name rhs_alias join_type lhs_alias '
-                      'lhs_join_col rhs_join_col nullable')
+                      'lhs_join_col rhs_join_col nullable extra')
+# JoinPath is used when converting lookups (fk__somecol). The contents
+# describe the join in Model terms (model Options and Fields for both
+# sides of the join. In addition contains extra join restrictions, used
+# by generic relations for example. This is a tuple of (col, someval),
+# where col is a column on the to side. A join condition like
+#    ON from.field = to.field AND to.col = someval
+# will be generated for the join.
+JoinPath = namedtuple('JoinPath',
+                      'from_field to_field from_opts to_opts direction extra')
 
 # Pairs of column clauses to select, and (possibly None) field for the clause.
 SelectInfo = namedtuple('SelectInfo', 'col field')
