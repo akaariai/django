@@ -244,7 +244,10 @@ class Queries1Tests(BaseQuerysetTest):
         q1 = Item.objects.order_by('name')
         q2 = Item.objects.filter(id=self.i1.id)
         list(q2)
-        self.assertEqual(len((q1 & q2).order_by('name').query.tables), 1)
+        combined_query = (q1 & q2).order_by('name').query
+        self.assertEqual(len([
+            t for t in combined_query.tables if combined_query.alias_refcount[t]
+        ]), 1)
 
     def test_order_by_join_unref(self):
         """
@@ -1282,14 +1285,12 @@ class Queries4Tests(BaseQuerysetTest):
         q1 = Item.objects.filter(Q(creator=self.a1) | Q(creator__report__name='r1')).order_by()
         q2 = Item.objects.filter(Q(creator=self.a1)).order_by() | Item.objects.filter(Q(creator__report__name='r1')).order_by()
         self.assertQuerysetEqual(q1, ["<Item: i1>"])
-        # This and the following query string equality check used to work, but
-        # no more due to one inner join turned to outer.
-        #self.assertEqual(str(q1.query), str(q2.query))
+        self.assertEqual(str(q1.query), str(q2.query))
 
         q1 = Item.objects.filter(Q(creator__report__name='e1') | Q(creator=self.a1)).order_by()
         q2 = Item.objects.filter(Q(creator__report__name='e1')).order_by() | Item.objects.filter(Q(creator=self.a1)).order_by()
         self.assertQuerysetEqual(q1, ["<Item: i1>"])
-        # self.assertEqual(str(q1.query), str(q2.query))
+        self.assertEqual(str(q1.query), str(q2.query))
 
     def test_ticket7095(self):
         # Updates that are filtered on the model being updated are somewhat
