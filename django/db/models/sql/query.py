@@ -1268,6 +1268,7 @@ class Query(object):
         if self.filter_is_sticky:
             self.used_aliases = used_aliases
 
+    names_to_path_cache = {}
     def names_to_path(self, names, opts, allow_many=False,
                       allow_explicit_fk=True):
         """
@@ -1285,130 +1286,134 @@ class Query(object):
         contain the same value as the final field).
         """
         cache_key = (tuple(names), opts, allow_explicit_fk)
-        path = []
-        multijoin_pos = None
-        for pos, name in enumerate(names):
-            if name == 'pk':
-                name = opts.pk.name
-            try:
-                field, model, direct, m2m = opts.get_field_by_name(name)
-            except FieldDoesNotExist:
-                for f in opts.fields:
-                    if allow_explicit_fk and name == f.attname:
-                        # XXX: A hack to allow foo_id to work in values() for
-                        # backwards compatibility purposes. If we dropped that
-                        # feature, this could be removed.
-                        field, model, direct, m2m = opts.get_field_by_name(f.name)
-                        break
-                else:
-                    available = opts.get_all_field_names() + list(self.aggregate_select)
-                    raise FieldError("Cannot resolve keyword %r into field. "
-                            "Choices are: %s" % (name, ", ".join(available)))
-            # Check if we need any joins for concrete inheritance cases (the
-            # field lives in parent, but we are currently in one of its
-            # children)
-            if model:
-                # The field lives on a base class of the current model.
-                # Skip the chain of proxy to the concrete proxied model
-                proxied_model = opts.concrete_model
-
-                for int_model in opts.get_base_chain(model):
-                    if int_model is proxied_model:
-                        opts = int_model._meta
+        if cache_key in self.__class__.names_to_path_cache:
+            path, multijoin_pos, target, final_field = self.__class__.names_to_path_cache[cache_key]
+        else:
+            path = []
+            multijoin_pos = None
+            for pos, name in enumerate(names):
+                if name == 'pk':
+                    name = opts.pk.name
+                try:
+                    field, model, direct, m2m = opts.get_field_by_name(name)
+                except FieldDoesNotExist:
+                    for f in opts.fields:
+                        if allow_explicit_fk and name == f.attname:
+                            # XXX: A hack to allow foo_id to work in values() for
+                            # backwards compatibility purposes. If we dropped that
+                            # feature, this could be removed.
+                            field, model, direct, m2m = opts.get_field_by_name(f.name)
+                            break
                     else:
-                        final_field = opts.parents[int_model]
-                        target = final_field.rel.get_related_field()
-                        opts = int_model._meta
-                        path.append(JoinPath(final_field, target, final_field.model._meta,
-                                             opts, 'FORWARD', None))
-            # We have five different cases to solve: foreign keys, reverse
-            # foreign keys, m2m fields (also reverse) and non-relational
-            # fields. There isn't anything really complicated here, just
-            # exercise the related fields API and fetch the from and to
-            # fields. The m2m fields are handled as two foreign keys,
-            # first one reverse, the second one direct.
-            if direct and not field.rel and not m2m:
-                final_field = target = field
-                break
-            elif direct and not m2m:
-                opts = field.rel.to._meta
-                target = field.rel.get_related_field()
-                final_field = field
-                path.append(JoinPath(field, target, field.model._meta, opts,
-                                     'FORWARD', None))
-            elif not direct and not m2m:
-                final_field = to_field = field.field
-                opts = to_field.model._meta
-                from_field = to_field.rel.get_related_field()
-                path.append(JoinPath(from_field, to_field,
-                                     from_field.model._meta, opts,
-                                     'REVERSE', None))
-                if from_field.model is to_field.model:
-                    # Recursive foreign key to self.
-                    target = opts.get_field_by_name(
-                                field.field.rel.field_name)[0]
-                else:
-                    target = opts.pk
-            elif direct and m2m:
-                if not field.rel.through:
-                    # Gotcha! This is just a fake m2m field (a generic relation
-                    # field).
-                    from_field = opts.pk
+                        available = opts.get_all_field_names() + list(self.aggregate_select)
+                        raise FieldError("Cannot resolve keyword %r into field. "
+                                "Choices are: %s" % (name, ", ".join(available)))
+                # Check if we need any joins for concrete inheritance cases (the
+                # field lives in parent, but we are currently in one of its
+                # children)
+                if model:
+                    # The field lives on a base class of the current model.
+                    # Skip the chain of proxy to the concrete proxied model
+                    proxied_model = opts.concrete_model
+
+                    for int_model in opts.get_base_chain(model):
+                        if int_model is proxied_model:
+                            opts = int_model._meta
+                        else:
+                            final_field = opts.parents[int_model]
+                            target = final_field.rel.get_related_field()
+                            opts = int_model._meta
+                            path.append(JoinPath(final_field, target, final_field.model._meta,
+                                                 opts, 'FORWARD', None))
+                # We have five different cases to solve: foreign keys, reverse
+                # foreign keys, m2m fields (also reverse) and non-relational
+                # fields. There isn't anything really complicated here, just
+                # exercise the related fields API and fetch the from and to
+                # fields. The m2m fields are handled as two foreign keys,
+                # first one reverse, the second one direct.
+                if direct and not field.rel and not m2m:
+                    final_field = target = field
+                    break
+                elif direct and not m2m:
                     opts = field.rel.to._meta
-                    target = opts.get_field_by_name(field.object_id_field_name)[0]
+                    target = field.rel.get_related_field()
                     final_field = field
-                    extra_col = opts.get_field_by_name(field.content_type_field_name)[0].column
-                    contenttype = field.get_content_type().pk
-                    path.append(JoinPath(from_field, target, field.model._meta, opts,
-                                         'REVERSE', (extra_col, contenttype)))
-                else:
+                    path.append(JoinPath(field, target, field.model._meta, opts,
+                                         'FORWARD', None))
+                elif not direct and not m2m:
+                    final_field = to_field = field.field
+                    opts = to_field.model._meta
+                    from_field = to_field.rel.get_related_field()
+                    path.append(JoinPath(from_field, to_field,
+                                         from_field.model._meta, opts,
+                                         'REVERSE', None))
+                    if from_field.model is to_field.model:
+                        # Recursive foreign key to self.
+                        target = opts.get_field_by_name(
+                                    field.field.rel.field_name)[0]
+                    else:
+                        target = opts.pk
+                elif direct and m2m:
+                    if not field.rel.through:
+                        # Gotcha! This is just a fake m2m field (a generic relation
+                        # field).
+                        from_field = opts.pk
+                        opts = field.rel.to._meta
+                        target = opts.get_field_by_name(field.object_id_field_name)[0]
+                        final_field = field
+                        extra_col = opts.get_field_by_name(field.content_type_field_name)[0].column
+                        contenttype = field.get_content_type().pk
+                        path.append(JoinPath(from_field, target, field.model._meta, opts,
+                                             'REVERSE', (extra_col, contenttype)))
+                    else:
+                        from_field1 = opts.get_field_by_name(
+                            field.m2m_target_field_name())[0]
+                        opts = field.rel.through._meta
+                        to_field1 = opts.get_field_by_name(field.m2m_field_name())[0]
+                        path.append(JoinPath(from_field1, to_field1,
+                                         from_field1.model._meta,
+                                         opts, 'REVERSE', None))
+                        final_field = from_field2 = opts.get_field_by_name(
+                            field.m2m_reverse_field_name())[0]
+                        opts = field.rel.to._meta
+                        target = to_field2 = opts.get_field_by_name(
+                            field.m2m_reverse_target_field_name())[0]
+                        path.append(JoinPath(from_field2, to_field2,
+                                             from_field2.model._meta,
+                                             opts, 'FORWARD', None))
+                elif not direct and m2m:
+                    # This one is just like above, except we are travelling the
+                    # fields in opposite direction.
+                    field = field.field
                     from_field1 = opts.get_field_by_name(
-                        field.m2m_target_field_name())[0]
-                    opts = field.rel.through._meta
-                    to_field1 = opts.get_field_by_name(field.m2m_field_name())[0]
-                    path.append(JoinPath(from_field1, to_field1,
-                                     from_field1.model._meta,
-                                     opts, 'REVERSE', None))
-                    final_field = from_field2 = opts.get_field_by_name(
-                        field.m2m_reverse_field_name())[0]
-                    opts = field.rel.to._meta
-                    target = to_field2 = opts.get_field_by_name(
                         field.m2m_reverse_target_field_name())[0]
+                    int_opts = field.rel.through._meta
+                    to_field1 = int_opts.get_field_by_name(
+                        field.m2m_reverse_field_name())[0]
+                    path.append(JoinPath(from_field1, to_field1,
+                                         from_field1.model._meta,
+                                         int_opts, 'REVERSE', None))
+                    final_field = from_field2 = int_opts.get_field_by_name(
+                        field.m2m_field_name())[0]
+                    opts = field.opts
+                    target = to_field2 = opts.get_field_by_name(
+                        field.m2m_target_field_name())[0]
                     path.append(JoinPath(from_field2, to_field2,
                                          from_field2.model._meta,
                                          opts, 'FORWARD', None))
-            elif not direct and m2m:
-                # This one is just like above, except we are travelling the
-                # fields in opposite direction.
-                field = field.field
-                from_field1 = opts.get_field_by_name(
-                    field.m2m_reverse_target_field_name())[0]
-                int_opts = field.rel.through._meta
-                to_field1 = int_opts.get_field_by_name(
-                    field.m2m_reverse_field_name())[0]
-                path.append(JoinPath(from_field1, to_field1,
-                                     from_field1.model._meta,
-                                     int_opts, 'REVERSE', None))
-                final_field = from_field2 = int_opts.get_field_by_name(
-                    field.m2m_field_name())[0]
-                opts = field.opts
-                target = to_field2 = opts.get_field_by_name(
-                    field.m2m_target_field_name())[0]
-                path.append(JoinPath(from_field2, to_field2,
-                                     from_field2.model._meta,
-                                     opts, 'FORWARD', None))
-            if m2m and multijoin_pos is None:
-                multijoin_pos = pos
-            if not direct and not path[-1].to_field.unique and multijoin_pos is None:
-                multijoin_pos = pos
+                if m2m and multijoin_pos is None:
+                    multijoin_pos = pos
+                if not direct and not path[-1].to_field.unique and multijoin_pos is None:
+                    multijoin_pos = pos
 
-        if pos != len(names) - 1:
-            if pos == len(names) - 2:
-                raise FieldError(
-                    "Join on field %r not permitted. Did you misspell %r for "
-                    "the lookup type?" % (name, names[pos + 1]))
-            else:
-                raise FieldError("Join on field %r not permitted." % name)
+            if pos != len(names) - 1:
+                if pos == len(names) - 2:
+                    raise FieldError(
+                        "Join on field %r not permitted. Did you misspell %r for "
+                        "the lookup type?" % (name, names[pos + 1]))
+                else:
+                    raise FieldError("Join on field %r not permitted." % name)
+            self.__class__.names_to_path_cache[cache_key] = path, multijoin_pos, target, final_field
         # We are a bit aggressive about raising the multijoin. If we can trim
         # joins from the end of the path, it is possible we can trim the multijoin
         # away, and avoid the need for a subquery. This isn't doable currently as
