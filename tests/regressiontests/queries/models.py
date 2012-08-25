@@ -400,3 +400,21 @@ class ModelA(models.Model):
     name = models.TextField()
     b = models.ForeignKey(ModelB, null=True)
     d = models.ForeignKey(ModelD)
+
+# Models for disjunction join promotion low level testing.
+class FK1(models.Model):
+    f1 = models.TextField()
+    f2 = models.TextField()
+
+class FK2(models.Model):
+    f1 = models.TextField()
+    f2 = models.TextField()
+
+class FK3(models.Model):
+    f1 = models.TextField()
+    f2 = models.TextField()
+
+class BaseA(models.Model):
+    a = models.ForeignKey(FK1, null=True)
+    b = models.ForeignKey(FK2, null=True)
+    c = models.ForeignKey(FK3, null=True)
