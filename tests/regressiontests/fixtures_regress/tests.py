@@ -147,7 +147,7 @@ class TestFixtures(TestCase):
         Validate that error conditions are caught correctly
         """
         with self.assertRaisesRegexp(management.CommandError,
-                "No fixture data found for 'bad_fixture2'. \(File format may be invalid.\)"):
+                "No fixture data found for 'bad_fixture2.xml'. \(File format may be invalid.\)"):
             management.call_command(
                 'loaddata',
                 'bad_fixture2.xml',
