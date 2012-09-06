@@ -32,24 +32,23 @@ def create_permissions(app, created_models, verbosity, **kwargs):
 
     # This will hold the permissions we're looking for as
     # (content_type, (codename, name))
-    searched_perms = list()
     # The codenames and ctypes that should exist.
-    ctypes = set()
-    for klass in app_models:
-        if klass not in created_models and auth_app.Permission not in created_models:
-            continue
-        ctype = ContentType.objects.get_for_model(klass)
-        ctypes.add(ctype)
-        for perm in _get_all_permissions(klass._meta):
-            searched_perms.append((ctype, perm))
-    if not ctypes:
+    klasses = [k for k in app_models
+               if k._meta.concrete_model in created_models
+               or auth_app.Permission in created_models]
+    if not klasses:
         return
+    ctypes = ContentType.objects.get_for_models(*klasses, for_concrete_models=False)
+    searched_perms = list()
+    for model, ctype in ctypes.items():
+        for perm in _get_all_permissions(model._meta):
+            searched_perms.append((ctype, perm))
 
     # Find all the Permissions that have a context_type for a model we're
     # looking for.  We don't need to check for codenames since we already have
     # a list of the ones we're going to create.
     all_perms = set(auth_app.Permission.objects.filter(
-        content_type__in=ctypes,
+        content_type__in=ctypes.values(),
     ).values_list(
         "content_type", "codename"
     ))
