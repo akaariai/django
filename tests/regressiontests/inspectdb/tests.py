@@ -1,8 +1,10 @@
 from __future__ import unicode_literals
 
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase, skipUnlessDBFeature
 from django.utils.six import StringIO
+from django.utils.unittest import skipIf
 
 
 class InspectDBTestCase(TestCase):
@@ -59,6 +61,7 @@ class InspectDBTestCase(TestCase):
         self.assertNotIn("    45extra = models.CharField", output, msg=error_message)
         self.assertIn("number_45extra = models.CharField", output)
 
+    @skipIf(connection.vendor == 'oracle', "Oracle breaks on '%' in table creation")
     def test_special_column_name_introspection(self):
         """Introspection of column names containing special characters,
            unsuitable for Python identifiers
