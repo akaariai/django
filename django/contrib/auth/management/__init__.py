@@ -36,6 +36,8 @@ def create_permissions(app, created_models, verbosity, **kwargs):
     # The codenames and ctypes that should exist.
     ctypes = set()
     for klass in app_models:
+        if klass not in created_models and auth_app.Permission not in created_models:
+            continue
         ctype = ContentType.objects.get_for_model(klass)
         ctypes.add(ctype)
         for perm in _get_all_permissions(klass._meta):

@@ -99,18 +99,21 @@ def sql_delete(app, style, connection):
 
     return output[::-1] # Reverse it, to deal with table dependencies.
 
-def sql_flush(style, connection, only_django=False, reset_sequences=True):
+def sql_flush(style, connection, only_django=False, reset_sequences=True,
+              limit_models=None):
     """
     Returns a list of the SQL statements used to flush the database.
 
     If only_django is True, then only table names that have associated Django
     models and are in INSTALLED_APPS will be included.
     """
+    inspect = connection.introspection
     if only_django:
-        tables = connection.introspection.django_table_names(only_existing=True)
+        tables = inspect.django_table_names(only_existing=True,
+                                            limit_models=limit_models)
     else:
-        tables = connection.introspection.table_names()
-    seqs = connection.introspection.sequence_list() if reset_sequences else ()
+        tables = inspect.table_names()
+    seqs = inspect.sequence_list(limit_models=limit_models) if reset_sequences else ()
     statements = connection.ops.sql_flush(style, tables, seqs)
     return statements
 

@@ -12,7 +12,7 @@ from django.db.models.fields import AutoField
 from django.db.models.query_utils import (Q, select_related_descend,
     deferred_class_factory, InvalidQuery)
 from django.db.models.deletion import Collector
-from django.db.models import sql
+from django.db.models import sql, signals
 from django.utils.functional import partition
 from django.utils import six
 
@@ -411,6 +411,7 @@ class QuerySet(object):
             raise ValueError("Can't bulk create an inherited model")
         if not objs:
             return objs
+        signals.model_changed.send(sender=self.model, using=self.db)
         self._for_write = True
         connection = connections[self.db]
         fields = self.model._meta.local_fields
@@ -535,6 +536,7 @@ class QuerySet(object):
         """
         assert self.query.can_filter(), \
                 "Cannot update a query once a slice has been taken."
+        signals.model_changed.send(sender=self.model, using=self.db)
         self._for_write = True
         query = self.query.clone(sql.UpdateQuery)
         query.add_update_values(kwargs)

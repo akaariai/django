@@ -957,7 +957,7 @@ class BaseDatabaseIntrospection(object):
         """
         raise NotImplementedError
 
-    def django_table_names(self, only_existing=False):
+    def django_table_names(self, only_existing=False, limit_models=None):
         """
         Returns a list of all table names that have associated Django models and
         are in INSTALLED_APPS.
@@ -968,13 +968,14 @@ class BaseDatabaseIntrospection(object):
         from django.db import models, router
         tables = set()
         for app in models.get_apps():
-            for model in models.get_models(app):
+            for model in models.get_models(app, include_auto_created=True):
                 if not model._meta.managed:
                     continue
                 if not router.allow_syncdb(self.connection.alias, model):
                     continue
+                if limit_models is not None and model not in limit_models:
+                    continue
                 tables.add(model._meta.db_table)
-                tables.update([f.m2m_db_table() for f in model._meta.local_many_to_many])
         tables = list(tables)
         if only_existing:
             existing_tables = self.table_names()
@@ -999,7 +1000,7 @@ class BaseDatabaseIntrospection(object):
             if self.table_name_converter(m._meta.db_table) in tables
         ])
 
-    def sequence_list(self):
+    def sequence_list(self, limit_models=None):
         "Returns a list of information about all DB sequences for all models in all apps."
         from django.db import models, router
 
@@ -1011,6 +1012,8 @@ class BaseDatabaseIntrospection(object):
                 if not model._meta.managed:
                     continue
                 if not router.allow_syncdb(self.connection.alias, model):
+                    continue
+                if limit_models is not None and model not in limit_models:
                     continue
                 for f in model._meta.local_fields:
                     if isinstance(f, models.AutoField):

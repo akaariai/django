@@ -10,7 +10,7 @@ def update_contenttypes(app, created_models, verbosity=2, **kwargs):
     entries that no longer have a matching model class.
     """
     ContentType.objects.clear_cache()
-    app_models = get_models(app)
+    app_models = [m for m in get_models(app) if (m in created_models or ContentType in created_models)]
     if not app_models:
         return
     # They all have the same app_label, get the first one.

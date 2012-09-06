@@ -42,8 +42,9 @@ class Command(NoArgsCommand):
                 import_module('.management', app_name)
             except ImportError:
                 pass
-
-        sql_list = sql_flush(self.style, connection, only_django=True, reset_sequences=reset_sequences)
+        limit_models = options.get('limit_models')
+        sql_list = sql_flush(self.style, connection, only_django=True,
+                             reset_sequences=reset_sequences, limit_models=limit_models)
 
         if interactive:
             confirm = input("""You have requested a flush of the database.
@@ -79,6 +80,9 @@ The full error: %s""" % (connection.settings_dict['NAME'], e))
                     m for m in models.get_models(app, include_auto_created=True)
                     if router.allow_syncdb(db, m)
                 ])
+            if limit_models is not None:
+                all_models = [m for m in all_models if m in limit_models]
+
             emit_post_sync_signal(set(all_models), verbosity, interactive, db)
 
             # Reinstall the initial_data fixture.
