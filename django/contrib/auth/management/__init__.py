@@ -42,6 +42,8 @@ def create_permissions(app, created_models, verbosity, **kwargs):
         ctypes.add(ctype)
         for perm in _get_all_permissions(klass._meta):
             searched_perms.append((ctype, perm))
+    if not ctypes:
+        return
 
     # Find all the Permissions that have a context_type for a model we're
     # looking for.  We don't need to check for codenames since we already have
