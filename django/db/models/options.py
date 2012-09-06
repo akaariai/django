@@ -68,6 +68,8 @@ class Options(object):
         # from *other* models. Needed for some admin checks. Internal use only.
         self.related_fkey_lookups = []
 
+        self.is_validated = False
+
     def contribute_to_class(self, cls, name):
         from django.db import connection
         from django.db.backends.util import truncate_name
