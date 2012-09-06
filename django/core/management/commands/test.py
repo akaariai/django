@@ -24,6 +24,11 @@ class Command(BaseCommand):
             help='Overrides the default address where the live server (used '
                  'with LiveServerTestCase) is expected to run from. The '
                  'default value is localhost:8081.'),
+        make_option('--detect_state_leaks',
+            action='store_false', dest='detect_state_leaks', default=False,
+            help='Tells Django to try to detect state leaks between tests. '
+                 'Currently only database state leaking for state tracking '
+                 'is implemented'),
     )
     help = ('Runs the test suite for the specified applications, or the '
             'entire site if no apps are specified.')

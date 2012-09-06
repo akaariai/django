@@ -31,6 +31,8 @@ from django.core.urlresolvers import clear_url_caches
 from django.core.validators import EMPTY_VALUES
 from django.db import (transaction, connection, connections, DEFAULT_DB_ALIAS,
     reset_queries)
+from django.db.models import signals
+from django.db.models.loading import get_models
 from django.forms.fields import CharField
 from django.http import QueryDict
 from django.test import _doctest as doctest
@@ -454,6 +456,25 @@ class TransactionTestCase(SimpleTestCase):
     # test case
     reset_sequences = False
 
+    # Should we track dirty state and try to be clever by flushing only
+    # dirty tables? The default of None allows for future global/app-level
+    # overrides. False and True can't be overridden. None is equivalent to
+    # False. False and True should not be overridden.
+    track_db_state = None
+    
+    # Should we try to compare the state of the DB pre/post test? If global
+    # state tracking is enabled, it overrides this flag.
+    detect_leaks = False
+
+    @property
+    def _track_state(self):
+        # Currently, there are no overrides.
+        return self.track_db_state
+
+    @property
+    def _detect_leaks(self):
+        return getattr(settings, '_DETECT_STATE_LEAKS', False) or self.detect_leaks
+
     def _pre_setup(self):
         """Performs any pre-test setup. This includes:
 
@@ -467,6 +488,43 @@ class TransactionTestCase(SimpleTestCase):
         self._fixture_setup()
         self._urlconf_setup()
         mail.outbox = []
+
+    def _attach_signals(self):
+        self.changed_models = set()
+        def listener(sender, *args, **kwargs):
+            assert sender is not None
+            self.changed_models.add(sender)
+        # Make sure we have a reference to the listener function until the
+        # class is garbage collected. This way weak reference collecting
+        # will not remove the signal while this instance exists.
+        self._listener = listener
+        signals.model_changed.connect(listener, dispatch_uid=id(self))
+
+    def _detach_signals(self):
+        signals.model_changed.disconnect(dispatch_uid=id(self))
+        self._listener = None
+
+    def _collect_changed_models(self):
+        if not self._track_state:
+            return set(m for m in get_models(include_auto_created=True))
+        changed = set()
+
+        def collect_model(model):
+            if model in changed:
+                return
+            changed.add(model._meta.concrete_model)
+            for parent in model._meta.parents:
+                collect_model(parent)
+            changed.union(set(parent for parent in model._meta.parents))
+            related_fields = model._meta.get_all_related_objects(
+                include_hidden=True, include_proxy_eq=True
+            )
+            for related in related_fields:
+                collect_model(related.model)
+
+        for model in self.changed_models:
+            collect_model(model)
+        return changed
 
     def _reset_sequences(self, db_name):
         conn = connections[db_name]
@@ -487,6 +545,10 @@ class TransactionTestCase(SimpleTestCase):
     def _fixture_setup(self):
         # If the test case has a multi_db=True flag, act on all databases.
         # Otherwise, just on the default DB.
+        if self._detect_leaks:
+            self._pre_state = self._collect_db_state()
+        if self._track_state:
+            self._attach_signals()
         db_names = connections if getattr(self, 'multi_db', False) else [DEFAULT_DB_ALIAS]
         for db_name in db_names:
             # Reset sequences
@@ -534,6 +596,24 @@ class TransactionTestCase(SimpleTestCase):
                 result.addError(self, sys.exc_info())
                 return
 
+    def _assert_state(self, pre_state, post_state):
+        """
+        Check that the states match. Checking is row-count based.
+        """
+        all_keys = set(pre_state) | set(post_state)
+        for k in all_keys:
+            self.assertEqual(pre_state.get(k, 0), post_state.get(k, 0), k)
+
+    def _collect_db_state(self):
+        """
+        Collect row counts for each database model Django knows of.
+        """
+        state = {}
+        for model in get_models(include_auto_created=True):
+            if model._meta.managed:
+                state[model] = model._default_manager.count()
+        return state
+
     def _post_teardown(self):
         """ Performs any post-test things. This includes:
 
@@ -554,12 +634,18 @@ class TransactionTestCase(SimpleTestCase):
             conn.close()
 
     def _fixture_teardown(self):
+        changed_models = self._collect_changed_models()
+        if self._track_state:
+            self._detach_signals()
         # If the test case has a multi_db=True flag, flush all databases.
         # Otherwise, just flush default.
         databases = connections if getattr(self, 'multi_db', False) else [DEFAULT_DB_ALIAS]
         for db in databases:
             call_command('flush', verbosity=0, interactive=False, database=db,
-                         skip_validation=True, reset_sequences=False)
+                         skip_validation=True, reset_sequences=False, limit_models=changed_models)
+        if self._detect_leaks:
+            post_state = self._collect_db_state()
+            self._assert_state(self._pre_state, post_state)
 
     def _urlconf_teardown(self):
         if hasattr(self, '_old_root_urlconf'):

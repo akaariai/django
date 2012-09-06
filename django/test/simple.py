@@ -235,14 +235,17 @@ def dependency_ordered(test_databases, dependencies):
 
 
 class DjangoTestSuiteRunner(object):
-    def __init__(self, verbosity=1, interactive=True, failfast=True, **kwargs):
+    def __init__(self, verbosity=1, interactive=True, failfast=True,
+                 detect_state_leaks=False, **kwargs):
         self.verbosity = verbosity
         self.interactive = interactive
         self.failfast = failfast
+        self.detect_state_leaks = detect_state_leaks
 
     def setup_test_environment(self, **kwargs):
         setup_test_environment()
         settings.DEBUG = False
+        settings._DETECT_STATE_LEAKS = self.detect_state_leaks
         unittest.installHandler()
 
     def build_suite(self, test_labels, extra_tests=None, **kwargs):
@@ -262,7 +265,6 @@ class DjangoTestSuiteRunner(object):
         if extra_tests:
             for test in extra_tests:
                 suite.addTest(test)
-
         return reorder_suite(suite, (unittest.TestCase,))
 
     def setup_databases(self, **kwargs):

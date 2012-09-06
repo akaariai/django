@@ -20,6 +20,7 @@ class TestTransactionClosing(TransactionTestCase):
         Make sure a transaction consisting of raw SQL execution gets
         committed by the commit_on_success decorator.
         """
+        self.changed_models.add(Mod)
         @commit_on_success
         def raw_sql():
             "Write a record using raw sql under a commit_on_success decorator"
@@ -106,6 +107,7 @@ class TestTransactionClosing(TransactionTestCase):
         (this is to show why it is wrong to set the transaction dirty only when a cursor
         is fetched from the connection).
         """
+        self.changed_models.add(Mod)
         @commit_on_success
         def reuse_cursor_ref():
             """

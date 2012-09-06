@@ -148,7 +148,7 @@ def teardown(state):
     for key, value in state.items():
         setattr(settings, key, value)
 
-def django_tests(verbosity, interactive, failfast, test_labels):
+def django_tests(verbosity, interactive, failfast, detect_state_leaks, test_labels):
     from django.conf import settings
     state = setup(verbosity, test_labels)
     extra_tests = []
@@ -166,7 +166,7 @@ def django_tests(verbosity, interactive, failfast, test_labels):
     TestRunner = get_runner(settings)
 
     test_runner = TestRunner(verbosity=verbosity, interactive=interactive,
-        failfast=failfast)
+        failfast=failfast, detect_state_leaks=detect_state_leaks)
     failures = test_runner.run_tests(test_labels, extra_tests=extra_tests)
 
     teardown(state)
@@ -199,6 +199,8 @@ def bisect_tests(bisection_label, options, test_labels):
         subprocess_args.append('--verbosity=%s' % options.verbosity)
     if not options.interactive:
         subprocess_args.append('--noinput')
+    if options.detect_state_leaks:
+        subprocess_args.append('--detect_state_leaks')
 
     iteration = 1
     while len(test_labels) > 1:
@@ -260,6 +262,8 @@ def paired_tests(paired_test, options, test_labels):
         subprocess_args.append('--verbosity=%s' % options.verbosity)
     if not options.interactive:
         subprocess_args.append('--noinput')
+    if not options.detect_state_leaks:
+        subprocess_args.append('--detect_state_leaks')
 
     for i, label in enumerate(test_labels):
         print('***** %d of %d: Check test pairing with %s' % (
@@ -305,8 +309,14 @@ if __name__ == "__main__":
         '--liveserver', action='store', dest='liveserver', default=None,
         help='Overrides the default address where the live server (used with '
              'LiveServerTestCase) is expected to run from. The default value '
-             'is localhost:8081.'),
+             'is localhost:8081.')
+    parser.add_option('--detect_state_leaks',
+            action='store_true', dest='detect_state_leaks', default=False,
+            help='Tells Django to try to detect state leaks between tests. '
+                 'Currently only database state leaking for state tracking '
+                 'is implemented')
     options, args = parser.parse_args()
+    print(options)
     if options.settings:
         os.environ['DJANGO_SETTINGS_MODULE'] = options.settings
     elif "DJANGO_SETTINGS_MODULE" not in os.environ:
@@ -324,6 +334,6 @@ if __name__ == "__main__":
         paired_tests(options.pair, options, args)
     else:
         failures = django_tests(int(options.verbosity), options.interactive,
-                                options.failfast, args)
+                                options.failfast, options.detect_state_leaks, args)
         if failures:
             sys.exit(bool(failures))

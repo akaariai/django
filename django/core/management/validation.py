@@ -34,6 +34,9 @@ def get_validation_errors(outfile, app=None):
 
     for cls in models.get_models(app):
         opts = cls._meta
+        if opts.is_validated:
+            continue
+        pre_errors_count = len(e.errors)
 
         # Do field-specific validation.
         for f in opts.local_fields:
@@ -308,5 +311,7 @@ def get_validation_errors(outfile, app=None):
                         e.add(opts, '"unique_together" refers to %s. ManyToManyFields are not supported in unique_together.' % f.name)
                     if f not in opts.local_fields:
                         e.add(opts, '"unique_together" refers to %s. This is not in the same model as the unique_together statement.' % f.name)
+        if len(e.errors) == pre_errors_count:
+            opts.is_validated = True
 
     return len(e.errors)
