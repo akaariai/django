@@ -9,12 +9,12 @@ from django.utils.http import int_to_base36
 from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext, ugettext_lazy as _
 
-from django.contrib.auth import authenticate
+from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import UNUSABLE_PASSWORD, identify_hasher
 from django.contrib.auth.tokens import default_token_generator
 from django.contrib.sites.models import get_current_site
-
+UserModel = get_user_model()
 
 UNMASKED_DIGITS_TO_SHOW = 6
 
@@ -75,7 +75,7 @@ class UserCreationForm(forms.ModelForm):
         help_text=_("Enter the same password as above, for verification."))
 
     class Meta:
-        model = User
+        model = UserModel
         fields = ("username",)
 
     def clean_username(self):
@@ -83,8 +83,8 @@ class UserCreationForm(forms.ModelForm):
         # but it sets a nicer error message than the ORM. See #13147.
         username = self.cleaned_data["username"]
         try:
-            User.objects.get(username=username)
-        except User.DoesNotExist:
+            UserModel.objects.get(username=username)
+        except UserModel.DoesNotExist:
             return username
         raise forms.ValidationError(self.error_messages['duplicate_username'])
 
@@ -121,7 +121,7 @@ class UserChangeForm(forms.ModelForm):
         return self.initial["password"]
 
     class Meta:
-        model = User
+        model = UserModel
 
     def __init__(self, *args, **kwargs):
         super(UserChangeForm, self).__init__(*args, **kwargs)
@@ -199,8 +199,8 @@ class PasswordResetForm(forms.Form):
         Validates that an active user exists with the given email address.
         """
         email = self.cleaned_data["email"]
-        self.users_cache = User.objects.filter(email__iexact=email,
-                                               is_active=True)
+        self.users_cache = UserModel.objects.filter(email__iexact=email,
+                                                    is_active=True)
         if not len(self.users_cache):
             raise forms.ValidationError(self.error_messages['unknown'])
         if any((user.password == UNUSABLE_PASSWORD)
