@@ -6,7 +6,7 @@ from django.db.backends.util import truncate_name
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.query_utils import select_related_descend
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
-        GET_ITERATOR_CHUNK_SIZE)
+        GET_ITERATOR_CHUNK_SIZE, REUSE_ALL)
 from django.db.models.sql.datastructures import EmptyResultSet
 from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.query import get_order_dir, Query
@@ -457,7 +457,7 @@ class SQLCompiler(object):
         if not alias:
             alias = self.query.get_initial_alias()
         field, target, opts, joins, _, _ = self.query.setup_joins(pieces,
-                opts, alias, False)
+                opts, alias, REUSE_ALL)
         # We will later on need to promote those joins that were added to the
         # query afresh above.
         joins_to_promote = [j for j in joins if self.query.alias_refcount[j] < 2]
@@ -573,7 +573,7 @@ class SQLCompiler(object):
         return result, params
 
     def fill_related_selections(self, opts=None, root_alias=None, cur_depth=1,
-            used=None, requested=None, restricted=None, nullable=None):
+            requested=None, restricted=None, nullable=None):
         """
         Fill in the information needed for a select_related query. The current
         depth is measured as the number of connections away from the root model
@@ -589,8 +589,6 @@ class SQLCompiler(object):
             root_alias = self.query.get_initial_alias()
             self.query.related_select_cols = []
             self.query.related_select_fields = []
-        if not used:
-            used = set()
         only_load = self.query.get_loaded_field_names()
 
         # Setup for the case when only particular related fields should be
@@ -635,8 +633,7 @@ class SQLCompiler(object):
 
             alias = self.query.join((alias, table, f.column,
                     f.rel.get_related_field().column),
-                    promote=promote, reuse=used)
-            used.add(alias)
+                    promote=promote)
             columns, aliases = self.get_default_columns(start_alias=alias,
                     opts=f.rel.to._meta, as_pairs=True)
             self.query.related_select_cols.extend(columns)
@@ -647,7 +644,7 @@ class SQLCompiler(object):
                 next = False
             new_nullable = f.null or promote
             self.fill_related_selections(f.rel.to._meta, alias, cur_depth + 1,
-                    used, next, restricted, new_nullable)
+                    next, restricted, new_nullable)
 
         if restricted:
             related_fields = [
@@ -682,14 +679,13 @@ class SQLCompiler(object):
                         int_opts = int_model._meta
                         alias = self.query.join(
                             (alias, int_opts.db_table, lhs_col, int_opts.pk.column),
-                            promote=True, reuse=used
+                            promote=True,
                         )
                         alias_chain.append(alias)
                 alias = self.query.join(
                     (alias, table, f.rel.get_related_field().column, f.column),
                     promote=True
                 )
-                used.add(alias)
                 columns, aliases = self.get_default_columns(start_alias=alias,
                     opts=model._meta, as_pairs=True, local_only=True)
                 self.query.related_select_cols.extend(columns)
@@ -701,7 +697,7 @@ class SQLCompiler(object):
                 new_nullable = True
 
                 self.fill_related_selections(model._meta, table, cur_depth+1,
-                    used, next, restricted, new_nullable)
+                    next, restricted, new_nullable)
 
     def deferred_to_columns(self):
         """
