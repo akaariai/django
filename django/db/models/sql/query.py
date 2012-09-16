@@ -478,7 +478,7 @@ class Query(object):
         #
         # Note that we will be creating duplicate joins for non-m2m joins in
         # the AND case. This is something that could be fixed later on.
-        reusability = None if conjunction else REUSE_ALL
+        reuse = set() if conjunction else set(self.tables)
 
         # Make sure the first table is already in the query - this is the same
         # table on both sides.
@@ -494,8 +494,12 @@ class Query(object):
             # updated alias.
             lhs = change_map.get(lhs, lhs)
             new_alias = self.join((lhs, table, lhs_col, col),
-                    reuse=reusability, promote=promote,
+                    reuse=reuse, promote=promote,
                     outer_if_first=not conjunction, nullable=nullable)
+            # We can't reuse the same join again. We might have two joins
+            # for the same join connection in the rhs query, and this must be
+            # the case in the combined query, too.
+            reuse.discard(new_alias)
             change_map[alias] = new_alias
 
         # So that we don't exclude valid results in an "or" query combination,
