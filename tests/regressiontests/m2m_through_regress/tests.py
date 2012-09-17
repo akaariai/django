@@ -121,6 +121,8 @@ class M2MThroughTestCase(TestCase):
 class ToFieldThroughTests(TestCase):
     def setUp(self):
         self.car = Car.objects.create(make="Toyota")
+        # Create one intentionally unused driver to mix up the autonumbering
+        unused_driver = Driver.objects.create(name="Barney Gumble")
         self.driver = Driver.objects.create(name="Ryan Briscoe")
         CarDriver.objects.create(car=self.car, driver=self.driver)
 
