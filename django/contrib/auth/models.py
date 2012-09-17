@@ -376,12 +376,12 @@ class User(models.Model):
         """
         send_mail(subject, message, from_email, [self.email])
 
-    def get_profile(self):
+    def get_profile(self, cached=True):
         """
         Returns site-specific profile for this user. Raises
         SiteProfileNotAvailable if this site does not allow profiles.
         """
-        if not hasattr(self, '_profile_cache'):
+        if not cached or not hasattr(self, '_profile_cache'):
             from django.conf import settings
             if not getattr(settings, 'AUTH_PROFILE_MODULE', False):
                 raise SiteProfileNotAvailable(

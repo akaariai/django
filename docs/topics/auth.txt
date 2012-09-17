@@ -248,14 +248,23 @@ Methods
         :attr:`~django.contrib.auth.models.User.from_email` is ``None``, Django
         uses the :setting:`DEFAULT_FROM_EMAIL`.
 
-    .. method:: models.User.get_profile()
+    .. method:: models.User.get_profile(cached=True)
+
+        .. versionchanged:: 1.5
+            The ``cached`` argument was added.
 
         Returns a site-specific profile for this user. Raises
         :exc:`django.contrib.auth.models.SiteProfileNotAvailable` if the
         current site doesn't allow profiles, or
         :exc:`django.core.exceptions.ObjectDoesNotExist` if the user does not
         have a profile. For information on how to define a site-specific user
-        profile, see the section on `storing additional user information`_ below.
+        profile, see the section on `storing additional user information`_
+        below.
+
+        By default it caches the result to prevent hitting the database
+        multiple times, however if the data is changed after calling it the
+        first time, subsequent calls will return the original unchanged object.
+        To force hitting the database again simply set ``cached`` to ``False``.
 
 .. _storing additional user information: #storing-additional-information-about-users
 
