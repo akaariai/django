@@ -1254,6 +1254,46 @@ to test the effects of commit and rollback:
     Using ``reset_sequences = True`` will slow down the test, since the primary
     key reset is an relatively expensive database operation.
 
+
+.. versionadded:: 1.5
+    State tracking in TransactionTestCase
+
+Normally Django truncates all tables after each test. Truncating tables can be
+expensive, and often there are no changes at all, or changes to just a couple
+of tables.
+
+It is possible to tell Django to track dirty state per table. If this is done,
+Django will automatically detect changes done through the ORM to tables and
+flush only the changed tables. The flush can cascade to further tables through
+foreign keys.
+
+Changes which aren't done through ORM can't be detected by Django. Such
+changes could be caused for example by raw SQL usage or cascading foreign keys
+in the database. It is still possible to use the state tracking, but the
+changes must be told to Django manually. There are two ways to do this:
+  
+- Use self.changed_models.add(SomeModel) in the test case itself.
+- Use django.db.models.signals.model_changed.send(SomeModel) in the location
+  that caused the change, for example in the manager method executing the raw
+  SQL.
+
+The change tracking is disabled by default. It can be enabled by settings
+TransactionTestCase attribute .track_db_state to True::
+
+    class MyTransactionTestCase(TransactionTestCase):
+        track_db_state = True
+
+        def test_animal_pk(self):
+            ...
+
+To ease debugging of leaked state, a new TransactionTestCase attribute
+.detect_leaks has been added. Turn this to True, and Django will try to see if
+tests leak state. The leak detection is based on counting rows in tables, so
+for example updates might leak and not be detected by this code. The test
+runner has a flag "detect_state_leaks" which can be used to turn leak tracking
+on globally.
+
+
 SimpleTestCase
 ^^^^^^^^^^^^^^
 
