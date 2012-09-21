@@ -330,6 +330,7 @@ class XmlSerializerTestCase(SerializersTestBase, TestCase):
         return ret_list
 
 class XmlSerializerTransactionTestCase(SerializersTransactionTestBase, TransactionTestCase):
+    track_db_state = True
     serializer_name = "xml"
     fwd_ref_str = """<?xml version="1.0" encoding="utf-8"?>
 <django-objects version="1.0">
@@ -380,6 +381,7 @@ class JsonSerializerTestCase(SerializersTestBase, TestCase):
         return ret_list
 
 class JsonSerializerTransactionTestCase(SerializersTransactionTestBase, TransactionTestCase):
+    track_db_state = True
     serializer_name = "json"
     fwd_ref_str = """[
     {
@@ -469,6 +471,7 @@ else:
             return ret_list
 
     class YamlSerializerTransactionTestCase(SerializersTransactionTestBase, TransactionTestCase):
+        track_db_state = True
         serializer_name = "yaml"
         fwd_ref_str = """- fields:
     headline: Forward references pose no problem

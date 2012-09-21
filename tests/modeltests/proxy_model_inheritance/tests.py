@@ -20,6 +20,7 @@ class ProxyModelInheritanceTests(TransactionTestCase):
     for the proxied model (as described in #12286).  This test creates two dummy
     apps and calls syncdb, then verifies that the table has been created.
     """
+    track_db_state = True
 
     def setUp(self):
         self.old_sys_path = sys.path[:]

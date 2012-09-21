@@ -441,6 +441,7 @@ class BackendTestCase(TestCase):
 # verify if its type is django.database.db.IntegrityError.
 
 class FkConstraintsTests(TransactionTestCase):
+    track_db_state = True
 
     def setUp(self):
         # Create a Reporter.

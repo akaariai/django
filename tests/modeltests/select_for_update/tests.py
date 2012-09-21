@@ -22,6 +22,7 @@ requires_threading = unittest.skipUnless(threading, 'requires threading')
 
 
 class SelectForUpdateTests(TransactionTestCase):
+    track_db_state = True
 
     def setUp(self):
         transaction.enter_transaction_management(True)

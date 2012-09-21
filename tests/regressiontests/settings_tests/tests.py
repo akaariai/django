@@ -10,6 +10,7 @@ from django.test.utils import override_settings
 
 @override_settings(TEST='override')
 class FullyDecoratedTranTestCase(TransactionTestCase):
+    track_db_state = True
 
     def test_override(self):
         self.assertEqual(settings.TEST, 'override')

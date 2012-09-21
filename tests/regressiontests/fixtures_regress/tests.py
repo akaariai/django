@@ -633,6 +633,7 @@ class NaturalKeyFixtureTests(TestCase):
 
 
 class TestTicket11101(TransactionTestCase):
+    track_db_state = True
 
     def ticket_11101(self):
         management.call_command(

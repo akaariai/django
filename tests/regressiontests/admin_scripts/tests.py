@@ -1384,6 +1384,7 @@ class ArgumentOrder(AdminScriptTestCase):
 
 
 class StartProject(LiveServerTestCase, AdminScriptTestCase):
+    track_db_state = True
 
     def test_wrong_args(self):
         "Make sure passing the wrong kinds of arguments raises a CommandError"

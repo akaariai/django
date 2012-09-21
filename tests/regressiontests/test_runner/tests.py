@@ -267,7 +267,7 @@ class AutoIncrementResetTest(TransactionTestCase):
     and check that both times they get "1" as their PK value. That is, we test
     that AutoField values start from 1 for each transactional test case.
     """
-
+    track_db_state = True
     reset_sequences = True
 
     @skipUnlessDBFeature('supports_sequence_reset')

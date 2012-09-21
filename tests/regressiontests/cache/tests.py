@@ -791,6 +791,7 @@ def custom_key_func(key, key_prefix, version):
 
 class DBCacheTests(BaseCacheTests, TransactionTestCase):
     backend_name = 'django.core.cache.backends.db.DatabaseCache'
+    track_db_state = True
 
     def setUp(self):
         # Spaces are used in the table name to ensure quoting/escaping is working

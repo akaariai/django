@@ -5,6 +5,7 @@ from django.utils.translation import ugettext as _
 
 class AdminSeleniumWebDriverTestCase(LiveServerTestCase):
     webdriver_class = 'selenium.webdriver.firefox.webdriver.WebDriver'
+    track_db_state = True
 
     @classmethod
     def setUpClass(cls):

@@ -15,6 +15,8 @@ class TestTransactionClosing(TransactionTestCase):
     when they should be, and aren't left pending after operations
     have been performed in them. Refs #9964.
     """
+    track_db_state = True
+
     def test_raw_committed_on_success(self):
         """
         Make sure a transaction consisting of raw SQL execution gets
@@ -176,6 +178,8 @@ class TestPostgresAutocommit(TransactionTestCase):
     Tests to make sure psycopg2's autocommit mode is restored after entering
     and leaving transaction management. Refs #16047.
     """
+    track_db_state = True
+
     def setUp(self):
         from psycopg2.extensions import (ISOLATION_LEVEL_AUTOCOMMIT,
                                          ISOLATION_LEVEL_READ_COMMITTED)
@@ -223,6 +227,8 @@ class TestPostgresAutocommit(TransactionTestCase):
 
 
 class TestManyToManyAddTransaction(TransactionTestCase):
+    track_db_state = True
+
     def test_manyrelated_add_commit(self):
         "Test for https://code.djangoproject.com/ticket/16818"
         a = M2mA.objects.create()
@@ -238,6 +244,7 @@ class TestManyToManyAddTransaction(TransactionTestCase):
 
 
 class SavepointTest(TransactionTestCase):
+    track_db_state = True
 
     @skipUnlessDBFeature('uses_savepoints')
     def test_savepoint_commit(self):

@@ -291,6 +291,8 @@ class FixtureLoadingTests(TestCase):
 
 
 class FixtureTransactionTests(TransactionTestCase):
+    track_db_state = True
+
     def _dumpdata_assert(self, args, output, format='json'):
         new_io = six.StringIO()
         management.call_command('dumpdata', *args, **{'format': format, 'stdout': new_io})

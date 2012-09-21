@@ -24,6 +24,8 @@ class SampleTestCase(TestCase):
 
 
 class TestNoInitialDataLoading(TransactionTestCase):
+    track_db_state = True
+
     def test_syncdb(self):
         with transaction.commit_manually():
             Book.objects.all().delete()

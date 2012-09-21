@@ -7,6 +7,8 @@ from .models import Reporter
 
 
 class TransactionTests(TransactionTestCase):
+    track_db_state = True
+
     def create_a_reporter_then_fail(self, first, last):
         a = Reporter(first_name=first, last_name=last)
         a.save()
@@ -162,10 +164,19 @@ class TransactionTests(TransactionTestCase):
 
 
 class TransactionRollbackTests(TransactionTestCase):
+    track_db_state = True
+
     def execute_bad_sql(self):
         cursor = connection.cursor()
         cursor.execute("INSERT INTO transactions_reporter (first_name, last_name) VALUES ('Douglas', 'Adams');")
         transaction.set_dirty()
+        
+    def test_foof(self):
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO transactions_reporter (first_name, last_name, email) VALUES ('Douglas', 'Adams', "
+                       " 'a@f.fi');")
+        self.changed_models.add(Reporter)
+        transaction.commit()
 
     @skipUnlessDBFeature('requires_rollback_on_dirty_transaction')
     def test_bad_sql(self):
@@ -180,6 +191,8 @@ class TransactionRollbackTests(TransactionTestCase):
         transaction.rollback()
 
 class TransactionContextManagerTests(TransactionTestCase):
+    track_db_state = True
+
     def create_reporter_and_fail(self):
         Reporter.objects.create(first_name="Bob", last_name="Holtzman")
         raise Exception

@@ -27,6 +27,7 @@ TEST_SETTINGS = {
 class LiveServerBase(LiveServerTestCase):
     urls = 'regressiontests.servers.urls'
     fixtures = ['testdata.json']
+    track_db_state = True
 
     @classmethod
     def setUpClass(cls):
