@@ -8,7 +8,7 @@ import sys
 
 from django.core import exceptions
 from django.db import connections, router, transaction, IntegrityError
-from django.db.models.constants import LOOKUP_SEP
+from django.db.models.constants import LOOKUP_SEP, RAISE_ERROR
 from django.db.models.fields import AutoField
 from django.db.models.query_utils import (Q, select_related_descend,
     deferred_class_factory, InvalidQuery)
@@ -365,6 +365,7 @@ class QuerySet(object):
         Performs the query and returns a single object matching the given
         keyword arguments.
         """
+        default_if_none = kwargs.pop('__default', RAISE_ERROR)
         clone = self.filter(*args, **kwargs)
         if self.query.can_filter():
             clone = clone.order_by()
@@ -372,6 +373,8 @@ class QuerySet(object):
         if num == 1:
             return clone._result_cache[0]
         if not num:
+            if default_if_none != RAISE_ERROR:
+                return default_if_none
             raise self.model.DoesNotExist(
                 "%s matching query does not exist. "
                 "Lookup parameters were %s" %

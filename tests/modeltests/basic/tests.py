@@ -89,6 +89,9 @@ class ModelTest(TestCase):
             Article.objects.get,
             id__exact=2000,
         )
+        # This can be overridden with .__default
+        self.assertEqual(Article.objects.get(id__exact=2000, __default=None),
+                         None)
         # To avoid dict-ordering related errors check only one lookup
         # in single assert.
         six.assertRaisesRegex(self,
