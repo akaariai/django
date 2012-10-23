@@ -5,13 +5,22 @@ from django.db.utils import (ConnectionHandler, ConnectionRouter,
     load_backend, DEFAULT_DB_ALIAS, DatabaseError, IntegrityError)
 
 __all__ = ('backend', 'connection', 'connections', 'router', 'DatabaseError',
-    'IntegrityError', 'DEFAULT_DB_ALIAS')
+        'IntegrityError', 'DEFAULT_DB_ALIAS', '_disable_connections',
+        '_enable_connections')
 
 
 if DEFAULT_DB_ALIAS not in settings.DATABASES:
     raise ImproperlyConfigured("You must define a '%s' database" % DEFAULT_DB_ALIAS)
 
 connections = ConnectionHandler(settings.DATABASES)
+
+def _disable_connections():
+    for alias in connections:
+        connections[alias]._queries_disabled = True
+
+def _enable_connections():
+    for alias in connections:
+        connections[alias]._queries_disabled = False
 
 router = ConnectionRouter(settings.DATABASE_ROUTERS)
 

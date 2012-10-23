@@ -40,6 +40,7 @@ class BaseDatabaseWrapper(object):
         self._dirty = None
         self._thread_ident = thread.get_ident()
         self.allow_thread_sharing = allow_thread_sharing
+        self._queries_disabled = False
 
     def __eq__(self, other):
         return self.alias == other.alias
@@ -307,7 +308,12 @@ class BaseDatabaseWrapper(object):
             self.connection.close()
             self.connection = None
 
+    def _disable_queries(self):
+        self._queries_disabled = True
+
     def cursor(self):
+        if self._queries_disabled:
+            raise RuntimeError("Queries disabled. Avoid import time queries...")
         self.validate_thread_sharing()
         if (self.use_debug_cursor or
             (self.use_debug_cursor is None and settings.DEBUG)):

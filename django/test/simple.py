@@ -233,6 +233,9 @@ def dependency_ordered(test_databases, dependencies):
         test_databases = deferred
     return ordered_test_databases
 
+def disable_global_connections():
+    from django.db import _disable_connections
+    _disable_connections()
 
 class DjangoTestSuiteRunner(object):
     def __init__(self, verbosity=1, interactive=True, failfast=True, **kwargs):
@@ -241,6 +244,10 @@ class DjangoTestSuiteRunner(object):
         self.failfast = failfast
 
     def setup_test_environment(self, **kwargs):
+        # Make a local copy of the global connections, remove them from
+        # use to make sure import time behavior doesn't access production
+        # db.
+        disable_global_connections()
         setup_test_environment()
         settings.DEBUG = False
         unittest.installHandler()
@@ -266,13 +273,14 @@ class DjangoTestSuiteRunner(object):
         return reorder_suite(suite, (unittest.TestCase,))
 
     def setup_databases(self, **kwargs):
-        from django.db import connections, DEFAULT_DB_ALIAS
+        from django.db import DEFAULT_DB_ALIAS, connections
 
         # First pass -- work out which databases actually need to be created,
         # and which ones are test mirrors or duplicate entries in DATABASES
         mirrored_aliases = {}
         test_databases = {}
         dependencies = {}
+
         for alias in connections:
             connection = connections[alias]
             if connection.settings_dict['TEST_MIRROR']:
@@ -302,6 +310,13 @@ class DjangoTestSuiteRunner(object):
         old_names = []
         mirrors = []
 
+        # Enable connections. We might still run queries against the production
+        # db (the database NAME isn't changed yet). There is minimal risk
+        # import time queries at this stage, so enabling connections should be
+        # safe enough.
+        from django.db import _enable_connections, connections
+        _enable_connections()
+
         for signature, (db_name, aliases) in dependency_ordered(
             test_databases.items(), dependencies):
             test_db_name = None
@@ -320,7 +335,6 @@ class DjangoTestSuiteRunner(object):
             mirrors.append((alias, connections[alias].settings_dict['NAME']))
             connections[alias].settings_dict['NAME'] = (
                 connections[mirror_alias].settings_dict['NAME'])
-
         return old_names, mirrors
 
     def run_suite(self, suite, **kwargs):
