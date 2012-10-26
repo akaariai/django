@@ -1,0 +1,29 @@
+# This file contains full set of requirements to run all Django's tests.
+# Some requirements have been commented out due to them needing compiling
+# and/or no Python 3 support.
+#
+# Note that in some cases installing a package will activate an alternate
+# set of tests. These packages are: pytz, enter more here.
+
+pytz
+selenium
+docutils
+
+# PyYAML will complain about not finding libyaml but will still work
+PyYAML
+# No py3 support
+# markdown
+# No py3 support
+# textile
+# Requires compiling
+# py-bcrypt
+# Requires compiling, no py3 support
+# PIL
+
+# Database adapters - all require compiling
+# PostgreSQL
+# psycopg2
+# Oracle
+# oracle_cx
+# MySQL - no py3 support
+# mysqldb
