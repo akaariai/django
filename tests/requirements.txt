@@ -8,9 +8,9 @@
 pytz
 selenium
 docutils
-
 # PyYAML will complain about not finding libyaml but will still work
 PyYAML
+
 # No py3 support
 # markdown
 # No py3 support
@@ -24,6 +24,6 @@ PyYAML
 # PostgreSQL
 # psycopg2
 # Oracle
-# oracle_cx
+# cx_oracle
 # MySQL - no py3 support
-# mysqldb
+# mysql-python
