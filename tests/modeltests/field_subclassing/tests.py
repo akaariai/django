@@ -4,7 +4,7 @@ from django.core import serializers
 from django.test import TestCase
 
 from .fields import Small
-from .models import DataModel, MyModel, OtherModel
+from .models import DataModel, MyModel, OtherModel, DivModel
 
 
 class CustomField(TestCase):
@@ -85,3 +85,25 @@ class CustomField(TestCase):
         o = OtherModel.objects.get()
         self.assertEqual(o.data.first, "a")
         self.assertEqual(o.data.second, "b")
+
+class CustomLookupTests(TestCase):
+    def test_div3_lookup(self):
+        d0 = DivModel.objects.create(divfield=0)
+        d1 = DivModel.objects.create(divfield=1)
+        d2 = DivModel.objects.create(divfield=2)
+        d3 = DivModel.objects.create(divfield=3)
+        qs = DivModel.objects.filter(divfield__div__3=0)
+        self.assertIn(d0, qs)
+        self.assertNotIn(d1, qs)
+        self.assertNotIn(d2, qs)
+        self.assertIn(d3, qs)
+        qs = DivModel.objects.filter(divfield__div__2=1)
+        self.assertNotIn(d0, qs)
+        self.assertIn(d1, qs)
+        self.assertNotIn(d2, qs)
+        self.assertIn(d3, qs)
+        qs = DivModel.objects.filter(divfield__div__2=0)
+        self.assertIn(d0, qs)
+        self.assertNotIn(d1, qs)
+        self.assertIn(d2, qs)
+        self.assertNotIn(d3, qs)

@@ -6,11 +6,11 @@ from django.core.exceptions import FieldError
 from django.db import connections
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import DateField, FieldDoesNotExist
+from django.db.models.lookups import lookups
 from django.db.models.sql.constants import *
-from django.db.models.sql.datastructures import Date
+from django.db.models.sql.datastructures import Date, Constraint
 from django.db.models.sql.query import Query
-from django.db.models.sql.where import AND, Constraint
-from django.utils.datastructures import SortedDict
+from django.db.models.sql.where import AND
 from django.utils.functional import Promise
 from django.utils.encoding import force_text
 from django.utils import six
@@ -43,7 +43,7 @@ class DeleteQuery(Query):
             field = self.model._meta.pk
         for offset in range(0, len(pk_list), GET_ITERATOR_CHUNK_SIZE):
             where = self.where_class()
-            where.add((Constraint(None, field.column, field), 'in',
+            where.add((Constraint(None, field.column, field), lookups.BackwardsCompatLookup('in'),
                     pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]), AND)
             self.do_query(self.model._meta.db_table, where, using=using)
 
@@ -79,7 +79,7 @@ class DeleteQuery(Query):
                 innerq.select = [SelectInfo((self.get_initial_alias(), pk.column), None)]
                 values = innerq
             where = self.where_class()
-            where.add((Constraint(None, pk.column, pk), 'in', values), AND)
+            where.add((Constraint(None, pk.column, pk), lookups.BackwardsCompatLookup('in'), values), AND)
             self.where = where
         self.get_compiler(using).execute_sql(None)
 
@@ -115,7 +115,8 @@ class UpdateQuery(Query):
         self.add_update_values(values)
         for offset in range(0, len(pk_list), GET_ITERATOR_CHUNK_SIZE):
             self.where = self.where_class()
-            self.where.add((Constraint(None, pk_field.column, pk_field), 'in',
+            self.where.add((Constraint(None, pk_field.column, pk_field),
+                            lookups.BackwardsCompatLookup('in'),
                     pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]),
                     AND)
             self.get_compiler(using).execute_sql(None)

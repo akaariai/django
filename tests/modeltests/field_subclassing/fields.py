@@ -72,3 +72,34 @@ class JSONField(six.with_metaclass(models.SubfieldBase, models.TextField)):
         if value is None:
             return None
         return json.dumps(value)
+
+class DivLookup(models.lookups.Lookup):
+    lookup_name = 'div'
+
+    def __init__(self, modulo):
+        self.modulo = modulo
+
+    def as_sql(self, field_sql, value_annotation, extra, params, connection, cast_sql):
+        params = [self.modulo] + params
+        if connection.vendor == 'postgresql':
+            sql = 'mod(%s, %%s) = %%s'
+        else:
+            sql = '%s %% %%s = %%s'
+        return sql % field_sql, params
+
+    def get_prep_lookup(self, field, value):
+        return field.get_prep_lookup('exact', value)
+
+    def get_db_prep_lookup(self, field, value, connection, prepared=False):
+        params = field.get_db_prep_lookup('exact', value,
+                                          connection, prepared)
+        db_type = field.db_type(connection=connection)
+        return params, db_type
+
+class CustomIntegerField(models.IntegerField):
+    def get_lookup(self, names, value):
+        if len(names) <= 2 and names[0] == 'div':
+            if len(names) == 2:
+                return DivLookup(int(names[1]))
+            else:
+                return DivLookup(2)

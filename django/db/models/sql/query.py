@@ -17,12 +17,13 @@ from django.db import connections, DEFAULT_DB_ALIAS
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.expressions import ExpressionNode
 from django.db.models.fields import FieldDoesNotExist
+from django.db.models.lookups import lookups
 from django.db.models.sql import aggregates as base_aggregates_module
 from django.db.models.sql.constants import (QUERY_TERMS, ORDER_DIR, SINGLE,
         ORDER_PATTERN, REUSE_ALL, JoinInfo, SelectInfo, JoinPath)
-from django.db.models.sql.datastructures import EmptyResultSet, Empty
+from django.db.models.sql.datastructures import EmptyResultSet, Empty, Constraint
 from django.db.models.sql.expressions import SQLEvaluator
-from django.db.models.sql.where import (WhereNode, Constraint, EverythingNode,
+from django.db.models.sql.where import (WhereNode, EverythingNode,
     ExtraWhere, AND, OR)
 from django.core.exceptions import FieldError
 
@@ -1037,9 +1038,9 @@ class Query(object):
         if value is None:
             # Interpret '__exact=None' as the sql 'is NULL'; otherwise, reject all
             # uses of None as a query value.
-            if lookup != 'exact':
+            if lookup.lookup_name != 'exact':
                 raise ValueError("Cannot use None as a query value")
-            lookup = 'isnull'
+            lookup = lookups.BackwardsCompatLookup('isnull')
             # We want to make Exact handle the value later on.
             return lookup, True
         elif callable(value):
@@ -1071,6 +1072,8 @@ class Query(object):
                     continue
                 if lookup not in self.query_terms:
                     continue
+                else:
+                    lookup = lookups.BackwardsCompatLookup(lookup)
                 entry = self.where_class()
                 lookup, value = self.resolve_value(lookup, value)
                 entry.add((aggregate, lookup, value), AND)
@@ -1100,7 +1103,8 @@ class Query(object):
 
     # Plan:
     #    1. [DONE] Move names_to_path call in the beginning of add_filter (but after lookup resolution)
-    #    2. Move aggregate and names_to_path resolution before lookup resolution.
+    #    2. [DONE] Move aggregate and names_to_path resolution before lookup resolution.
+    #       [NOTE: The lookup resolution should be moved to names_to_path()]
     #    3. Resolve the lookups from fields
     #    4. Introduce Lookup object
     #    5. Introduce backend.lookups (that is, move the implementation of the lookup
@@ -1136,24 +1140,29 @@ class Query(object):
         split_multijoin = negate
         path, field, target, multijoin_pos, parts_found = self.names_to_path(
             parts, opts, allow_explicit_fk=True, multijoin_break=split_multijoin)
+
         if split_multijoin and multijoin_pos is not None:
             self.split_exclude(filter_expr, LOOKUP_SEP.join(parts[:multijoin_pos+1]),
                     can_reuse)
             return
+
         if parts_found == len(parts):
-            lookup = 'exact'
-        elif parts_found == len(parts) - 1:
-            lookup = parts[-1]
-            if lookup not in self.query_terms:
-                self.fail_lookup(parts, parts_found, path, field)
+            lookup = target.get_lookup(['exact'], value)
+            if lookup is None:
+                lookup = 'exact'
         else:
+            lookup = target.get_lookup(parts[parts_found:], value)
+        if lookup is None and len(parts[parts_found:]) == 1:
+            lookup = parts[-1] if parts[-1] in self.query_terms else None
+        if lookup is None:
             self.fail_lookup(parts, parts_found, path, field)
+        if isinstance(lookup, six.string_types):
+            lookup = lookups.BackwardsCompatLookup(lookup)
 
         lookup, value = self.resolve_value(lookup, value)
         # By default, this is a WHERE clause. If an aggregate is referenced
         # in the value, the filter will be promoted to a HAVING
         having_clause = getattr(value, 'contains_aggregate', False)
-
 
         _, join_list, path = self._setup_joins(
              path, opts, self.get_initial_alias(), can_reuse)
@@ -1163,7 +1172,7 @@ class Query(object):
         table_promote = False
         join_promote = False
 
-        if (lookup == 'isnull' and value is True and not negate and
+        if (lookup.lookup_name == 'isnull' and value is True and not negate and
                 len(join_list) > 1):
             # If the comparison is against NULL, we may need to use some left
             # outer joins when creating the join chain. This is only done when
@@ -1175,7 +1184,7 @@ class Query(object):
         # the far end (fewer tables in a query is better). Note that we must
         # first do the promotion for isnull, as we must promote even the
         # trimmed joins in this case.
-        nonnull_comparison = lookup == 'isnull'
+        nonnull_comparison = lookup.lookup_name == 'isnull'
         col, alias, join_list = self.trim_joins(target, join_list, path,
                                                 trim_reverse=not nonnull_comparison)
 
@@ -1223,7 +1232,7 @@ class Query(object):
 
         if negate:
             self.promote_joins(join_list)
-            if lookup != 'isnull':
+            if lookup.lookup_name != 'isnull':
                 if len(join_list) > 1:
                     for alias in join_list:
                         if self.alias_map[alias].join_type == self.LOUTER:
@@ -1233,7 +1242,7 @@ class Query(object):
                             assert j_col is not None
                             entry = self.where_class()
                             entry.add(
-                                (Constraint(alias, j_col, None), 'isnull', True),
+                                (Constraint(alias, j_col, None), lookups.BackwardsCompatLookup('isnull'), True),
                                 AND
                             )
                             entry.negate()
@@ -1248,7 +1257,7 @@ class Query(object):
                     # be included in the final resultset. We are essentially creating
                     # SQL like this here: NOT (col IS NOT NULL), where the first NOT
                     # is added in upper layers of the code.
-                    self.where.add((Constraint(alias, col, None), 'isnull', False), AND)
+                    self.where.add((Constraint(alias, col, None), lookups.BackwardsCompatLookup('isnull'), False), AND)
 
 
     def add_q(self, q_object, used_aliases=None, force_having=False):
@@ -1549,7 +1558,7 @@ class Query(object):
         # database from tripping over IN (...,NULL,...) selects and returning
         # nothing
         alias, col = query.select[0].col
-        query.where.add((Constraint(alias, col, None), 'isnull', False), AND)
+        query.where.add((Constraint(alias, col, None), lookups.BackwardsCompatLookup('isnull'), False), AND)
         # We need to trim the last part from the prefix.
         trimmed_prefix = '__'.join(prefix.split(LOOKUP_SEP)[0:-1])
         if not trimmed_prefix:

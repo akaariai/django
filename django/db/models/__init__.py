@@ -14,6 +14,7 @@ from django.db.models.fields.related import ForeignKey, OneToOneField, ManyToMan
 from django.db.models.deletion import CASCADE, PROTECT, SET, SET_NULL, SET_DEFAULT, DO_NOTHING, ProtectedError
 from django.db.models import signals
 from django.utils.decorators import wraps
+from django.db.models.lookups import lookups
 
 
 def permalink(func):

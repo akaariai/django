@@ -375,6 +375,20 @@ class Field(object):
             else:
                 return connection.ops.year_lookup_bounds(value)
 
+    def get_lookup(self, names, value):
+        """
+        Custom lookup hook. Given in a list of names (for example
+        ['date', 'lte']) and the value. Return an (immutable!) lookup
+        object to be used in the query.
+        
+        Allowed return values are:
+            None: This method does not disallow or allow the lookup.
+            A Lookup object: A lookup to be used in query
+        In addition this method can raise a FieldError if this field
+        specifically disallows one of the default lookups.
+        """
+        return None
+
     def has_default(self):
         """
         Returns a boolean of whether this field has a default value.
