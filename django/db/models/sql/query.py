@@ -1033,6 +1033,13 @@ class Query(object):
         # Add the aggregate to the query
         aggregate.add_to_query(self, alias, col=col, source=source, is_summary=is_summary)
 
+    # Plan:
+    #    1. move names_to_path call in the beginning of add_filter (but after lookup resolution)
+    #    2. do lookup resolution in names_to_path
+    #    3. resolve the lookups from fields
+    #    4. Introduce Lookup object
+    #    5. Introduce backend.lookups (that is, move the implementation of the lookup
+    #       in there)
     def add_filter(self, filter_expr, connector=AND, negate=False,
             can_reuse=None, force_having=False):
         """
@@ -1112,18 +1119,19 @@ class Query(object):
 
         opts = self.get_meta()
         alias = self.get_initial_alias()
-        allow_many = not negate
+        split_multijoin = negate
+        path, field, target, multijoin_pos = self.names_to_path(
+            parts, opts, allow_explicit_fk=True, multijoin_break=split_multijoin)
 
-        try:
-            field, target, opts, join_list, path = self.setup_joins(
-                    parts, opts, alias, can_reuse, allow_many,
-                    allow_explicit_fk=True)
-            if can_reuse is not None:
-                can_reuse.update(join_list)
-        except MultiJoin as e:
-            self.split_exclude(filter_expr, LOOKUP_SEP.join(parts[:e.level]),
+        if split_multijoin and multijoin_pos is not None:
+            self.split_exclude(filter_expr, LOOKUP_SEP.join(parts[:multijoin_pos+1]),
                     can_reuse)
             return
+        else:
+            _, join_list, path = self._setup_joins(
+                path, opts, alias, can_reuse)
+        if can_reuse is not None:
+            can_reuse.update(join_list)
 
         table_promote = False
         join_promote = False
@@ -1267,8 +1275,7 @@ class Query(object):
         if self.filter_is_sticky:
             self.used_aliases = used_aliases
 
-    def names_to_path(self, names, opts, allow_many=False,
-                      allow_explicit_fk=True):
+    def names_to_path(self, names, opts, allow_explicit_fk=True, multijoin_break=False):
         """
         Walks the names path and turns them into joins.
 
@@ -1283,7 +1290,6 @@ class Query(object):
         (the last used join field), and target (which is a field guaranteed to
         contain the same value as the final field).
         """
-        cache_key = (tuple(names), opts, allow_explicit_fk)
         path = []
         multijoin_pos = None
         for pos, name in enumerate(names):
@@ -1400,27 +1406,25 @@ class Query(object):
                 multijoin_pos = pos
             if not direct and not path[-1].to_field.unique and multijoin_pos is None:
                 multijoin_pos = pos
+            if multijoin_pos and multijoin_break:
+                break
 
-        if pos != len(names) - 1:
+        if pos != len(names) - 1 and not (multijoin_pos and multijoin_break):
             if pos == len(names) - 2:
                 raise FieldError(
                     "Join on field %r not permitted. Did you misspell %r for "
                     "the lookup type?" % (name, names[pos + 1]))
             else:
                 raise FieldError("Join on field %r not permitted." % name)
+        if multijoin_pos:
+            multijoin_pos = None if len(path) < multijoin_pos else multijoin_pos
         # We are a bit aggressive about raising the multijoin. If we can trim
         # joins from the end of the path, it is possible we can trim the multijoin
-        # away, and avoid the need for a subquery. This isn't doable currently as
-        # in nonnull check cases we trim differently than in other situations,
-        # and the nonnull info is not available here. If names_to_path call was
-        # moved to add_filter, then we should be able to better trim joins in
-        # the multijoin case, too.
-        if multijoin_pos is not None and len(path) >= multijoin_pos and not allow_many:
-            raise MultiJoin(multijoin_pos + 1)
-        return path, final_field, target
-
-    def setup_joins(self, names, opts, alias, can_reuse, allow_many=True,
-            allow_explicit_fk=False):
+        # away, and avoid the need for a subquery.
+        return path, final_field, target, multijoin_pos
+    
+    def setup_joins(self, names, opts, alias, can_reuse, allow_m2m=True,
+                    allow_explicit_fk=False):
         """
         Compute the necessary table joins for the passage through the fields
         given in 'names'. 'opts' is the Options class for the current model
@@ -1441,9 +1445,18 @@ class Query(object):
         final_field=fk. Now if given RelatedModel instance instead of 1 as value
         pk can't use it, but fk field can transfer it to value for pk to use).
         """
+        path, final_field, target, multijoin_pos = self.names_to_path(names, opts, allow_explicit_fk)
+        if multijoin_pos and not allow_m2m:
+            raise FieldError("Invalid field name: '%s'" % names[multijoin_pos])
+        opts, joins, path = self._setup_joins(path, opts, alias, can_reuse)
+        return final_field, target, opts, joins, path
+
+    def _setup_joins(self, path, opts, alias, can_reuse):
+        """
+        An internal version of setup_joins. Takes in PathInfos instead of names
+        and returns just the generated join aliases and options.
+        """
         joins = [alias]
-        path, final_field, target = self.names_to_path(
-            names, opts, allow_many, allow_explicit_fk)
         for pos, join in enumerate(path):
             from_field, to_field, from_opts, opts, direction, extra = join
             if direction == 'FORWARD':
@@ -1454,7 +1467,7 @@ class Query(object):
                                to_field.column), reuse=can_reuse, nullable=nullable,
                               extra=extra)
             joins.append(alias)
-        return final_field, target, opts, joins, path
+        return opts, joins, path
 
     def trim_joins(self, target, joins, path, trim_reverse=True):
         """
@@ -1620,8 +1633,6 @@ class Query(object):
                         joins = joins[:-1]
                 self.promote_joins(joins[1:])
                 self.select.append(SelectInfo((final_alias, col), field))
-        except MultiJoin:
-            raise FieldError("Invalid field name: '%s'" % name)
         except FieldError:
             if LOOKUP_SEP in name:
                 # For lookups spanning over relationships, show the error
