@@ -3,6 +3,7 @@ from __future__ import absolute_import
 import datetime
 from decimal import Decimal
 
+from django.core.exceptions import FieldError
 from django.db.models import Avg, Sum, Count, Max, Min
 from django.test import TestCase, Approximate
 
@@ -435,11 +436,15 @@ class BaseAggregateTestCase(TestCase):
         publishers = Publisher.objects.annotate(num_books=Count("book")).filter(num_books__isnull=True)
         self.assertEqual(len(publishers), 0)
 
+    def test_annotation_ge_fails(self):
+        with self.assertRaises(FieldError):
+            Book.objects.annotate(num_authors=Count("authors__name")).filter(num_authors__ge=2).order_by("pk")
+
     def test_annotation(self):
         vals = Author.objects.filter(pk=1).aggregate(Count("friends__id"))
         self.assertEqual(vals, {"friends__id__count": 2})
 
-        books = Book.objects.annotate(num_authors=Count("authors__name")).filter(num_authors__ge=2).order_by("pk")
+        books = Book.objects.annotate(num_authors=Count("authors__name")).filter(num_authors__exact=2).order_by("pk")
         self.assertQuerysetEqual(
             books, [
                 "The Definitive Guide to Django: Web Development Done Right",

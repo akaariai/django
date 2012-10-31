@@ -6,15 +6,6 @@ the SQL domain.
 class EmptyResultSet(Exception):
     pass
 
-class MultiJoin(Exception):
-    """
-    Used by join construction code to indicate the point at which a
-    multi-valued join was attempted (if the caller wants to treat that
-    exceptionally).
-    """
-    def __init__(self, level):
-        self.level = level
-
 class Empty(object):
     pass
 
