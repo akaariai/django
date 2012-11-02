@@ -1,129 +1,161 @@
 from datetime import datetime
-from itertools import repeat
 
-from django.db.models.sql.datastructures import Constraint
-from django.db.models.sql.where import EmptyShortCircuit, EmptyResultSet
-from django.db.models.sql.aggregates import Aggregate
-from django.utils.six.moves import xrange
+from django.db.models.lookups.backwards_compat import BackwardsCompatLookup
+from django.db.models.query_utils import QueryWrapper
 
+# We have two different paths to solve a lookup. BackwardsCompatLookup tries
+# to guarantee that Fields with overridden get[_db]_prep_lookup defined will
+# still work. The new code has very different implementation. The rest of this
+# docs is about the new Lookup code path.
+#
+# We are using "lhs" and "rhs" terms here. "lhs" means the the "column" we are
+# comparing against (though it could as well be a computer value, like
+# aggregate), "rhs" means the given value, a string or integer for example.
+#
+# When processing a Lookup to SQL, three things need to happen:
+#  1. We need to turn the LHS into SQL. The LHS is either an Aggregate or a
+#     Constraint object.
+#  2. We need to turn the RHS into properly typed parameters. The RHS can be
+#     a raw value, a query a list of values or depending on the field type
+#     something else. This value needs to be normalized in to a type the db
+#     adapter is expecting.
+#  3. Finally, we need to turn these pieces into SQL constraint. Here we could
+#     need to turn the SQL into a direct comparison:
+#         ('T1."somecol" = %s', [someparam])
+#     or maybe to a procedure call:
+#         is_subunit('T1."org_id"', %s), [parent_id])
+#     No. 3 is implemented by as_sql()
+#
+# The default implementation passes the RHS normalization to the underlying
+# field. This is so that fields don't need all the different lookups just to
+# implement different normalization rules.
+#
+# When turning the Lookup into SQL the API is simple from the caller
+# perspective: We have make_atom, which will return SQL + params. The
+# implementation of make_atom is totally different for BackwardsCompatLookup
+# and new Lookup objects.
+#
+# For implementing custom lookups the idea is that one needs to just implement
+# as_sql() and register the lookup.
+#
+# Note that a lookup is against single field only - there is currently no
+# support for fetching multiple fields for single lookup. This is something
+# virtual fields will likely achieve. Of course, if all the fields are in a
+# single table a clever hacker will find a way to do multifield comparisons...
 
 class Lookup(object):
-    """
-    Lookup is to be used in queries. Don't know how, don't know
-    when...
-    """
+    # A name used mostly for internal purposes. This can also be used by custom
+    # fields to detect the lookup type.
     lookup_name = None
+    # What type of rhs value do we expect? Choices are RAW (do not do anything
+    # to the value), LIST (loop through the value and prepare each one
+    # separately) and PREPARE (the value must be prepared using the field).
+    RAW = object()
+    LIST_FIELD_PREPARE = object()
+    FIELD_PREPARE = object()
+    rhs_prepare = RAW
 
-    def make_atom(self, lvalue, value_annotation, params_or_value, qn, connection):
-        if isinstance(lvalue, Constraint):
-            try:
-                lvalue, params = lvalue.process(self, params_or_value, connection)
-            except EmptyShortCircuit:
-                raise EmptyResultSet
-        elif isinstance(lvalue, Aggregate):
-            params = lvalue.field.get_db_prep_lookup(self.lookup_name, params_or_value, connection)
-        else:
-            raise TypeError("'make_atom' expects a Constraint or an Aggregate "
-                            "as the first item of its 'child' argument.")
+    def get_prep_lookup(self, field, value):
+        return value
 
-        if isinstance(lvalue, tuple):
-            # A direct database column lookup.
-            field_sql = self.sql_for_columns(lvalue, qn, connection)
-        else:
-            # A smart object with an as_sql() method.
-            field_sql = lvalue.as_sql(qn, connection)
+    def make_atom(self, lvalue, value_annotation, params_or_value, qn,
+                  connection):
+        """
+        Returns (sql, params) for this Lookup.
 
-        if value_annotation is datetime:
-            cast_sql = connection.ops.datetime_cast_sql()
-        else:
-            cast_sql = '%s'
+        The 'lvalue' is either a Constraint of Aggregate. In any case, target
+        field must be available from lvalue.field.
 
+        The 'params_or_value' is something we are comparing against - for
+        example a raw value, list of values, a queryset, ...
+
+        The 'value_annotation' is a known unknown...
+
+        The 'qn' and connection are quote_name_unless_alias and the used
+        connection respectively.
+        """
+        rhs_clause, db_type = self.prepare_rhs(lvalue, qn, connection)
+        params = self.common_normalize(params_or_value, lvalue.field, qn,
+                                       connection)
+        params = self.normalize_value(params, lvalue.field, qn, connection)
+        cast_sql = self.cast_sql(value_annotation, connection)
         if hasattr(params, 'as_sql'):
             extra, params = params.as_sql(qn, connection)
             cast_sql = ''
         else:
             extra = ''
+        return self.as_sql(rhs_clause, params, cast_sql, extra, lvalue.field, qn, connection)
 
-        if (len(params) == 1 and params[0] == '' and self.lookup_name == 'exact'
-            and connection.features.interprets_empty_strings_as_nulls):
-            self.lookup_name = 'isnull'
-            value_annotation = True
-
-        if self.lookup_name in connection.operators:
-            format = "%s %%s %%s" % (connection.ops.lookup_cast(self.lookup_name),)
-            return (format % (field_sql,
-                              connection.operators[self.lookup_name] % cast_sql,
-                              extra), params)
-
-        return self.as_sql(field_sql, value_annotation, extra, params, connection, cast_sql)
-
-    def as_sql(self, field_sql, value_annotation, extra, params, connection, cast_sql):
-        if self.lookup_name == 'in':
-            if not value_annotation:
-                raise EmptyResultSet
-            if extra:
-                return ('%s IN %s' % (field_sql, extra), params)
-            max_in_list_size = connection.ops.max_in_list_size()
-            if max_in_list_size and len(params) > max_in_list_size:
-                # Break up the params list into an OR of manageable chunks.
-                in_clause_elements = ['(']
-                for offset in xrange(0, len(params), max_in_list_size):
-                    if offset > 0:
-                        in_clause_elements.append(' OR ')
-                    in_clause_elements.append('%s IN (' % field_sql)
-                    group_size = min(len(params) - offset, max_in_list_size)
-                    param_group = ', '.join(repeat('%s', group_size))
-                    in_clause_elements.append(param_group)
-                    in_clause_elements.append(')')
-                in_clause_elements.append(')')
-                return ''.join(in_clause_elements), params
-            else:
-                return ('%s IN (%s)' % (field_sql,
-                                        ', '.join(repeat('%s', len(params)))),
-                        params)
-        elif self.lookup_name in ('range', 'year'):
-            return ('%s BETWEEN %%s and %%s' % field_sql, params)
-        elif self.lookup_name in ('month', 'day', 'week_day'):
-            return ('%s = %%s' % connection.ops.date_extract_sql(self.lookup_name, field_sql),
-                    params)
-        elif self.lookup_name == 'isnull':
-            return ('%s IS %sNULL' % (field_sql,
-                (not value_annotation and 'NOT ' or '')), ())
-        elif self.lookup_name == 'search':
-            return (connection.ops.fulltext_search_sql(field_sql), params)
-        elif self.lookup_name in ('regex', 'iregex'):
-            return connection.ops.regex_lookup(self.lookup_name) % (field_sql, cast_sql), params
-
-        raise TypeError('Invalid lookup_type: %r' % self.lookup_name)
-    
-    def sql_for_columns(self, data, qn, connection):
+    def prepare_rhs(self, lvalue, qn, connection):
         """
         Returns the SQL fragment used for the left-hand side of a column
         constraint (for example, the "T1.foo" portion in the clause
-        "WHERE ... T1.foo = 6").
+        "WHERE ... T1.foo = 6"). The lvalue can also be something that
+        knows how to turn itself into SQL by an as_sql() method.
         """
-        table_alias, name, db_type = data
+        field = lvalue.field
+        db_type = field.db_type if field else None
+        if hasattr(lvalue, 'as_sql'):
+            return lvalue.as_sql(qn, connection), db_type
+        table_alias, name = lvalue.alias, lvalue.col
         if table_alias:
             lhs = '%s.%s' % (qn(table_alias), qn(name))
         else:
             lhs = qn(name)
-        return connection.ops.field_cast_sql(db_type) % lhs
+        return connection.ops.field_cast_sql(db_type) % lhs, db_type
 
-    def get_prep_lookup(self, field, value):
-        return field.get_prep_lookup(self.lookup_name, value)
+    def common_normalize(self, value, field, qn, connection):
+        if hasattr(value, 'prepare'):
+            value = value.prepare()
+        if hasattr(value, '_prepare'):
+            # Do we really need _two_ prepares...
+            value = value._prepare()
+        if self.rhs_prepare == self.FIELD_PREPARE:
+            value = field.get_prep_value(value)
+        if self.rhs_prepare == self.LIST_FIELD_PREPARE:
+            value = [field.get_prep_value(v) for v in value]
+        if hasattr(value, 'get_compiler'):
+            value = value.get_compiler(connection=connection)
+        if hasattr(value, 'as_sql') or hasattr(value, '_as_sql'):
+            # If the value has a relabel_aliases method, it will need to
+            # be invoked before the final SQL is evaluated
+            if hasattr(value, 'relabel_aliases'):
+                return value
+            if hasattr(value, 'as_sql'):
+                sql, params = value.as_sql()
+            else:
+                sql, params = value._as_sql(connection=connection)
+            return QueryWrapper(('(%s)' % sql), params)
+        if self.rhs_prepare == self.RAW:
+            value = [value]
+        elif self.rhs_prepare == self.FIELD_PREPARE:
+            value = [field.get_db_prep_value(value, connection, False)]
+        elif self.rhs_prepare == self.LIST_FIELD_PREPARE:
+            value = [field.get_db_prep_value(v, connection, False) for v in value]
+        return value
 
-    def get_db_prep_lookup(self, field, value, connection, prepared=False):
+    def cast_sql(self, value_annotation, connection):
+        if value_annotation is datetime:
+            return connection.ops.datetime_cast_sql()
+        return '%s'
+    
+    def normalize_value(self, value, field, qn, connection):
         """
-        Returns a tuple of data suitable for inclusion in a WhereNode
-        instance.
+        A subclass hook for easier value normalization per lookup.
         """
-        # Because of circular imports, we need to import this here.
-        params = field.get_db_prep_lookup(self.lookup_name, value,
-            connection=connection, prepared=prepared)
-        db_type = field.db_type(connection=connection)
-        return params, db_type
+        return value
 
+    def as_sql(self, rhs_clause, params, cast_sql, extra, field, qn, connection):
+        raise NotImplementedError
 
-class BackwardsCompatLookup(Lookup):
-    def __init__(self, lookup_name):
-        self.lookup_name = lookup_name
+class Exact(Lookup):
+    lookup_name = 'exact'
+    rhs_prepare = Lookup.FIELD_PREPARE
+
+    def as_sql(self, rhs_clause, params, cast_sql, extra, field, qn, connection):
+        format = '%s %s %s'
+        if extra:
+            print(extra)
+        return (format % (rhs_clause,
+                          connection.operators['exact'] % cast_sql,
+                          extra), params)

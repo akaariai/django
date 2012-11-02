@@ -387,6 +387,9 @@ class Field(object):
         In addition this method can raise a FieldError if this field
         specifically disallows one of the default lookups.
         """
+        from django.db.models.lookups import lookups
+        if names[0] == 'exact':
+            return lookups.Exact()
         return None
 
     def has_default(self):
