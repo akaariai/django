@@ -1149,7 +1149,9 @@ class Query(object):
         if parts_found == len(parts):
             lookup = field.get_lookup(['exact'], value)
         else:
-            lookup = target.get_lookup(parts[parts_found:], value)
+            lookup = None
+        #else:
+        #    lookup = field.get_lookup(parts[parts_found:], value)
         if lookup is None and len(parts[parts_found:]) == 1:
             lookup = parts[-1] if parts[-1] in self.query_terms else None
         if lookup is None:

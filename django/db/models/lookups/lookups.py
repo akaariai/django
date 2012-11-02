@@ -61,14 +61,9 @@ class Lookup(object):
         """
         return self
 
-    def get_prep_lookup(self, field, value):
-        """
-        Backwards compatibility (at least for now).
-        """
-        return value
 
     def make_atom(self, lvalue, value_annotation, params_or_value, qn,
-                  connection):
+                  connection, field=None):
         """
         Returns (sql, params) for this Lookup.
 
@@ -83,10 +78,11 @@ class Lookup(object):
         The 'qn' and connection are quote_name_unless_alias and the used
         connection respectively.
         """
+        field = field or lvalue.field
         lhs_clause, db_type = self.prepare_lhs(lvalue, qn, connection)
-        params = self.common_normalize(params_or_value, lvalue.field, qn,
+        params = self.common_normalize(params_or_value, field, qn,
                                        connection)
-        params = self.normalize_value(params, lvalue.field, qn, connection)
+        params = self.normalize_value(params, field, qn, connection)
         cast_sql = self.cast_sql(value_annotation, connection)
         if hasattr(params, 'as_sql'):
             extra, params = params.as_sql(qn, connection)
@@ -112,13 +108,28 @@ class Lookup(object):
         else:
             lhs = qn(name)
         return connection.ops.field_cast_sql(db_type) % lhs, db_type
+    
+    def get_prep_lookup(self, field, value):
+        """
+        Does some backend independent type checks and conversions to the
+        value.
+
+        This method is called when the constraint is added to WhereNode. The
+        reason we need to do a first-stage prepare is that we will do some
+        type conversions (for example Model -> pk), and also type safety
+        checks are better done at this stage.
+        """
+        if hasattr(value, 'prepare'):
+            return value.prepare()
+        if hasattr(value, '_prepare'):
+            return value._prepare()
+        if self.rhs_prepare == self.FIELD_PREPARE:
+            value = field.get_prep_value(value)
+        elif self.rhs_prepare == self.LIST_FIELD_PREPARE:
+            value = [field.get_prep_value(v) for v in value]
+        return value
 
     def common_normalize(self, value, field, qn, connection):
-        if hasattr(value, 'prepare'):
-            value = value.prepare()
-        if hasattr(value, '_prepare'):
-            # Do we really need _two_ prepares...
-            value = value._prepare()
         if hasattr(value, 'get_compiler'):
             value = value.get_compiler(connection=connection)
         if hasattr(value, 'as_sql') or hasattr(value, '_as_sql'):
@@ -183,13 +194,13 @@ class RelatedLookup(Lookup):
         return value
 
     def make_atom(self, lvalue, value_annotation, params_or_value, qn,
-                  connection):
+                  connection, field=None):
         if isinstance(self.lookup, BackwardsCompatLookup):
             # Let it do whatever it needs to do...
             return self.lookup.make_atom(lvalue, value_annotation, params_or_value,
                                          qn, connection)
         return self.lookup.make_atom(lvalue, value_annotation, params_or_value, qn,
-                                connection)
+                                connection, field=self.target_field)
 
     def get_target_field(self, field): 
         while field.rel:
