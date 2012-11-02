@@ -1063,17 +1063,14 @@ class Query(object):
             if prefix in self.aggregates:
                 aggregate = self.aggregates[prefix]
                 if idx == len(parts):
-                    lookup = 'exact'
-                elif idx == len(parts) - 1:
-                    lookup = parts[-1]
+                    lookup = aggregate.field.get_lookup(['exact'], aggregate.field)
                 else:
-                    # We will want to change this later on so that
-                    # multipart lookups are allowed for aggregates, too.
-                    continue
-                if lookup not in self.query_terms:
-                    continue
-                else:
-                    lookup = lookups.BackwardsCompatLookup(lookup)
+                    lookup = aggregate.field.get_lookup(parts[idx:], aggregate.field)
+                if lookup is None:
+                    if parts[idx] not in self.query_terms:
+                        continue
+                    else:
+                        lookup = lookups.BackwardsCompatLookup(parts[idx])
                 entry = self.where_class()
                 lookup, value = self.resolve_value(lookup, value)
                 entry.add((aggregate, lookup, value), AND)
@@ -1149,9 +1146,7 @@ class Query(object):
         if parts_found == len(parts):
             lookup = field.get_lookup(['exact'], value)
         else:
-            lookup = None
-        #else:
-        #    lookup = field.get_lookup(parts[parts_found:], value)
+            lookup = field.get_lookup(parts[parts_found:], value)
         if lookup is None and len(parts[parts_found:]) == 1:
             lookup = parts[-1] if parts[-1] in self.query_terms else None
         if lookup is None:

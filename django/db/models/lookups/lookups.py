@@ -124,9 +124,9 @@ class Lookup(object):
         if hasattr(value, '_prepare'):
             return value._prepare()
         if self.rhs_prepare == self.FIELD_PREPARE:
-            value = field.get_prep_value(value)
+            value = field.lookup_prep(self.lookup_name, value)
         elif self.rhs_prepare == self.LIST_FIELD_PREPARE:
-            value = [field.get_prep_value(v) for v in value]
+            value = [field.lookup_prep(self.lookup_name, v) for v in value]
         return value
 
     def common_normalize(self, value, field, qn, connection):
@@ -145,10 +145,8 @@ class Lookup(object):
         if self.rhs_prepare == self.RAW:
             value = [value]
         elif self.rhs_prepare == self.FIELD_PREPARE:
-            value = field.get_prep_value(value)
             value = [field.get_db_prep_value(value, connection, False)]
         elif self.rhs_prepare == self.LIST_FIELD_PREPARE:
-            value = [field.get_prep_value(v) for v in value]
             value = [field.get_db_prep_value(v, connection, False) for v in value]
         return value
 

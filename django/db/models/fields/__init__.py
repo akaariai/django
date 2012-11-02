@@ -302,6 +302,9 @@ class Field(object):
         return self.get_db_prep_value(value, connection=connection,
                                       prepared=False)
 
+    def lookup_prep(self, lookup_type, value):
+        return self.get_prep_value(value)
+
     def get_prep_lookup(self, lookup_type, value):
         """
         Perform preliminary non-db specific lookup checks and conversions
@@ -607,6 +610,16 @@ class BooleanField(Field):
             return False
         msg = self.error_messages['invalid'] % value
         raise exceptions.ValidationError(msg)
+    
+    def lookup_prep(self, lookup_type, value):
+        # Special-case handling for filters coming from a Web request (e.g. the
+        # admin interface). Only works for scalar values (not lists). If you're
+        # passing in a list, you might as well make things the right type when
+        # constructing the list. Maybe we should add '1' and '0' to prep_value
+        # instead, or disallow them altogether...
+        if value in ('1', '0'):
+            value = bool(int(value))
+        return super(BooleanField, self).lookup_prep(lookup_type, value)
 
     def get_prep_lookup(self, lookup_type, value):
         # Special-case handling for filters coming from a Web request (e.g. the
@@ -737,6 +750,11 @@ class DateField(Field):
             setattr(cls, 'get_previous_by_%s' % self.name,
                 curry(cls._get_next_or_previous_by_FIELD, field=self,
                       is_next=False))
+
+    def lookup_prep(self, lookup_type, value):
+        if lookup_type in ('month', 'day', 'week_day'):
+            return int(value)
+        return super(DateField, self).lookup_prep(lookup_type, value)
 
     def get_prep_lookup(self, lookup_type, value):
         # For "__month", "__day", and "__week_day" lookups, convert the value
@@ -1006,10 +1024,16 @@ class IntegerField(Field):
             return None
         return int(value)
 
+    def lookup_prep(self, lookup_type, value):
+        if ((lookup_type == 'gte' or lookup_type == 'lt')
+                and isinstance(value, float)):
+            return math.ceil(value)
+        return super(IntegerField, self).lookup_prep(lookup_type, value)
+
     def get_prep_lookup(self, lookup_type, value):
         if ((lookup_type == 'gte' or lookup_type == 'lt')
-            and isinstance(value, float)):
-            value = math.ceil(value)
+                and isinstance(value, float)):
+            return math.ceil(value)
         return super(IntegerField, self).get_prep_lookup(lookup_type, value)
 
     def get_internal_type(self):
@@ -1129,6 +1153,12 @@ class NullBooleanField(Field):
             return False
         msg = self.error_messages['invalid'] % value
         raise exceptions.ValidationError(msg)
+
+    def lookup_prep(self, lookup_type, value):
+        if value in ('1', '0'):
+            value = bool(int(value))
+        return super(NullBooleanField, self).lookup_prep(lookup_type,
+                                                         value)
 
     def get_prep_lookup(self, lookup_type, value):
         # Special-case handling for filters coming from a Web request (e.g. the
