@@ -83,19 +83,19 @@ class Lookup(object):
         The 'qn' and connection are quote_name_unless_alias and the used
         connection respectively.
         """
-        rhs_clause, db_type = self.prepare_rhs(lvalue, qn, connection)
+        lhs_clause, db_type = self.prepare_lhs(lvalue, qn, connection)
         params = self.common_normalize(params_or_value, lvalue.field, qn,
                                        connection)
         params = self.normalize_value(params, lvalue.field, qn, connection)
         cast_sql = self.cast_sql(value_annotation, connection)
         if hasattr(params, 'as_sql'):
             extra, params = params.as_sql(qn, connection)
-            cast_sql = ''
         else:
             extra = ''
-        return self.as_sql(rhs_clause, params, cast_sql, extra, lvalue.field, qn, connection)
+        rhs_format = self.rhs_format(cast_sql, extra)
+        return self.as_sql(lhs_clause, rhs_format, params, lvalue.field, qn, connection)
 
-    def prepare_rhs(self, lvalue, qn, connection):
+    def prepare_lhs(self, lvalue, qn, connection):
         """
         Returns the SQL fragment used for the left-hand side of a column
         constraint (for example, the "T1.foo" portion in the clause
@@ -119,10 +119,6 @@ class Lookup(object):
         if hasattr(value, '_prepare'):
             # Do we really need _two_ prepares...
             value = value._prepare()
-        if self.rhs_prepare == self.FIELD_PREPARE:
-            value = field.get_prep_value(value)
-        if self.rhs_prepare == self.LIST_FIELD_PREPARE:
-            value = [field.get_prep_value(v) for v in value]
         if hasattr(value, 'get_compiler'):
             value = value.get_compiler(connection=connection)
         if hasattr(value, 'as_sql') or hasattr(value, '_as_sql'):
@@ -138,8 +134,10 @@ class Lookup(object):
         if self.rhs_prepare == self.RAW:
             value = [value]
         elif self.rhs_prepare == self.FIELD_PREPARE:
+            value = field.get_prep_value(value)
             value = [field.get_db_prep_value(value, connection, False)]
         elif self.rhs_prepare == self.LIST_FIELD_PREPARE:
+            value = [field.get_prep_value(v) for v in value]
             value = [field.get_db_prep_value(v, connection, False) for v in value]
         return value
 
@@ -147,6 +145,12 @@ class Lookup(object):
         if value_annotation is datetime:
             return connection.ops.datetime_cast_sql()
         return '%s'
+
+    def rhs_format(self, cast_sql, extra):
+        format = cast_sql
+        if extra:
+            format = cast_sql % extra
+        return format
     
     def normalize_value(self, value, field, qn, connection):
         """
@@ -154,7 +158,7 @@ class Lookup(object):
         """
         return value
 
-    def as_sql(self, rhs_clause, params, cast_sql, extra, field, qn, connection):
+    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
         raise NotImplementedError
 
 class RelatedLookup(Lookup):
@@ -217,10 +221,6 @@ class Exact(Lookup):
     lookup_name = 'exact'
     rhs_prepare = Lookup.FIELD_PREPARE
 
-    def as_sql(self, rhs_clause, params, cast_sql, extra, field, qn, connection):
-        format = '%s %s %s'
-        if extra:
-            print(extra)
-        return (format % (rhs_clause,
-                          connection.operators['exact'] % cast_sql,
-                          extra), params)
+    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+        rhs_clause = connection.operators['exact'] % rhs_format
+        return '%s %s' % (lhs_clause, rhs_clause), params
