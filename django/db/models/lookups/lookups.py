@@ -55,7 +55,16 @@ class Lookup(object):
     FIELD_PREPARE = object()
     rhs_prepare = RAW
 
+    def __deepcopy__(self, memo):
+        """
+        I am immutable!
+        """
+        return self
+
     def get_prep_lookup(self, field, value):
+        """
+        Backwards compatibility (at least for now).
+        """
         return value
 
     def make_atom(self, lvalue, value_annotation, params_or_value, qn,
@@ -147,6 +156,62 @@ class Lookup(object):
 
     def as_sql(self, rhs_clause, params, cast_sql, extra, field, qn, connection):
         raise NotImplementedError
+
+class RelatedLookup(Lookup):
+    def __init__(self, lookup, source_field, target_field):
+        self.lookup = lookup
+        self.lookup_name = lookup.lookup_name
+        self.source_field = source_field
+        self.target_field = target_field
+
+    def get_prep_lookup(self, field, value):
+        """
+        Note: We must convert any "model" value on add from model to something
+        else. __deepcopy__ goes seriously wrong if we don't do this...
+        """
+        if isinstance(self.lookup, BackwardsCompatLookup):
+            # Let it do whatever it needs to do...
+            return self.lookup.get_prep_lookup(field, value)
+        if self.lookup.rhs_prepare == self.LIST_FIELD_PREPARE:
+            value = [self.convert_value(self.souce_field, v) for v in value]
+        else:
+            value = self.convert_value(self.source_field, value)
+        return value
+
+    def make_atom(self, lvalue, value_annotation, params_or_value, qn,
+                  connection):
+        if isinstance(self.lookup, BackwardsCompatLookup):
+            # Let it do whatever it needs to do...
+            return self.lookup.make_atom(lvalue, value_annotation, params_or_value,
+                                         qn, connection)
+        return self.lookup.make_atom(lvalue, value_annotation, params_or_value, qn,
+                                connection)
+
+    def get_target_field(self, field): 
+        while field.rel:
+            if hasattr(field.rel, 'field_name'):
+                field = field.rel.to._meta.get_field(field.rel.field_name)
+            else:
+                field = field.rel.to._meta.pk
+        return field
+
+    def convert_value(self, field, value):
+        # Value may be a primary key, or an object held in a relation.
+        # If it is an object, then we need to get the primary key value for
+        # that object. In certain conditions (especially one-to-one relations),
+        # the primary key may itself be an object - so we need to keep drilling
+        # down until we hit a value that can be used for a comparison.
+
+        # In the case of an FK to 'self', this check allows to_field to be used
+        # for both forwards and reverse lookups across the FK. (For normal FKs,
+        # it's only relevant for forward lookups).
+        if isinstance(value, field.rel.to):
+            value = getattr(value, self.target_field.attname)
+        elif hasattr(value, '_meta'):
+            # One can pass in any model. Is this dangerous?
+            pk_field = getattr(value, '_meta').pk.attname
+            value = getattr(value, pk_field)
+        return value
 
 class Exact(Lookup):
     lookup_name = 'exact'

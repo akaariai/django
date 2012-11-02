@@ -5,6 +5,7 @@ from django.db.backends import util
 from django.db.models import signals, get_model
 from django.db.models.fields import (AutoField, Field, IntegerField,
     PositiveIntegerField, PositiveSmallIntegerField, FieldDoesNotExist)
+from django.db.models.lookups import lookups
 from django.db.models.related import RelatedObject
 from django.db.models.query import QuerySet
 from django.db.models.query_utils import QueryWrapper
@@ -127,6 +128,13 @@ class RelatedField(object):
         self.related = RelatedObject(other, cls, self)
         if not cls._meta.abstract:
             self.contribute_to_related_class(other, self.related)
+
+    def get_lookup(self, names, value):
+        target_field = self.rel.get_related_field()
+        target_lookup = target_field.get_lookup(names, value)
+        if target_lookup is None:
+            target_lookup = lookups.BackwardsCompatLookup(names[0])
+        return lookups.RelatedLookup(target_lookup, self, target_field)
 
     def get_prep_lookup(self, lookup_type, value):
         if hasattr(value, 'prepare'):
