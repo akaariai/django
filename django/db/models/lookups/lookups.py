@@ -427,10 +427,7 @@ class RelatedLookup(Lookup):
         # for both forwards and reverse lookups across the FK. (For normal FKs,
         # it's only relevant for forward lookups).
         if isinstance(value, field.rel.to):
-            try:
-                value = getattr(value, self.target_field.attname)
-            except AttributeError:
-                import ipdb; ipdb.set_trace()
+            value = getattr(value, self.target_field.attname)
         elif hasattr(value, '_meta'):
             # One can pass in any model. Is this dangerous?
             pk_field = getattr(value, '_meta').pk.attname

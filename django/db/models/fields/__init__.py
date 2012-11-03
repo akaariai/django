@@ -379,7 +379,7 @@ class Field(object):
             else:
                 return connection.ops.year_lookup_bounds(value)
 
-    def get_lookup(self, names):
+    def get_lookup(self, names, target_field):
         """
         Custom lookup hook. Given in a list of names (for example
         ['date', 'lte']). Returns an (immutable!) Lookup object to be

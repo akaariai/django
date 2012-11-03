@@ -129,13 +129,16 @@ class RelatedField(object):
         if not cls._meta.abstract:
             self.contribute_to_related_class(other, self.related)
 
-    def get_lookup(self, names):
-        target_field = self.rel.get_related_field()
-        while target_field.rel:
-            target_field = target_field.rel.get_related_field()
-        target_lookup = target_field.get_lookup(names)
-        if target_lookup is None:
-            target_lookup = lookups.BackwardsCompatLookup(names[0])
+    def get_lookup(self, names, target_field):
+        if (self == target_field):
+            final_field = target_field
+            while final_field.rel:
+                final_field = final_field.rel.get_related_field()
+            target_lookup = final_field.get_lookup(names, target_field)
+        else:
+            target_lookup = target_field.get_lookup(names, target_field)
+            if target_lookup is None:
+                target_lookup = lookups.BackwardsCompatLookup(names[0])
         return lookups.RelatedLookup(target_lookup, self, target_field)
 
     def get_prep_lookup(self, lookup_type, value):

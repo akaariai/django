@@ -1063,9 +1063,9 @@ class Query(object):
             if prefix in self.aggregates:
                 aggregate = self.aggregates[prefix]
                 if idx == len(parts):
-                    lookup = aggregate.field.get_lookup(['exact'])
+                    lookup = aggregate.field.get_lookup(['exact'], None)
                 else:
-                    lookup = aggregate.field.get_lookup(parts[idx:])
+                    lookup = aggregate.field.get_lookup(parts[idx:], None)
                 if lookup is None:
                     if parts[idx] not in self.query_terms:
                         continue
@@ -1144,9 +1144,9 @@ class Query(object):
             return
 
         if parts_found == len(parts):
-            lookup = field.get_lookup(['exact'])
+            lookup = field.get_lookup(['exact'], target)
         else:
-            lookup = field.get_lookup(parts[parts_found:])
+            lookup = field.get_lookup(parts[parts_found:], target)
         if lookup is None and len(parts[parts_found:]) == 1:
             lookup = parts[-1] if parts[-1] in self.query_terms else None
         if lookup is None:
