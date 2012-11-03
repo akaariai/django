@@ -58,10 +58,7 @@ class Node(object):
         """
         obj = Node(connector=self.connector, negated=self.negated)
         obj.__class__ = self.__class__
-        try:
-            obj.children = copy.deepcopy(self.children, memodict)
-        except TypeError:
-            import ipdb; ipdb.set_trace()
+        obj.children = copy.deepcopy(self.children, memodict)
         obj.subtree_parents = copy.deepcopy(self.subtree_parents, memodict)
         return obj
 
