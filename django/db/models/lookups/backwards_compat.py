@@ -89,7 +89,6 @@ class BackwardsCompatLookup(object):
             return (connection.ops.fulltext_search_sql(field_sql), params)
         elif self.lookup_name in ('regex', 'iregex'):
             return connection.ops.regex_lookup(self.lookup_name) % (field_sql, cast_sql), params
-
         raise TypeError('Invalid lookup_type: %r' % self.lookup_name)
     
     def sql_for_columns(self, data, qn, connection):

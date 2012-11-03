@@ -70,6 +70,7 @@ class Field(object):
         'unique': _('%(model_name)s with this %(field_label)s '
                     'already exists.'),
     }
+    lookups = {}
 
     # Generic field type description, usually overriden by subclasses
     def _description(self):
@@ -378,21 +379,22 @@ class Field(object):
             else:
                 return connection.ops.year_lookup_bounds(value)
 
-    def get_lookup(self, names, value):
+    def get_lookup(self, names):
         """
         Custom lookup hook. Given in a list of names (for example
-        ['date', 'lte']) and the value. Return an (immutable!) lookup
-        object to be used in the query.
+        ['date', 'lte']). Returns an (immutable!) Lookup object to be
+        used in the query.
         
         Allowed return values are:
             None: This method does not disallow or allow the lookup.
             A Lookup object: A lookup to be used in query
+
         In addition this method can raise a FieldError if this field
         specifically disallows one of the default lookups.
         """
-        from django.db.models.lookups import lookups
-        if names[0] == 'exact':
-            return lookups.Exact()
+        lookup = self.lookups.get(names[0])
+        if lookup:
+            return lookup()
         return None
 
     def has_default(self):

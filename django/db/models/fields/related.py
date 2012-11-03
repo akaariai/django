@@ -129,9 +129,11 @@ class RelatedField(object):
         if not cls._meta.abstract:
             self.contribute_to_related_class(other, self.related)
 
-    def get_lookup(self, names, value):
+    def get_lookup(self, names):
         target_field = self.rel.get_related_field()
-        target_lookup = target_field.get_lookup(names, value)
+        while target_field.rel:
+            target_field = target_field.rel.get_related_field()
+        target_lookup = target_field.get_lookup(names)
         if target_lookup is None:
             target_lookup = lookups.BackwardsCompatLookup(names[0])
         return lookups.RelatedLookup(target_lookup, self, target_field)

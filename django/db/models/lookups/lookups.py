@@ -1,7 +1,10 @@
 from datetime import datetime
+from itertools import repeat
 
+from django.db.models.sql.datastructures import EmptyResultSet
 from django.db.models.lookups.backwards_compat import BackwardsCompatLookup
 from django.db.models.query_utils import QueryWrapper
+from django.db.models.fields import Field
 
 # We have two different paths to solve a lookup. BackwardsCompatLookup tries
 # to guarantee that Fields with overridden get[_db]_prep_lookup defined will
@@ -170,7 +173,214 @@ class Lookup(object):
     def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
         raise NotImplementedError
 
+class SimpleLookup(Lookup):
+    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+        lhs_clause = connection.ops.lookup_cast(self.lookup_name) % lhs_clause
+        rhs_clause = connection.operators[self.lookup_name] % rhs_format
+        return '%s %s' % (lhs_clause, rhs_clause), params
+
+class Exact(SimpleLookup):
+    lookup_name = 'exact'
+    rhs_prepare = Lookup.FIELD_PREPARE
+Field.lookups['exact'] = Exact
+
+class IsNull(Lookup):
+    lookup_name = 'isnull'
+    rhs_prepare = Lookup.RAW
+
+    def make_atom(self, lvalue, value_annotation, params_or_value, qn,
+                  connection, field=None):
+        lhs_clause, db_type = self.prepare_lhs(lvalue, qn, connection)
+        return ('%s IS %sNULL' % (lhs_clause, (not value_annotation and 'NOT ' or '')), ())
+Field.lookups['isnull'] = IsNull
+
+class LessThan(SimpleLookup):
+    lookup_name = 'lt'
+    rhs_prepare = Lookup.FIELD_PREPARE
+Field.lookups['lt'] = LessThan
+
+class EqOrLessThan(SimpleLookup):
+    lookup_name = 'lte'
+    rhs_prepare = Lookup.FIELD_PREPARE
+Field.lookups['lte'] = EqOrLessThan
+
+class GreaterThan(SimpleLookup):
+    lookup_name = 'gt'
+    rhs_prepare = Lookup.FIELD_PREPARE
+Field.lookups['gt'] = GreaterThan
+
+class EqOrGreaterThan(SimpleLookup):
+    lookup_name = 'gte'
+    rhs_prepare = Lookup.FIELD_PREPARE
+Field.lookups['gte'] = EqOrGreaterThan
+
+class PatternLookup(SimpleLookup):
+    rhs_prepare = Lookup.RAW
+    pattern = ""
+
+    def normalize_value(self, params, field, qn, connection):
+        return [self.pattern % connection.ops.prep_for_like_query(params[0])]
+
+class Contains(PatternLookup):
+    lookup_name = 'contains'
+    pattern = "%%%s%%"
+Field.lookups['contains'] = Contains
+
+class IContains(Contains):
+    lookup_name = 'icontains'
+Field.lookups['icontains'] = IContains
+
+class StartsWith(PatternLookup):
+    lookup_name = 'startswith'
+    pattern = "%s%%"
+Field.lookups['startswith'] = StartsWith
+
+class IStartsWith(StartsWith):
+    lookup_name = 'istartswith'
+Field.lookups['istartswith'] = IStartsWith
+
+class EndsWith(PatternLookup):
+    lookup_name = 'endswith'
+    pattern = '%%%s'
+Field.lookups['endswith'] = EndsWith
+
+class IEndsWith(EndsWith):
+    lookup_name = 'iendswith'
+Field.lookups['iendswith'] = IEndsWith
+
+class IExact(SimpleLookup):
+    lookup_name = 'iexact'
+    rhs_prepare = Lookup.RAW
+
+    def normalize_value(self, params, field, qn, connection):
+        return [connection.ops.prep_for_iexact_query(params[0])]
+Field.lookups['iexact'] = IExact
+
+class Year(SimpleLookup):
+    lookup_name = 'year'
+    rhs_prepare = Lookup.RAW
+
+    def normalize_value(self, params, field, qn, connection):
+        intval = int(params[0])
+        if field.get_internal_type() == 'DateField':
+            return connection.ops.year_lookup_bounds_for_date_field(intval)
+        else:
+            return connection.ops.year_lookup_bounds(intval)
+
+    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+        return '%s BETWEEN %%s AND %%s' % lhs_clause, params
+Field.lookups['year'] = Year
+
+class DateBase(SimpleLookup):
+    rhs_prepare = Lookup.RAW
+
+    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+        return '%s = %%s' % connection.ops.date_extract_sql(self.lookup_name, lhs_clause), params
+
+class Month(DateBase):
+    lookup_name = 'month'
+Field.lookups['month'] = Month
+
+class Day(DateBase):
+    lookup_name = 'day'
+Field.lookups['day'] = Day
+
+class WeekDay(DateBase):
+    lookup_name = 'week_day'
+Field.lookups['week_day'] = WeekDay
+
+class In(SimpleLookup):
+    lookup_name = 'in'
+    rhs_prepare = Lookup.LIST_FIELD_PREPARE
+    
+    def cast_sql(self, value_annotation, connection):
+        if not value_annotation:
+            raise EmptyResultSet
+        return '%s'
+
+    def rhs_format(self, cast_sql, extra):
+        """
+        We need these values in as_sql()
+        """
+        return cast_sql, extra
+    
+    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+        cast_sql, extra = rhs_format
+        if extra:
+            return '%s IN %s' % (lhs_clause, extra), params
+        # Move rest of me into connection...
+        max_in_list_size = connection.ops.max_in_list_size()
+        if max_in_list_size and len(params) > max_in_list_size:
+            # Break up the params list into an OR of manageable chunks.
+            in_clause_elements = ['(']
+            for offset in xrange(0, len(params), max_in_list_size):
+                if offset > 0:
+                    in_clause_elements.append(' OR ')
+                in_clause_elements.append('%s IN (' % lhs_clause)
+                group_size = min(len(params) - offset, max_in_list_size)
+                param_group = ', '.join(repeat(cast_sql, group_size))
+                in_clause_elements.append(param_group)
+                in_clause_elements.append(')')
+            in_clause_elements.append(')')
+            return ''.join(in_clause_elements), params
+        else:
+            return ('%s IN (%s)' %
+                    (lhs_clause, ', '.join(repeat(cast_sql, len(params)))),
+                    params)
+Field.lookups['in'] = In
+
+class Range(Lookup):
+    lookup_name = 'range'
+    rhs_prepare = Lookup.LIST_FIELD_PREPARE
+
+    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+        return '%s BETWEEN %%s AND %%s' % lhs_clause, params
+Field.lookups['range'] = Range
+
+class Search(Lookup):
+    lookup_name = 'search'
+    rhs_prepare = Lookup.RAW
+
+    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+        return connection.ops.fulltext_search_sql(lhs_clause), params
+Field.lookups['search'] = Search
+
+class Regex(Lookup):
+    lookup_name = 'regex'
+
+    def rhs_format(self, cast_sql, extra):
+        """
+        We need these values in as_sql()
+        """
+        return cast_sql, extra
+
+    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+        """
+        Regex lookups are implemented partly by connection.operators... Except
+        when not.
+        """
+        if self.lookup_name in connection.operators:
+            lhs_clause = connection.ops.lookup_cast(self.lookup_name) % lhs_clause
+            rhs_clause = super(Regex, self).rhs_format(*rhs_format)
+            rhs_clause = connection.operators[self.lookup_name] % rhs_clause
+            return '%s %s' % (lhs_clause, rhs_clause), params
+        else:
+            cast_sql, extra = rhs_format
+            return connection.ops.regex_lookup(self.lookup_name) % (lhs_clause, cast_sql), params
+Field.lookups['regex'] = Regex
+
+class IRegex(Regex):
+    lookup_name = 'iregex'
+Field.lookups['iregex'] = IRegex
+
 class RelatedLookup(Lookup):
+    """
+    Related lookup is needed so that we can prepare the values. After that
+    we just pass the action to the target field's lookup.
+
+    It would be possible (and likely wise) to get rid of RelatedLookup -
+    we could do the value transformation directly in get_lookup().
+    """
     def __init__(self, lookup, source_field, target_field):
         self.lookup = lookup
         self.lookup_name = lookup.lookup_name
@@ -180,13 +390,19 @@ class RelatedLookup(Lookup):
     def get_prep_lookup(self, field, value):
         """
         Note: We must convert any "model" value on add from model to something
-        else. __deepcopy__ goes seriously wrong if we don't do this...
+        else. __deepcopy__ goes seriously wrong if we don't do this.
+
+        This is somewhat non-dry compared to the default get_pre_lookup...
         """
         if isinstance(self.lookup, BackwardsCompatLookup):
             # Let it do whatever it needs to do...
             return self.lookup.get_prep_lookup(field, value)
+        if hasattr(value, 'prepare'):
+            return value.prepare()
+        if hasattr(value, '_prepare'):
+            return value._prepare()
         if self.lookup.rhs_prepare == self.LIST_FIELD_PREPARE:
-            value = [self.convert_value(self.souce_field, v) for v in value]
+            value = [self.convert_value(self.source_field, v) for v in value]
         else:
             value = self.convert_value(self.source_field, value)
         return value
@@ -200,14 +416,6 @@ class RelatedLookup(Lookup):
         return self.lookup.make_atom(lvalue, value_annotation, params_or_value, qn,
                                 connection, field=self.target_field)
 
-    def get_target_field(self, field): 
-        while field.rel:
-            if hasattr(field.rel, 'field_name'):
-                field = field.rel.to._meta.get_field(field.rel.field_name)
-            else:
-                field = field.rel.to._meta.pk
-        return field
-
     def convert_value(self, field, value):
         # Value may be a primary key, or an object held in a relation.
         # If it is an object, then we need to get the primary key value for
@@ -219,17 +427,12 @@ class RelatedLookup(Lookup):
         # for both forwards and reverse lookups across the FK. (For normal FKs,
         # it's only relevant for forward lookups).
         if isinstance(value, field.rel.to):
-            value = getattr(value, self.target_field.attname)
+            try:
+                value = getattr(value, self.target_field.attname)
+            except AttributeError:
+                import ipdb; ipdb.set_trace()
         elif hasattr(value, '_meta'):
             # One can pass in any model. Is this dangerous?
             pk_field = getattr(value, '_meta').pk.attname
             value = getattr(value, pk_field)
         return value
-
-class Exact(Lookup):
-    lookup_name = 'exact'
-    rhs_prepare = Lookup.FIELD_PREPARE
-
-    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
-        rhs_clause = connection.operators['exact'] % rhs_format
-        return '%s %s' % (lhs_clause, rhs_clause), params
