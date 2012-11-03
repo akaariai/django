@@ -43,7 +43,7 @@ class DeleteQuery(Query):
             field = self.model._meta.pk
         for offset in range(0, len(pk_list), GET_ITERATOR_CHUNK_SIZE):
             where = self.where_class()
-            where.add((Constraint(None, field.column, field), lookups.BackwardsCompatLookup('in'),
+            where.add((Constraint(None, field.column, field), lookups.In(),
                     pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]), AND)
             self.do_query(self.model._meta.db_table, where, using=using)
 
@@ -79,7 +79,7 @@ class DeleteQuery(Query):
                 innerq.select = [SelectInfo((self.get_initial_alias(), pk.column), None)]
                 values = innerq
             where = self.where_class()
-            where.add((Constraint(None, pk.column, pk), lookups.BackwardsCompatLookup('in'), values), AND)
+            where.add((Constraint(None, pk.column, pk), lookups.In(), values), AND)
             self.where = where
         self.get_compiler(using).execute_sql(None)
 
@@ -116,7 +116,7 @@ class UpdateQuery(Query):
         for offset in range(0, len(pk_list), GET_ITERATOR_CHUNK_SIZE):
             self.where = self.where_class()
             self.where.add((Constraint(None, pk_field.column, pk_field),
-                            lookups.BackwardsCompatLookup('in'),
+                            lookups.In(),
                     pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]),
                     AND)
             self.get_compiler(using).execute_sql(None)

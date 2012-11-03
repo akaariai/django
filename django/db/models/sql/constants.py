@@ -9,7 +9,10 @@ import re
 # considered SQL-specific; other storage systems may choose to use different
 # lookup types.
 QUERY_TERMS = set([
-    # There is nothing to see here. All the lookups are implemented by Field.
+    # These are still needed for the admin...
+    'exact', 'iexact', 'contains', 'icontains', 'gt', 'gte', 'lt', 'lte', 'in',
+    'startswith', 'istartswith', 'endswith', 'iendswith', 'range', 'year',
+    'month', 'day', 'week_day', 'isnull', 'search', 'regex', 'iregex',
 ])
 
 # Size of each "chunk" for get_iterator calls.

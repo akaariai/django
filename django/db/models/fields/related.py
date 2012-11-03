@@ -130,15 +130,15 @@ class RelatedField(object):
             self.contribute_to_related_class(other, self.related)
 
     def get_lookup(self, names, target_field):
-        if (self == target_field):
-            final_field = target_field
-            while final_field.rel:
-                final_field = final_field.rel.get_related_field()
-            target_lookup = final_field.get_lookup(names, target_field)
-        else:
-            target_lookup = target_field.get_lookup(names, target_field)
-            if target_lookup is None:
-                target_lookup = lookups.BackwardsCompatLookup(names[0])
+        if self.needs_backwards_compat_lookup():
+            return lookups.BackwardsCompatLookup(names[0])
+        if target_field.rel:
+            target_field = target_field.rel.get_related_field()
+        if target_field == self:
+            return super(RelatedField, self).get_lookup(names, target_field)
+        target_lookup = target_field.get_lookup(names, target_field)
+        if target_lookup is None:
+            target_lookup = lookups.BackwardsCompatLookup(names[0])
         return lookups.RelatedLookup(target_lookup, self, target_field)
 
     def get_prep_lookup(self, lookup_type, value):
@@ -157,6 +157,7 @@ class RelatedField(object):
         elif lookup_type == 'isnull':
             return []
         raise TypeError("Related Field has invalid lookup: %s" % lookup_type)
+    get_prep_lookup.safe = True
 
     def get_db_prep_lookup(self, lookup_type, value, connection, prepared=False):
         if not prepared:
@@ -188,6 +189,7 @@ class RelatedField(object):
         elif lookup_type == 'isnull':
             return []
         raise TypeError("Related Field has invalid lookup: %s" % lookup_type)
+    get_db_prep_lookup.safe = True
 
     def _pk_trace(self, value, prep_func, lookup_type, **kwargs):
         # Value may be a primary key, or an object held in a relation.

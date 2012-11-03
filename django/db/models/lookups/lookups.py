@@ -1,6 +1,7 @@
 from datetime import datetime
 from itertools import repeat
 
+from django.core import exceptions
 from django.db.models.sql.datastructures import EmptyResultSet
 from django.db.models.lookups.backwards_compat import BackwardsCompatLookup
 from django.db.models.query_utils import QueryWrapper
@@ -102,7 +103,7 @@ class Lookup(object):
         knows how to turn itself into SQL by an as_sql() method.
         """
         field = lvalue.field
-        db_type = field.db_type if field else None
+        db_type = field.db_type(connection) if field else None
         if hasattr(lvalue, 'as_sql'):
             return lvalue.as_sql(qn, connection), db_type
         table_alias, name = lvalue.alias, lvalue.col
@@ -274,6 +275,9 @@ Field.lookups['year'] = Year
 class DateBase(SimpleLookup):
     rhs_prepare = Lookup.RAW
 
+    def normalize_value(self, value, field, qn, connection):
+        return [int(value[0])]
+
     def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
         return '%s = %%s' % connection.ops.date_extract_sql(self.lookup_name, lhs_clause), params
 
@@ -402,9 +406,9 @@ class RelatedLookup(Lookup):
         if hasattr(value, '_prepare'):
             return value._prepare()
         if self.lookup.rhs_prepare == self.LIST_FIELD_PREPARE:
-            value = [self.convert_value(self.source_field, v) for v in value]
+            value = [self.convert_value(v) for v in value]
         else:
-            value = self.convert_value(self.source_field, value)
+            value = self.convert_value(value)
         return value
 
     def make_atom(self, lvalue, value_annotation, params_or_value, qn,
@@ -416,7 +420,7 @@ class RelatedLookup(Lookup):
         return self.lookup.make_atom(lvalue, value_annotation, params_or_value, qn,
                                 connection, field=self.target_field)
 
-    def convert_value(self, field, value):
+    def convert_value(self, value):
         # Value may be a primary key, or an object held in a relation.
         # If it is an object, then we need to get the primary key value for
         # that object. In certain conditions (especially one-to-one relations),
@@ -426,10 +430,18 @@ class RelatedLookup(Lookup):
         # In the case of an FK to 'self', this check allows to_field to be used
         # for both forwards and reverse lookups across the FK. (For normal FKs,
         # it's only relevant for forward lookups).
-        if isinstance(value, field.rel.to):
-            value = getattr(value, self.target_field.attname)
-        elif hasattr(value, '_meta'):
-            # One can pass in any model. Is this dangerous?
-            pk_field = getattr(value, '_meta').pk.attname
-            value = getattr(value, pk_field)
+        if isinstance(value, self.source_field.rel.to):
+            field_name = getattr(self.source_field.rel, 'field_name')
+        else:
+            field_name = None
+        try:
+            while True:
+                if field_name is None:
+                    field_name = value._meta.pk.name
+                value = getattr(value, field_name)
+                field_name = None
+        except AttributeError:
+            pass
+        except exceptions.ObjectDoesNotExist:
+            value = None
         return value

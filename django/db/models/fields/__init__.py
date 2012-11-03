@@ -333,6 +333,7 @@ class Field(object):
                                  "argument")
 
         raise TypeError("Field has invalid lookup: %s" % lookup_type)
+    get_prep_lookup.safe = True
 
     def get_db_prep_lookup(self, lookup_type, value, connection,
                            prepared=False):
@@ -378,6 +379,13 @@ class Field(object):
                 return connection.ops.year_lookup_bounds_for_date_field(value)
             else:
                 return connection.ops.year_lookup_bounds(value)
+    get_db_prep_lookup.safe = True
+
+    def needs_backwards_compat_lookup(self):
+        if not (hasattr(self.get_prep_lookup, 'safe') and
+                hasattr(self.get_db_prep_lookup, 'safe')):
+            return True
+        return False
 
     def get_lookup(self, names, target_field):
         """
@@ -392,9 +400,12 @@ class Field(object):
         In addition this method can raise a FieldError if this field
         specifically disallows one of the default lookups.
         """
-        lookup = self.lookups.get(names[0])
-        if lookup:
-            return lookup()
+        if self.needs_backwards_compat_lookup():
+            from django.db.models.lookups import lookups
+            return lookups.BackwardsCompatLookup(names[0])
+        lookup_class = self.lookups.get(names[0])
+        if lookup_class:
+            return lookup_class()
         return None
 
     def has_default(self):
@@ -631,6 +642,7 @@ class BooleanField(Field):
         if value in ('1', '0'):
             value = bool(int(value))
         return super(BooleanField, self).get_prep_lookup(lookup_type, value)
+    get_prep_lookup.safe = True
 
     def get_prep_value(self, value):
         if value is None:
@@ -764,6 +776,7 @@ class DateField(Field):
         if lookup_type in ('month', 'day', 'week_day'):
             return int(value)
         return super(DateField, self).get_prep_lookup(lookup_type, value)
+    get_prep_lookup.safe = True
 
     def get_prep_value(self, value):
         return self.to_python(value)
@@ -1037,6 +1050,7 @@ class IntegerField(Field):
                 and isinstance(value, float)):
             return math.ceil(value)
         return super(IntegerField, self).get_prep_lookup(lookup_type, value)
+    get_prep_lookup.safe = True
 
     def get_internal_type(self):
         return "IntegerField"
@@ -1171,6 +1185,7 @@ class NullBooleanField(Field):
             value = bool(int(value))
         return super(NullBooleanField, self).get_prep_lookup(lookup_type,
                                                              value)
+    get_prep_lookup.safe = True
 
     def get_prep_value(self, value):
         if value is None:

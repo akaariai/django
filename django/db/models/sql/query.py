@@ -1040,7 +1040,7 @@ class Query(object):
             # uses of None as a query value.
             if lookup.lookup_name != 'exact':
                 raise ValueError("Cannot use None as a query value")
-            lookup = lookups.BackwardsCompatLookup('isnull')
+            lookup = lookups.IsNull()
             # We want to make Exact handle the value later on.
             return lookup, True
         elif callable(value):
@@ -1237,7 +1237,7 @@ class Query(object):
                             assert j_col is not None
                             entry = self.where_class()
                             entry.add(
-                                (Constraint(alias, j_col, None), lookups.BackwardsCompatLookup('isnull'), True),
+                                (Constraint(alias, j_col, None), lookups.IsNull(), True),
                                 AND
                             )
                             entry.negate()
@@ -1252,7 +1252,7 @@ class Query(object):
                     # be included in the final resultset. We are essentially creating
                     # SQL like this here: NOT (col IS NOT NULL), where the first NOT
                     # is added in upper layers of the code.
-                    self.where.add((Constraint(alias, col, None), lookups.BackwardsCompatLookup('isnull'), False), AND)
+                    self.where.add((Constraint(alias, col, None), lookups.IsNull(), False), AND)
 
 
     def add_q(self, q_object, used_aliases=None, force_having=False):
@@ -1553,7 +1553,7 @@ class Query(object):
         # database from tripping over IN (...,NULL,...) selects and returning
         # nothing
         alias, col = query.select[0].col
-        query.where.add((Constraint(alias, col, None), lookups.BackwardsCompatLookup('isnull'), False), AND)
+        query.where.add((Constraint(alias, col, None), lookups.IsNull(), False), AND)
         # We need to trim the last part from the prefix.
         trimmed_prefix = '__'.join(prefix.split(LOOKUP_SEP)[0:-1])
         if not trimmed_prefix:

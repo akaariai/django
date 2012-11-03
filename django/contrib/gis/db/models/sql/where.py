@@ -1,7 +1,8 @@
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.sql.expressions import SQLEvaluator
-from django.db.models.sql.where import Constraint, WhereNode
+from django.db.models.sql.where import WhereNode
+from django.db.models.sql.datastructures import Constraint
 from django.contrib.gis.db.models.fields import GeometryField
 
 class GeoConstraint(Constraint):
@@ -43,8 +44,8 @@ class GeoWhereNode(WhereNode):
     def make_atom(self, child, qn, connection):
         lvalue, lookup_type, value_annot, params_or_value = child
         if isinstance(lvalue, GeoConstraint):
-            data, params = lvalue.process(lookup_type, params_or_value, connection)
-            spatial_sql = connection.ops.spatial_lookup_sql(data, lookup_type, params_or_value, lvalue.field, qn)
+            data, params = lvalue.process(lookup_type.lookup_name, params_or_value, connection)
+            spatial_sql = connection.ops.spatial_lookup_sql(data, lookup_type.lookup_name, params_or_value, lvalue.field, qn)
             return spatial_sql, params
         else:
             return super(GeoWhereNode, self).make_atom(child, qn, connection)
