@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 
 from django.core import serializers
+from django.db.models import F
 from django.test import TestCase
 
 from .fields import Small
@@ -88,8 +89,6 @@ class CustomField(TestCase):
 
 class CustomLookupTests(TestCase):
     def test_div3_lookup(self):
-        # Fixme later.
-        return
         d0 = DivModel.objects.create(divfield=0)
         d1 = DivModel.objects.create(divfield=1)
         d2 = DivModel.objects.create(divfield=2)
@@ -109,3 +108,9 @@ class CustomLookupTests(TestCase):
         self.assertNotIn(d1, qs)
         self.assertIn(d2, qs)
         self.assertNotIn(d3, qs)
+        qs = DivModel.objects.filter(divfield__div__2=F('pk') % 3)
+        for m in [d0, d1, d2, d3]:
+            if m.divfield % 2 == m.pk % 3:
+                self.assertIn(m, qs)
+            else:
+                self.assertNotIn(m, qs)
