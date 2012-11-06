@@ -179,7 +179,12 @@ class ModelBase(type):
             # Check for clashes between locally declared fields and those
             # on the base classes (we cannot handle shadowed fields at the
             # moment).
-            for field in parent_fields:
+            if base._meta.abstract:
+                non_overridden_parent_fields = [f for f in parent_fields
+                                                if f.name not in field_names]
+            else:
+                non_overridden_parent_fields = parent_fields
+            for field in non_overridden_parent_fields:
                 if field.name in field_names:
                     raise FieldError('Local field %r in class %r clashes '
                                      'with field of similar name from '
@@ -200,7 +205,7 @@ class ModelBase(type):
                 new_class._meta.parents[base] = field
             else:
                 # .. and abstract ones.
-                for field in parent_fields:
+                for field in non_overridden_parent_fields:
                     new_class.add_to_class(field.name, copy.deepcopy(field))
 
                 # Pass any non-abstract parent classes onto child.
