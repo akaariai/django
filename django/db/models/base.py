@@ -168,6 +168,7 @@ class ModelBase(type):
         o2o_map = dict([(f.rel.to, f) for f in new_class._meta.local_fields
                 if isinstance(f, OneToOneField)])
 
+        seen_parent_fields = set()
         for base in parents:
             original_base = base
             if not hasattr(base, '_meta'):
@@ -181,7 +182,8 @@ class ModelBase(type):
             # moment).
             if base._meta.abstract:
                 non_overridden_parent_fields = [f for f in parent_fields
-                                                if f.name not in field_names]
+                                                if f.name not in field_names
+                                                and f.name not in seen_parent_fields]
             else:
                 non_overridden_parent_fields = parent_fields
             for field in non_overridden_parent_fields:
@@ -190,6 +192,11 @@ class ModelBase(type):
                                      'with field of similar name from '
                                      'base class %r' %
                                         (field.name, name, base.__name__))
+                if field.name in seen_parent_fields:
+                    raise FieldError('Field %r defined multiple times in different '
+                                     'parent classes for class %r.' %
+                                     (field.name, name))
+                seen_parent_fields.add(field.name)
             if not base._meta.abstract:
                 # Concrete classes...
                 base = base._meta.concrete_model

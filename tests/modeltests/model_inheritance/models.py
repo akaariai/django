@@ -41,8 +41,12 @@ class Student(CommonInfo):
     class Meta:
         pass
 
-class StudentWorker(Student, Worker):
-    pass
+#class StudentWorker(Student, Worker):
+    # This construct doesn't work. We have two different 'name' and 'age'
+    # fields in the Worker and Student tables. However, StudentWorker can
+    # have only one of each one. This seems like too big of a mismatch to
+    # fix.
+#    pass
 
 #
 # Abstract base classes with related models
