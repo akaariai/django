@@ -104,7 +104,9 @@ class DatabaseCache(BaseDatabaseCache):
         if num > self._max_entries:
             self._cull(db, cursor, now)
         pickled = pickle.dumps(value, pickle.HIGHEST_PROTOCOL)
-        encoded = base64.b64encode(pickled).strip()
+        # Convert to base64. Make sure the value is a string, as the
+        # db column is a string (not byte) column.
+        encoded = base64.b64encode(pickled).decode('latin1')
         cursor.execute("SELECT cache_key, expires FROM %s "
                        "WHERE cache_key = %%s" % table, [key])
         try:
