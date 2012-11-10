@@ -203,13 +203,13 @@ class SortedDict(dict):
         itervalues = _itervalues
 
         def items(self):
-            return list(self.iteritems())
+            return [(k, self[k]) for k in self.keyOrder]
 
         def keys(self):
-            return list(self.iterkeys())
+            return self.keyOrder[:]
 
         def values(self):
-            return list(self.itervalues())
+            return [self[k] for k in self.keyOrder]
 
     def update(self, dict_):
         for k, v in six.iteritems(dict_):
