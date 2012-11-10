@@ -120,6 +120,10 @@ class SortedDict(dict):
         return instance
 
     def __init__(self, data=None):
+        if isinstance(data, SortedDict):
+            super(SortedDict, self).__init__(data)
+            self.keyOrder = data.keyOrder[:]
+            return
         if data is None:
             data = {}
         elif isinstance(data, GeneratorType):
@@ -140,7 +144,7 @@ class SortedDict(dict):
 
     def __deepcopy__(self, memo):
         return self.__class__([(key, copy.deepcopy(value, memo))
-                               for key, value in six.iteritems(self)])
+                               for key, value in self.items()])
 
     def __copy__(self):
         # The Python's default copy implementation will alter the state
