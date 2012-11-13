@@ -27,3 +27,22 @@ class Experiment(models.Model):
     def duration(self):
         return self.end - self.start
 
+
+class ModelC(models.Model):
+    pass
+
+class ModelB(models.Model):
+    m2m_field_q = models.ManyToManyField(ModelC)
+
+class ModelA(models.Model):
+    m2m_field_r = models.ManyToManyField(ModelB)
+
+class ModelY(models.Model):
+    fk_field_s = models.ForeignKey(ModelC)
+
+class ModelX(models.Model):
+    fk_field_t = models.ForeignKey(ModelY)
+
+class ModelXThroughA(models.Model):
+    fk_field_v = models.ForeignKey(ModelX)
+    fk_field_w = models.ForeignKey(ModelA)

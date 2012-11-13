@@ -9,7 +9,7 @@ from django.db import connection
 from django.db.models import F
 from django.test import TestCase, Approximate, skipUnlessDBFeature
 
-from .models import Number, Experiment
+from .models import Number, Experiment, ModelA, ModelB, ModelC, ModelY, ModelX, ModelXThroughA
 
 
 class ExpressionsRegressTests(TestCase):
@@ -383,3 +383,28 @@ class FTimeDeltaTests(TestCase):
         except TypeError:
             raised = True
         self.assertTrue(raised, "TypeError not raised on attempt to binary or a datetime with a timedelta.")
+
+class Ticket18726Tests(TestCase):
+    def test_ticket_18726(self):
+        # The model structure is
+        #               /-- ModelX->ModelY----->\
+        # ModelXThroughA                     ->ModelC
+        #               \-- ModelA<>ModelB<-/
+        # We are asked for ModelXThroughA instances which do not have same C
+        # through the two different routes.
+        ma = ModelA.objects.create()
+        mc = ModelC.objects.create()
+        mc2 = ModelC.objects.create()
+        mb = ModelB.objects.create()
+        ma.m2m_field_r.add(mb)
+        mb.m2m_field_q.add(mc)
+        my = ModelY.objects.create(fk_field_s=mc)
+        mx = ModelX.objects.create(fk_field_t=my)
+        mxt1 = ModelXThroughA(fk_field_v=mx, fk_field_w=ma)
+        # Now, another route for X->Y->Different C
+        my2 = ModelY.objects.create(fk_field_s=mc2)
+        mx2 = ModelX.objects.create(fk_field_t=my2)
+        mxt2 = ModelXThroughA(fk_field_v=mx2, fk_field_w=ma)
+        qs = ModelXThroughA.objects.exclude(fk_field_w__m2m_field_r__m2m_field_q=F("fk_field_v__fk_field_t__fk_field_s"))
+        self.assertNotIn(mxt1, qs)
+        self.assertIn(mxt2, qs)
