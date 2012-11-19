@@ -1095,9 +1095,13 @@ class Query(object):
         elif callable(value):
             value = value()
         elif isinstance(value, ExpressionNode):
-            # If value is a query expression, evaluate it
+            # If value is a query expression, generate a SQLEvaluator object
+            # of it. The initialization adds the evaluator to this query, and
+            # can generate some reusable joins.
+            having_clause = value.contains_aggregate(self.aggregate_select.keys())
             value = SQLEvaluator(value, self)
-            having_clause = value.contains_aggregate
+            if value.reusable_joins and can_reuse is not None:
+                can_reuse.update(value.reusable_joins)
 
         for alias, aggregate in self.aggregates.items():
             if alias in (parts[0], LOOKUP_SEP.join(parts)):

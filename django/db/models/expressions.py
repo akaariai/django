@@ -20,6 +20,8 @@ class ExpressionNode(tree.Node):
     BITAND = '&'
     BITOR = '|'
 
+    dupe_multis = False
+
     def __init__(self, children=None, connector=None, negated=False):
         if children is not None and len(children) > 1 and connector is None:
             raise TypeError('You have to specify a connector.')
@@ -116,11 +118,19 @@ class ExpressionNode(tree.Node):
     def prepare_database_save(self, unused):
         return self
 
+    def contains_aggregate(self, aggregate_refs):
+        if self.children:
+            return any(child.contains_aggregate(aggregate_refs)
+                       for child in self.children if isinstance(child, ExpressionNode))
+        else:
+            return self.name in aggregate_refs
+
+
 class F(ExpressionNode):
     """
     An expression representing the value of the given field.
     """
-    def __init__(self, name):
+    def __init__(self, name, dupe_multis=False):
         super(F, self).__init__(None, None, False)
         self.name = name
 
@@ -134,6 +144,14 @@ class F(ExpressionNode):
 
     def evaluate(self, evaluator, qn, connection):
         return evaluator.evaluate_leaf(self, qn, connection)
+
+class DupeMultisF(F):
+    """
+    Like normal F-expression, but always duplicates multivalued relations.
+
+    Subclass needed for ticket #18375 backwards compatibility.
+    """
+    dupe_multis = True
 
 class DateModifierNode(ExpressionNode):
     """

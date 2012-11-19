@@ -317,6 +317,30 @@ Backwards incompatible changes in 1.5
     deprecation timeline for a given feature, its removal may appear as a
     backwards incompatible change.
 
+F() expression behaviour in multivalued relationships changed
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When :ref:`F() expressions <query-expressions>` are added into a query in
+multivalued relation situations the behavior of relation reuse has changed.
+Previously this query::
+
+   qs.filter(revrel__col1=F('revrel__col2'), revrel__col3='foo')
+
+would have created a new reference to revrel for the F() expression, then another
+one for the filter lookups. However, if the order of the filter clauses were
+changed, then just a single reference was created. This had to be changed because
+the behavior was dependant on dictionary ordering. In 1.5 the query will generate
+just a single join always. In the hopefully rare cases where the old behavior is
+needed it is possible to use a `DupeMultisF` subclass of F::
+
+  from django.db.models import DupeMultisF
+  qs.filter(revrel__col1=DupeMultisF('fexpr'), revrel__col3='foo')
+
+This query will generate two references like the original example did in 1.4.
+Notably `DupeMultisF` doesn't guarantee the same behavior that F() had in 1.4 -
+it always duplicates multivalued relations while 1.4 F() did that only for the
+first filter kwarg, and even then if there was no pre-existing reference.
+
 Context in year archive class-based views
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
