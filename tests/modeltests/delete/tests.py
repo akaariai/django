@@ -1,7 +1,11 @@
 from __future__ import absolute_import
 
+from math import ceil
+
 from django.db import models, IntegrityError, connection
+from django.db.models.sql.constants import GET_ITERATOR_CHUNK_SIZE
 from django.test import TestCase, skipUnlessDBFeature, skipIfDBFeature
+from django.test.utils import override_settings
 from django.utils.six.moves import xrange
 
 from .models import (R, RChild, S, T, U, A, M, MR, MRNull,
@@ -164,7 +168,6 @@ class DeletionTests(TestCase):
         self.assertFalse(m.m2m_through_null.exists())
 
     def test_bulk(self):
-        from django.db.models.sql.constants import GET_ITERATOR_CHUNK_SIZE
         s = S.objects.create(r=R.objects.create())
         for i in xrange(2*GET_ITERATOR_CHUNK_SIZE):
             T.objects.create(s=s)
@@ -286,6 +289,31 @@ class DeletionTests(TestCase):
         r.delete()
         self.assertEqual(HiddenUserProfile.objects.count(), 0)
 
+    def test_large_batch(self):
+        TEST_SIZE = 2000
+        objs = [Avatar() for i in range(0, TEST_SIZE)]
+        Avatar.objects.bulk_create(objs)
+        # The amount of queries isn't easy to calculate - for each batch
+        # we are going to do one related fetch, and additionally
+        # batch size // ITERATOR_CHUNK_SIZE deletes (where last batch might
+        # need fewer than the others). So, calculate reasonable upper and
+        # lower bounds.
+        batch_size = connection.ops.delete_batch_size(objs)
+        batches = ceil(float(len(objs)) / batch_size)
+        # One query for Avatar.objects.all() and then one related fetch for
+        # each batch.
+        fetches_to_mem = batches + 1
+        chunks_per_batch = ceil(float(batch_size) / GET_ITERATOR_CHUNK_SIZE)
+        qcount_upper_bound = batches * chunks_per_batch + fetches_to_mem
+        # We know all the full batches will need chunks_per_batch queries.
+        qcount_lower_bound = (batches - 1) * chunks_per_batch + fetches_to_mem
+        with override_settings(DEBUG=True):
+            connection.queries = []
+            Avatar.objects.all().delete()
+            self.assertTrue(len(connection.queries) <= qcount_upper_bound)
+            self.assertTrue(len(connection.queries) >= qcount_lower_bound)
+        self.assertEquals(Avatar.objects.count(), 0)
+
 class FastDeleteTests(TestCase):
 
     def test_fast_delete_fk(self):
@@ -319,6 +347,18 @@ class FastDeleteTests(TestCase):
         self.assertNumQueries(1, User.objects.filter(pk=u1.pk).delete)
         self.assertEqual(User.objects.count(), 1)
         self.assertTrue(User.objects.filter(pk=u2.pk).exists())
+
+    def test_fast_delete_large_batch(self):
+        User.objects.bulk_create(User() for i in range(0, 2000))
+        # No problems here - we aren't going to cascade, so we will fast
+        # delete the objects in a single query.
+        self.assertNumQueries(1, User.objects.all().delete)
+        a = Avatar.objects.create(desc='a')
+        User.objects.bulk_create(User(avatar=a) for i in range(0, 2000))
+        # We don't hit parameter amount limits for a, so just one query for
+        # that + fast delete of the related objs.
+        self.assertNumQueries(2, a.delete)
+        self.assertEqual(User.objects.count(), 0)
 
     def test_fast_delete_joined_qs(self):
         a = Avatar.objects.create(desc='a')
