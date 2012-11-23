@@ -487,6 +487,14 @@ class BaseDatabaseOperations(object):
         """
         return len(objs)
 
+    def delete_batch_size(self, objs):
+        """
+        Returns the maximum allowed delete batch size for the backend. The
+        objects are going to be deleted by something like
+            DELETE ... WHERE pk IN (list_of_obj_pks)
+        """
+        return len(objs)
+
     def cache_key_culling_sql(self):
         """
         Returns a SQL query that retrieves the first cache key greater than the
