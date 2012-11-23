@@ -151,6 +151,13 @@ class DatabaseOperations(BaseDatabaseOperations):
         # cause a collision with a field name).
         return "django_date_trunc('%s', %s)" % (lookup_type.lower(), field_name)
 
+    def delete_batch_size(self, objs):
+        """
+        More than 999 objs will make us hit SQLITE_LIMIT_VARIABLE_NUMBER
+        (999).
+        """
+        return 999
+
     def drop_foreignkey_sql(self):
         return ""
 

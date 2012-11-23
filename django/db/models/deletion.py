@@ -171,6 +171,19 @@ class Collector(object):
                 return False
         return True
 
+    def get_del_batches(self, objs):
+        """
+        Returns the objs in suitably sized batches for the used connection.
+        The problem we are trying to avoid is too many query parameters when
+        fetching the related objects.
+        """
+        conn_batch_size = connections[self.using].ops.delete_batch_size(objs)
+        if len(objs) > conn_batch_size:
+            return [objs[i:i + conn_batch_size]
+                    for i in range(0, len(objs), conn_batch_size)]
+        else:
+            return [objs]
+
     def collect(self, objs, source=None, nullable=False, collect_related=True,
         source_attr=None, reverse_dependency=False):
         """
@@ -219,11 +232,13 @@ class Collector(object):
                 field = related.field
                 if field.rel.on_delete == DO_NOTHING:
                     continue
-                sub_objs = self.related_objects(related, new_objs)
-                if self.can_fast_delete(sub_objs, from_field=field):
-                    self.fast_deletes.append(sub_objs)
-                elif sub_objs:
-                    field.rel.on_delete(self, field, sub_objs, self.using)
+                batches = self.get_del_batches(new_objs)
+                for batch in batches:
+                    sub_objs = self.related_objects(related, batch)
+                    if self.can_fast_delete(sub_objs, from_field=field):
+                        self.fast_deletes.append(sub_objs)
+                    elif sub_objs:
+                        field.rel.on_delete(self, field, sub_objs, self.using)
 
             # TODO This entire block is only needed as a special case to
             # support cascade-deletes for GenericRelation. It should be
