@@ -258,3 +258,31 @@ class ExpressionsTests(TestCase):
             company_ceo_set__num_employees=F('company_ceo_set__num_employees')
         )
         self.assertEqual(str(qs.query).count('JOIN'), 2)
+
+    def test_ticket_18375_backwards_compat(self):
+        # There is a flag for Expression - reuse_multis - if set to True
+        # the F() will behave exactly like previously.
+        pk_f = F('pk')
+        ceo_employees_f = F('company_ceo_set__num_employees')
+        qs = Employee.objects.filter(
+            company_ceo_set__num_employees=pk_f
+        ).filter(
+            pk=ceo_employees_f
+        )
+        # ceo_employees_f doesn't reuse the join from first filter
+        self.assertEqual(str(qs.query).count('JOIN'), 2)
+        # Set the compat flag and it will reuse that join
+        ceo_employees_f.backwards_compat = True
+        qs = Employee.objects.filter(
+            company_ceo_set__num_employees=pk_f
+        ).filter(
+            pk=ceo_employees_f
+        )
+        self.assertEqual(str(qs.query).count('JOIN'), 1)
+        # The lookup in the second filter will not be able to reuse from F()
+        qs = Employee.objects.filter(
+            company_ceo_set__num_employees=pk_f
+        ).filter(
+            company_ceo_set__num_employees=ceo_employees_f
+        )
+        self.assertEqual(str(qs.query).count('JOIN'), 2)

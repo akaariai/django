@@ -10,7 +10,10 @@ class SQLEvaluator(object):
         self.cols = []
 
         self.contains_aggregate = False
-        self.reuse = reuse
+        if expression.backwards_compat is True:
+            self.reuse = REUSE_ALL
+        else:
+            self.reuse = reuse
         self.expression.prepare(self, query, allow_joins)
 
     def prepare(self):

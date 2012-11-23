@@ -20,6 +20,8 @@ class ExpressionNode(tree.Node):
     BITAND = '&'
     BITOR = '|'
 
+    backwards_compat = False
+
     def __init__(self, children=None, connector=None, negated=False):
         if children is not None and len(children) > 1 and connector is None:
             raise TypeError('You have to specify a connector.')

@@ -593,7 +593,8 @@ Miscellaneous
   contained lookups spanning multi-valued relations, they didn't always reuse
   the same relations as other lookups along the same chain. This was changed,
   and now F() expressions will always use the same relations as other lookups
-  within the same ``filter()`` call.
+  within the same ``filter()`` call. If the old behaviour is absolutely needed
+  for a given F() expression you can set f_expr.backwards_compat = True.
 
 * The :ttag:`csrf_token` template tag is no longer enclosed in a div. If you need
   HTML validation against pre-HTML5 Strict DTDs, you should add a div around it
