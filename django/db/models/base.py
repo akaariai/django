@@ -301,24 +301,64 @@ class ModelBase(type):
 
 class ModelState(object):
     """
-    A class for storing instance state
+    A class for storing instance state. By default the state kept is minimal.
+    We store the DB this model is stored in, and we keep info about if this
+    model is saved or not (in the flag adding).
+
+    The state is used for validation in some cases (new instances with
+    non-auto PKs).
+    
+    The state is also used to decide if we should save the model by
+      UPDATE - if not updated - INSERT
+    or
+      SELECT - if found UPDATE - else INSERT
+    See _save_table() for details about this.
+
+    In addition, the state offers a couple of hooks so that custom state can
+    do things like nicely working primary key updates and automatic saving
+    of changed fields only.
     """
-    def __init__(self, db=None):
-        self.db = db
-        # If true, uniqueness validation checks will consider this a new, as-yet-unsaved object.
-        # Necessary for correct validation of new instances of objects with explicit (non-auto) PKs.
-        # This impacts validation only; it has no effect on the actual save.
+
+    def __init__(self):
+        self.db = None
         self.adding = True
 
+    def set_state(self, db, adding, instance, updated_fields=None):
+        """
+        Called when the object is fetched from the DB or after the object has
+        been saved to the DB.
+        
+        The 'instance' is the instance that was operated upon.
+
+        The 'updated_fields' is a list of fields that were saved.
+        """
+        self.db = db
+        self.adding = adding
+
+    def reset(self):
+        """
+        Called when the model is deleted.
+        """
+        self.db = None
+        self.adding = False
+
+def get_deferred_fields(instance):
+    """
+    Gets the deferred fields of the model using its __class__.__dict__.
+    """
+    return [f.attname for f in instance._meta.fields
+            if f.attname not in instance.__dict__
+            and isinstance(instance.__class__.__dict__[f.attname], DeferredAttribute)]
 
 class Model(six.with_metaclass(ModelBase, object)):
     _deferred = False
+    _state_cls = ModelState
 
     def __init__(self, *args, **kwargs):
         signals.pre_init.send(sender=self.__class__, args=args, kwargs=kwargs)
 
         # Set up the storage for instance state
-        self._state = ModelState()
+        self._state = self._state_cls()
 
         # There is a rather weird disparity here; if kwargs, it's set, then args
         # overrides it. It should be one or the other; don't duplicate the work
@@ -523,12 +563,7 @@ class Model(six.with_metaclass(ModelBase, object)):
             for field in self._meta.fields:
                 if not field.primary_key and not hasattr(field, 'through'):
                     field_names.add(field.attname)
-            deferred_fields = [
-                f.attname for f in self._meta.fields
-                if f.attname not in self.__dict__
-                   and isinstance(self.__class__.__dict__[f.attname],
-                                  DeferredAttribute)]
-
+            deferred_fields = get_deferred_fields(self)
             loaded_fields = field_names.difference(deferred_fields)
             if loaded_fields:
                 update_fields = frozenset(loaded_fields)
@@ -567,10 +602,7 @@ class Model(six.with_metaclass(ModelBase, object)):
             self._save_parents(cls, using, update_fields)
         # Finally save the outermost model.
         updated = self._save_table(raw, cls, force_insert, force_update, using, update_fields)
-        # Store the database on which the object was saved
-        self._state.db = using
-        # Once saved, this is no longer a to-be-added instance.
-        self._state.adding = False
+        self._state.set_state(using, False, self, update_fields)
 
         # Signal that the save is complete
         if not meta.auto_created:
@@ -621,20 +653,19 @@ class Model(six.with_metaclass(ModelBase, object)):
         base_qs = cls._base_manager.using(using)
         # If possible, try an UPDATE. If that doesn't update anything, do an INSERT.
         if pk_set and not force_insert:
-            values = [(f, None, (raw and getattr(self, f.attname) or f.pre_save(self, False)))
-                      for f in non_pks]
+            values = self._get_update_values(non_pks, pk_val, raw)
             # If there are no values we will just check if the PK exists already.
             if not values:
                 # We can end up here when saving a model in inheritance chain where
                 # update_fields doesn't target any field in current model. In that
                 # case we just say the update succeeded.
-                updated = update_fields is not None or base_qs.filter(pk=pk_val).exists()
+                updated = update_fields is not None or self._check_exists(base_qs, pk_val)
             else:
                 try_update = True
                 if self._state.db != using and not force_update and not update_fields:
                     # If the model is in different DB then we will do first a query to
                     # check if the model already exists.
-                    try_update = base_qs.filter(pk=pk_val).exists()
+                    try_update = self._check_exists(base_qs, pk_val)
                 if try_update:
                     updated = self._do_update(base_qs, using, pk_val, values)
             if force_update and not updated:
@@ -661,6 +692,13 @@ class Model(six.with_metaclass(ModelBase, object)):
         return updated
 
     _save_table.alters_data = True
+
+    def _check_exists(self, base_qs, pk_val):
+        return base_qs.filter(pk=pk_val).exists()
+
+    def _get_update_values(self, non_pks, pk_val, raw):
+        return [(f, None, (raw and getattr(self, f.attname) or f.pre_save(self, False)))
+                for f in non_pks]
 
     def _do_update(self, base_qs, using, pk_val, values):
         """

@@ -308,12 +308,16 @@ class Collector(object):
             query = sql.DeleteQuery(model)
             for field, instances in six.iteritems(batches):
                 query.delete_batch([obj.pk for obj in instances], self.using, field)
+                for obj in instances:
+                    obj._state.reset()
 
         # delete instances
         for model, instances in six.iteritems(self.data):
             query = sql.DeleteQuery(model)
             pk_list = [obj.pk for obj in instances]
             query.delete_batch(pk_list, self.using)
+            for obj in instances:
+                obj._state.reset()
 
         # send post_delete signals
         for model, obj in self.instances_with_model():

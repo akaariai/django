@@ -308,11 +308,7 @@ class QuerySet(object):
                     obj = model_cls(**dict(zip(init_list, row_data)))
                 else:
                     obj = model(*row_data)
-
-                # Store the source database of the object
-                obj._state.db = db
-                # This object came from the database; it's not being added.
-                obj._state.adding = False
+                obj._state.set_state(db, False, obj)
 
             if extra_select:
                 for i, k in enumerate(extra_select):
@@ -1453,10 +1449,9 @@ def get_cached_row(row, index_start, using,  klass_info, offset=0,
         obj = klass(**dict(zip(field_names, fields)))
     else:
         obj = klass(*fields)
-    # If an object was retrieved, set the database state.
     if obj:
-        obj._state.db = using
-        obj._state.adding = False
+        obj._state.set_state(using, False, obj)
+    # If an object was retrieved, set the database state.
 
     # Instantiate related fields
     index_end = index_start + field_count + offset
@@ -1586,12 +1581,11 @@ class RawQuerySet(object):
             else:
                 model_init_args = [values[pos] for pos in model_init_field_pos]
                 instance = model_cls(*model_init_args)
+                instance._state.set_state(db, False, instance)
+            instance._state.set_state(db, False, instance)
             if annotation_fields:
                 for column, pos in annotation_fields:
                     setattr(instance, column, values[pos])
-
-            instance._state.db = db
-            instance._state.adding = False
 
             yield instance
 
