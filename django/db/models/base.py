@@ -537,57 +537,89 @@ class Model(six.with_metaclass(ModelBase, object)):
                        force_update=force_update, update_fields=update_fields)
     save.alters_data = True
 
-    def save_base(self, raw=False, cls=None, origin=None, force_insert=False,
+    def save_base(self, raw=False, force_insert=False,
                   force_update=False, using=None, update_fields=None):
         """
-        Does the heavy-lifting involved in saving. Subclasses shouldn't need to
-        override this method. It's separate from save() in order to hide the
-        need for overrides of save() to pass around internal-only parameters
-        ('raw', 'cls', and 'origin').
+        Handles the parts of saving which should be done only once per save,
+        yet need to be done in raw saves, too. This includes some sanity
+        checks and signal sending.
+
+        For each concrete parent of self does a _save_table(), and finally a
+        _save_table for self.
+
+        The 'raw' argument is telling the save_base to not save any parent
+        models, and to not do any changes to the values before save. This
+        is used by fixture loading.
         """
         using = using or router.db_for_write(self.__class__, instance=self)
         assert not (force_insert and (force_update or update_fields))
         assert update_fields is None or len(update_fields) > 0
-        if cls is None:
-            cls = origin = self.__class__
-            # Skip proxies, but keep the origin as the proxy model.
-            if cls._meta.proxy:
-                cls = cls._meta.concrete_model
+        cls = origin = self.__class__
+        # Skip proxies, but keep the origin as the proxy model.
+        if cls._meta.proxy:
+            cls = cls._meta.concrete_model
         meta = cls._meta
-
-        if origin and not meta.auto_created:
+        if not meta.auto_created:
             signals.pre_save.send(sender=origin, instance=self, raw=raw, using=using,
                                   update_fields=update_fields)
-
-        # If we are in a raw save, save the object exactly as presented.
-        # That means that we don't try to be smart about saving attributes
-        # that might have come from the parent class - we just save the
-        # attributes we have been given to the class we have been given.
+        # Save parent models (except in raw mode).
         if not raw:
-            for parent, field in meta.parents.items():
-                # At this point, parent's primary key field may be unknown
-                # (for example, from administration form which doesn't fill
-                # this field). If so, fill it.
-                if field and getattr(self, parent._meta.pk.attname) is None and getattr(self, field.attname) is not None:
-                    setattr(self, parent._meta.pk.attname, getattr(self, field.attname))
-                self.save_base(cls=parent, origin=None, using=using,
-                               update_fields=update_fields)
-                if field:
-                    setattr(self, field.attname, self._get_pk_val(parent._meta))
+            self._save_parents(cls, using, update_fields)
+        # Finally save the outermost model.
+        updated = self._save_table(raw, cls, force_insert, force_update, using, update_fields)
+        # Store the database on which the object was saved
+        self._state.db = using
+        # Once saved, this is no longer a to-be-added instance.
+        self._state.adding = False
 
+        # Signal that the save is complete
+        if not meta.auto_created:
+            signals.post_save.send(sender=origin, instance=self, created=(not updated),
+                                   update_fields=update_fields, raw=raw, using=using)
+            transaction.commit_unless_managed(using=using)
+
+    save_base.alters_data = True
+
+    def _save_parents(self, cls, using, update_fields):
+        # At this point, parent's primary key field may be unknown
+        # (for example, from administration form which doesn't fill
+        # this field). If so, fill it.
+        meta = cls._meta
+        for parent, field in meta.parents.items():
+            # Make sure the fields are sync between parent and self - they
+            # could be out of sync because population of only self, but not
+            # parent field.
+            if (field and getattr(self, parent._meta.pk.attname) is None
+                    and getattr(self, field.attname) is not None):
+                setattr(self, parent._meta.pk.attname, getattr(self, field.attname))
+            # Recurse to possible parents of the parent.
+            self._save_parents(cls=parent, using=using, update_fields=update_fields)
+            # Save the parent itself.
+            self._save_table(cls=parent, using=using, update_fields=update_fields)
+            # Set the parent's PK value to self.
+            if field:
+                setattr(self, field.attname, self._get_pk_val(parent._meta))
+
+    def _save_table(self, raw=False, cls=None, force_insert=False,
+                    force_update=False, using=None, update_fields=None):
+        """
+        Does the heavy-lifting involved in saving. Updates or inserts the data
+        for a single table into the DB.
+        """
+        meta = cls._meta
         non_pks = [f for f in meta.local_fields if not f.primary_key]
 
         if update_fields:
             non_pks = [f for f in non_pks
                        if f.name in update_fields or f.attname in update_fields]
 
-        # First, try an UPDATE. If that doesn't update anything, do an INSERT.
         pk_val = self._get_pk_val(meta)
         pk_set = pk_val is not None
         if not pk_set and (force_update or update_fields):
             raise ValueError("Cannot force an update in save() with no primary key.")
         updated = False
         base_qs = cls._base_manager.using(using)
+        # If possible, try an UPDATE. If that doesn't update anything, do an INSERT.
         if pk_set and not force_insert:
             values = [(f, None, (raw and getattr(self, f.attname) or f.pre_save(self, False)))
                       for f in non_pks]
@@ -626,19 +658,9 @@ class Model(six.with_metaclass(ModelBase, object)):
             result = self._do_insert(cls._base_manager, using, fields, update_pk, raw)
             if update_pk:
                 setattr(self, meta.pk.attname, result)
+        return updated
 
-        # Store the database on which the object was saved
-        self._state.db = using
-        # Once saved, this is no longer a to-be-added instance.
-        self._state.adding = False
-
-        # Signal that the save is complete
-        if origin and not meta.auto_created:
-            signals.post_save.send(sender=origin, instance=self, created=(not updated),
-                                   update_fields=update_fields, raw=raw, using=using)
-            transaction.commit_unless_managed(using=using)
-
-    save_base.alters_data = True
+    _save_table.alters_data = True
 
     def _do_update(self, base_qs, using, pk_val, values):
         """
