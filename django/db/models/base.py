@@ -549,12 +549,11 @@ class Model(six.with_metaclass(ModelBase, object)):
         assert not (force_insert and (force_update or update_fields))
         assert update_fields is None or len(update_fields) > 0
         if cls is None:
-            cls = self.__class__
-            meta = cls._meta
-            if not meta.proxy:
-                origin = cls
-        else:
-            meta = cls._meta
+            cls = origin = self.__class__
+            # Skip proxies, but keep the origin as the proxy model.
+            if cls._meta.proxy:
+                cls = cls._meta.concrete_model
+        meta = cls._meta
 
         if origin and not meta.auto_created:
             signals.pre_save.send(sender=origin, instance=self, raw=raw, using=using,
@@ -566,25 +565,18 @@ class Model(six.with_metaclass(ModelBase, object)):
         # attributes we have been given to the class we have been given.
         # We also go through this process to defer the save of proxy objects
         # to their actual underlying model.
-        if not raw or meta.proxy:
-            if meta.proxy:
-                org = cls
-            else:
-                org = None
+        if not raw:
+            org = None
             for parent, field in meta.parents.items():
                 # At this point, parent's primary key field may be unknown
                 # (for example, from administration form which doesn't fill
                 # this field). If so, fill it.
                 if field and getattr(self, parent._meta.pk.attname) is None and getattr(self, field.attname) is not None:
                     setattr(self, parent._meta.pk.attname, getattr(self, field.attname))
-
                 self.save_base(cls=parent, origin=org, using=using,
                                update_fields=update_fields)
-
                 if field:
                     setattr(self, field.attname, self._get_pk_val(parent._meta))
-            if meta.proxy:
-                return
 
         non_pks = [f for f in meta.local_fields if not f.primary_key]
 
