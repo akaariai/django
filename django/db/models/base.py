@@ -586,54 +586,58 @@ class Model(six.with_metaclass(ModelBase, object)):
             if meta.proxy:
                 return
 
-        if not meta.proxy:
-            non_pks = [f for f in meta.local_fields if not f.primary_key]
+        non_pks = [f for f in meta.local_fields if not f.primary_key]
 
-            if update_fields:
-                non_pks = [f for f in non_pks if f.name in update_fields or f.attname in update_fields]
+        if update_fields:
+            non_pks = [f for f in non_pks
+                       if f.name in update_fields or f.attname in update_fields]
 
-            # First, try an UPDATE. If that doesn't update anything, do an INSERT.
-            pk_val = self._get_pk_val(meta)
-            pk_set = pk_val is not None
-            record_exists = True
-            manager = cls._base_manager
-            if pk_set:
-                # Determine if we should do an update (pk already exists, forced update,
-                # no force_insert)
-                if ((force_update or update_fields) or (not force_insert and
-                        manager.using(using).filter(pk=pk_val).exists())):
-                    if force_update or non_pks:
-                        values = [(f, None, (raw and getattr(self, f.attname) or f.pre_save(self, False))) for f in non_pks]
-                        if values:
-                            rows = manager.using(using).filter(pk=pk_val)._update(values)
-                            if force_update and not rows:
-                                raise DatabaseError("Forced update did not affect any rows.")
-                            if update_fields and not rows:
-                                raise DatabaseError("Save with update_fields did not affect any rows.")
-                else:
-                    record_exists = False
-            if not pk_set or not record_exists:
-                if meta.order_with_respect_to:
-                    # If this is a model with an order_with_respect_to
-                    # autopopulate the _order field
-                    field = meta.order_with_respect_to
-                    order_value = manager.using(using).filter(**{field.name: getattr(self, field.attname)}).count()
-                    self._order = order_value
+        # First, try an UPDATE. If that doesn't update anything, do an INSERT.
+        pk_val = self._get_pk_val(meta)
+        pk_set = pk_val is not None
+        if not pk_set and (force_update or update_fields):
+            raise ValueError("Cannot force an update in save() with no primary key.")
+        updated = False
+        base_qs = cls._base_manager.using(using)
+        if pk_set and not force_insert:
+            values = [(f, None, (raw and getattr(self, f.attname) or f.pre_save(self, False)))
+                      for f in non_pks]
+            # If there are no values we will just check if the PK exists already.
+            if not values:
+                # We can end up here when saving a model in inheritance chain where
+                # update_fields doesn't target any field in current model. In that
+                # case we just say the update succeeded.
+                updated = update_fields is not None or base_qs.filter(pk=pk_val).exists()
+            else:
+                try_update = True
+                if self._state.db != using and not force_update and not update_fields:
+                    # If the model is in different DB then we will do first a query to
+                    # check if the model already exists.
+                    try_update = base_qs.filter(pk=pk_val).exists()
+                if try_update:
+                    updated = self._do_update(base_qs, using, pk_val, values)
+            if force_update and not updated:
+                raise DatabaseError("Forced update did not affect any rows.")
+            if update_fields and not updated:
+                raise DatabaseError("Save with update_fields did not affect any rows.")
+        if not updated:
+            if meta.order_with_respect_to:
+                # If this is a model with an order_with_respect_to
+                # autopopulate the _order field
+                field = meta.order_with_respect_to
+                order_value = base_qs.filter(
+                    **{field.name: getattr(self, field.attname)}).count()
+                self._order = order_value
 
-                fields = meta.local_fields
-                if not pk_set:
-                    if force_update or update_fields:
-                        raise ValueError("Cannot force an update in save() with no primary key.")
-                    fields = [f for f in fields if not isinstance(f, AutoField)]
+            fields = meta.local_fields
+            if not pk_set:
+                fields = [f for f in fields if not isinstance(f, AutoField)]
 
-                record_exists = False
-
-                update_pk = bool(meta.has_auto_field and not pk_set)
-                result = manager._insert([self], fields=fields, return_id=update_pk, using=using, raw=raw)
-
-                if update_pk:
-                    setattr(self, meta.pk.attname, result)
-            transaction.commit_unless_managed(using=using)
+            update_pk = bool(meta.has_auto_field and not pk_set)
+            result = self._do_insert(cls._base_manager, using, fields, update_pk, raw)
+            if update_pk:
+                setattr(self, meta.pk.attname, result)
+        transaction.commit_unless_managed(using=using)
 
         # Store the database on which the object was saved
         self._state.db = using
@@ -642,10 +646,26 @@ class Model(six.with_metaclass(ModelBase, object)):
 
         # Signal that the save is complete
         if origin and not meta.auto_created:
-            signals.post_save.send(sender=origin, instance=self, created=(not record_exists),
+            signals.post_save.send(sender=origin, instance=self, created=(not updated),
                                    update_fields=update_fields, raw=raw, using=using)
 
     save_base.alters_data = True
+
+    def _do_update(self, base_qs, using, pk_val, values):
+        """
+        This method will try to update the model. If the model was updated (in
+        the sense that an update query was done and a matching row was found
+        from the DB) the method will return True.
+        """
+        return base_qs.filter(pk=pk_val)._update(values) > 0
+
+    def _do_insert(self, manager, using, fields, update_pk, raw):
+        """
+        Do an INSERT. If update_pk is defined then this method should return
+        the new pk for the model.
+        """
+        return manager._insert([self], fields=fields, return_id=update_pk,
+                               using=using, raw=raw)
 
     def delete(self, using=None):
         using = using or router.db_for_write(self.__class__, instance=self)
