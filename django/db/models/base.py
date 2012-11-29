@@ -563,17 +563,14 @@ class Model(six.with_metaclass(ModelBase, object)):
         # That means that we don't try to be smart about saving attributes
         # that might have come from the parent class - we just save the
         # attributes we have been given to the class we have been given.
-        # We also go through this process to defer the save of proxy objects
-        # to their actual underlying model.
         if not raw:
-            org = None
             for parent, field in meta.parents.items():
                 # At this point, parent's primary key field may be unknown
                 # (for example, from administration form which doesn't fill
                 # this field). If so, fill it.
                 if field and getattr(self, parent._meta.pk.attname) is None and getattr(self, field.attname) is not None:
                     setattr(self, parent._meta.pk.attname, getattr(self, field.attname))
-                self.save_base(cls=parent, origin=org, using=using,
+                self.save_base(cls=parent, origin=None, using=using,
                                update_fields=update_fields)
                 if field:
                     setattr(self, field.attname, self._get_pk_val(parent._meta))
@@ -629,7 +626,6 @@ class Model(six.with_metaclass(ModelBase, object)):
             result = self._do_insert(cls._base_manager, using, fields, update_pk, raw)
             if update_pk:
                 setattr(self, meta.pk.attname, result)
-        transaction.commit_unless_managed(using=using)
 
         # Store the database on which the object was saved
         self._state.db = using
@@ -640,6 +636,7 @@ class Model(six.with_metaclass(ModelBase, object)):
         if origin and not meta.auto_created:
             signals.post_save.send(sender=origin, instance=self, created=(not updated),
                                    update_fields=update_fields, raw=raw, using=using)
+            transaction.commit_unless_managed(using=using)
 
     save_base.alters_data = True
 
