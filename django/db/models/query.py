@@ -288,8 +288,6 @@ class QuerySet(object):
                 else:
                     init_list.append(field.attname)
             model_cls = deferred_class_factory(self.model, skip)
-        else:
-            init_list = [field.attname for field in self.model._meta.fields]
 
         # Cache db, model and known_related_object outside the loop
         db = self.db
@@ -308,9 +306,10 @@ class QuerySet(object):
                 row_data = row[index_start:aggregate_start]
                 if skip:
                     obj = model_cls(**dict(zip(init_list, row_data)))
+                    obj._state.set_state(db, False, obj, loaded_fields=init_list)
                 else:
                     obj = model(*row_data)
-                obj._state.set_state(db, False, obj, loaded_fields=init_list)
+                    obj._state.set_state(db, False, obj)
 
             if extra_select:
                 for i, k in enumerate(extra_select):
@@ -1449,10 +1448,10 @@ def get_cached_row(row, index_start, using,  klass_info, offset=0,
             field_names.append(rel_field.attname)
             fields.append(value)
         obj = klass(**dict(zip(field_names, fields)))
+        obj._state.set_state(using, False, obj, loaded_fields=field_names)
     else:
         obj = klass(*fields)
-    if obj:
-        obj._state.set_state(using, False, obj, loaded_fields=field_names)
+        obj._state.set_state(using, False, obj)
     # If an object was retrieved, set the database state.
 
     # Instantiate related fields
@@ -1553,7 +1552,7 @@ class RawQuerySet(object):
 
         # Find out which model's fields are not present in the query.
         skip = set()
-        init_fields = model_init_field_names.keys() or [f.attname for f in self.model._meta.fields]
+        init_fields = model_init_field_names.keys() or None
         for field in self.model._meta.fields:
             if field.attname not in model_init_field_names:
                 skip.add(field.attname)
@@ -1581,12 +1580,12 @@ class RawQuerySet(object):
                 for attname, pos in six.iteritems(model_init_field_names):
                     model_init_kwargs[attname] = values[pos]
                 instance = model_cls(**model_init_kwargs)
+                instance._state.set_state(
+                    db, False, instance, loaded_fields=init_fields)
             else:
                 model_init_args = [values[pos] for pos in model_init_field_pos]
                 instance = model_cls(*model_init_args)
-                instance._state.set_state(
-                    db, False, instance, loaded_fields=init_fields)
-            instance._state.set_state(db, False, instance)
+                instance._state.set_state(db, False, instance)
             if annotation_fields:
                 for column, pos in annotation_fields:
                     setattr(instance, column, values[pos])
