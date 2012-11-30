@@ -323,7 +323,7 @@ class ModelState(object):
         self.db = None
         self.adding = True
 
-    def set_state(self, db, adding, instance, updated_fields=None):
+    def set_state(self, db, adding, instance, updated_fields=None, loaded_fields=None):
         """
         Called when the object is fetched from the DB or after the object has
         been saved to the DB.
@@ -331,6 +331,8 @@ class ModelState(object):
         The 'instance' is the instance that was operated upon.
 
         The 'updated_fields' is a list of fields that were saved.
+
+        The 'loaded_fields' is a list of fields that were loaded from the db.
         """
         self.db = db
         self.adding = adding
@@ -341,6 +343,12 @@ class ModelState(object):
         """
         self.db = None
         self.adding = False
+
+    def set_loaded_from_db(self, field_attname, val):
+        """
+        Called when a deferred field is loaded from DB.
+        """
+        pass
 
 def get_deferred_fields(instance):
     """

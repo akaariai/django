@@ -104,6 +104,7 @@ class DeferredAttribute(object):
                     self.field_name
                 )
             data[self.field_name] = val
+            instance._state.set_loaded_from_db(self.field_name, val)
         return data[self.field_name]
 
     def __set__(self, instance, value):
