@@ -307,7 +307,7 @@ class ModelState(object):
 
     The state is used for validation in some cases (new instances with
     non-auto PKs).
-    
+
     The state is also used to decide if we should save the model by
       UPDATE - if not updated - INSERT
     or
@@ -320,29 +320,26 @@ class ModelState(object):
     """
 
     def __init__(self):
-        self.db = None
-        self.adding = True
+        self.db, self.adding = None, True
 
     def set_state(self, db, adding, instance, updated_fields=None, loaded_fields=None):
         """
         Called when the object is fetched from the DB or after the object has
         been saved to the DB.
-        
+
         The 'instance' is the instance that was operated upon.
 
         The 'updated_fields' is a list of fields that were saved.
 
         The 'loaded_fields' is a list of fields that were loaded from the db.
         """
-        self.db = db
-        self.adding = adding
+        self.db, self.adding = db, adding
 
     def reset(self):
         """
         Called when the model is deleted.
         """
-        self.db = None
-        self.adding = False
+        self.db, self.adding = None, False
 
     def set_loaded_from_db(self, field_attname, val):
         """
