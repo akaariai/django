@@ -3,7 +3,8 @@ from __future__ import absolute_import, unicode_literals
 from django.db import IntegrityError
 from django.test import TestCase
 
-from .models import UpdatablePKModel, SingleFieldPK, TrackStateModel
+from .models import (UpdatablePKModel, SingleFieldPK,
+                     TrackStateModel, StateTrackingUpdatablePK)
 
 class UpdatablePKTests(TestCase):
 
@@ -64,7 +65,7 @@ class StateTrackingTests(TestCase):
         self.assertEqual(db_t.f2, 'bar')
         self.assertEqual(db_t.f3, 'bar')
         with self.assertNumQueries(0):
-            db_t.save() # No changes - no queries
+            db_t.save()  # No changes - no queries
 
     def test_deferred(self):
         t = TrackStateModel(f1='foo', f2='foo', f3='foo')
@@ -89,3 +90,24 @@ class StateTrackingTests(TestCase):
         self.assertEqual(db_t.f1, 'bar')
         self.assertEqual(db_t.f2, 'baz')
         self.assertEqual(db_t.f3, 'fuu')
+
+    def test_mixing(self):
+        s = StateTrackingUpdatablePK(code='code1', value='val', f2='foob')
+        s.save()
+        # Change values hidden to s.
+        s2 = StateTrackingUpdatablePK(code='code1', value='val', f2='bar')
+        s2.save()
+        with self.assertNumQueries(0):
+            s.save()
+        s.pk = 'code2'
+        with self.assertNumQueries(1):
+            s.save()
+        with self.assertNumQueries(0):
+            s.save()
+        s.value = 'val2'
+        with self.assertNumQueries(1):
+            s.save()
+        self.assertEqual(StateTrackingUpdatablePK.objects.count(), 1)
+        db_s = StateTrackingUpdatablePK.objects.get(code='code2')
+        self.assertEqual(db_s.value, 'val2')
+        self.assertEqual(db_s.f2, 'bar')

@@ -33,6 +33,7 @@ class UpdatablePK(object):
 class UpdatablePKModel(UpdatablePK, models.Model):
     code = models.CharField(max_length=20, primary_key=True)
     value = models.TextField()
+    f2 = models.CharField(max_length=20, null=True)
 
 class SingleFieldPK(UpdatablePK, models.Model):
     code = models.CharField(max_length=20, primary_key=True)
@@ -51,7 +52,7 @@ class ChangeTrackingState(ModelState):
                                        for attname in updated_fields)
             else:
                 self.old_values = ((attname, getattr(obj, attname))
-                                       for attname in updated_fields)
+                                   for attname in updated_fields)
         else:
             self.old_values = dict((attname, getattr(obj, attname))
                                    for attname in loaded_fields)
@@ -82,7 +83,33 @@ class StateTracking(object):
             return True
         return super(StateTracking, self)._check_exists(base_qs, pk_val)
 
-class TrackStateModel(StateTracking, models.Model):
+class NormalModel(models.Model):
     f1 = models.TextField()
     f2 = models.TextField()
     f3 = models.TextField()
+
+class TrackStateModel(StateTracking, NormalModel):
+    # You can take a normal model and just change it to state tracking in
+    # a subclass.
+
+    class Meta:
+        proxy = True
+
+class UpdatablePKStateTracking(ChangeTrackingState):
+    # The UpdatablePKState is so simple there is no need to do anything crazy to
+    # subclass these properly.
+    old_pk = None
+
+    def set_state(self, db, adding, obj, updated_fields=None, loaded_fields=None):
+        super(UpdatablePKStateTracking, self).set_state(
+            db, adding, obj, updated_fields, loaded_fields)
+        self.old_pk = obj.pk
+
+
+class StateTrackingUpdatablePK(StateTracking, UpdatablePKModel):
+    # And, the state tracking and updatable PK style can be mixed with
+    # some effort. We just need a slightly modified state class.
+    _state_cls = UpdatablePKStateTracking
+
+    class Meta:
+        proxy = True
