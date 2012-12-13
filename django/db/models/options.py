@@ -240,8 +240,9 @@ class Options(object):
     def get_fields_with_model(self):
         """
         Returns a sequence of (field, model) pairs for all fields. The "model"
-        element is None for fields on the current model. Mostly of use when
-        constructing queries so that we know which model a field belongs to.
+        element is None for fields on current model's concrete_model. Mostly
+        of use when constructing queries so that we know which model a field
+        belongs to.
         """
         try:
             self._field_cache
@@ -250,14 +251,19 @@ class Options(object):
         return self._field_cache
 
     def _fill_fields_cache(self):
-        cache = []
-        for parent in self.parents:
-            for field, model in parent._meta.get_fields_with_model():
-                if model:
-                    cache.append((field, model))
-                else:
-                    cache.append((field, parent))
-        cache.extend([(f, None) for f in self.local_fields])
+        if self.proxy:
+            proxy_opts = self.proxy_for_model._meta
+            proxy_opts._fill_fields_cache()
+            cache = proxy_opts._field_cache[:]
+        else:
+            cache = []
+            for parent in self.parents:
+                for field, model in parent._meta.get_fields_with_model():
+                    if model:
+                        cache.append((field, model))
+                    else:
+                        cache.append((field, parent))
+            cache.extend([(f, None) for f in self.local_fields])
         self._field_cache = tuple(cache)
         self._field_name_cache = [x for x, _ in cache]
 
