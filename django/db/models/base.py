@@ -576,7 +576,7 @@ class Model(six.with_metaclass(ModelBase, object)):
         if not meta.auto_created:
             signals.post_save.send(sender=origin, instance=self, created=(not updated),
                                    update_fields=update_fields, raw=raw, using=using)
-            transaction.commit_unless_managed(using=using)
+        transaction.commit_unless_managed(using=using)
 
     save_base.alters_data = True
 
