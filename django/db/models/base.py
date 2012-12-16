@@ -659,8 +659,6 @@ class Model(six.with_metaclass(ModelBase, object)):
                 setattr(self, meta.pk.attname, result)
         return updated
 
-    _save_table.alters_data = True
-
     def _do_update(self, base_qs, using, pk_val, values):
         """
         This method will try to update the model. If the model was updated (in
