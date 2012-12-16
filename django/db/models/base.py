@@ -544,9 +544,6 @@ class Model(six.with_metaclass(ModelBase, object)):
         yet need to be done in raw saves, too. This includes some sanity
         checks and signal sending.
 
-        For each concrete parent of self does a _save_table(), and finally a
-        _save_table for self.
-
         The 'raw' argument is telling the save_base to not save any parent
         models, and to not do any changes to the values before save. This
         is used by fixture loading.
@@ -627,7 +624,9 @@ class Model(six.with_metaclass(ModelBase, object)):
             if not values:
                 # We can end up here when saving a model in inheritance chain where
                 # update_fields doesn't target any field in current model. In that
-                # case we just say the update succeeded.
+                # case we just say the update succeeded. Another case ending up here
+                # is a model with just PK - in that case check that the PK still
+                # exists.
                 updated = update_fields is not None or base_qs.filter(pk=pk_val).exists()
             else:
                 try_update = True
