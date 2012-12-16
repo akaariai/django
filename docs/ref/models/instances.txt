@@ -299,6 +299,13 @@ follows this algorithm:
 * If the object's primary key attribute is *not* set, or if it's set but a
   record doesn't exist, Django executes an ``INSERT``.
 
+.. versionchanged:: 1.6
+  If the object is loaded from the same database it is saved into, then Django
+  will try to directly ``UPDATE`` the object instead of first doing a
+  ``SELECT``. If the ``UPDATE`` doesn't update anything (likely due to
+  concurrent delete), then an ``INSERT`` is still done. In effect this
+  optimization collapses the first two steps of the above algorithm into one.
+
 The one gotcha here is that you should be careful not to specify a primary-key
 value explicitly when saving new objects, if you cannot guarantee the
 primary-key value is unused. For more on this nuance, see `Explicitly specifying

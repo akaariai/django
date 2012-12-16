@@ -28,6 +28,10 @@ Minor features
   undefined if the given ``QuerySet`` isn't ordered and there are more than
   one ordered values to compare against.
 
+* The :meth:`Model.save() <django.db.models.Model.save()>` will try a direct
+  ``UPDATE`` instead of ``SELECT`` - ``UPDATE`` in case the saved object is
+  known to be loaded from the same database it is saved into.
+
 Backwards incompatible changes in 1.6
 =====================================
 
