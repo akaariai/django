@@ -2,6 +2,7 @@ from __future__ import absolute_import, unicode_literals
 
 from datetime import datetime
 
+from django.db.models import Q
 from django.test import TestCase
 from django.utils.translation import activate, deactivate
 
@@ -35,5 +36,10 @@ class ModelTest(TestCase):
             activate('en')
             self.assertEqual(Article.objects.filter(translation__title='Otsikko').count(), 0)
             self.assertEqual(Article.objects.filter(translation__title='Title').count(), 1)
+            # isnull works too (that is, we have proper left joins!)
+            self.assertEqual(Article.objects.filter(
+                Q(translation__title='Title') | Q(translation__isnull=True)).count(), 2)
+            self.assertEqual(Article.objects.filter(
+                Q(translation__title='Otsikko') | Q(translation__isnull=True)).count(), 1)
         finally:
             deactivate()

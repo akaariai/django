@@ -43,7 +43,7 @@ class TranslationField(object):
         opts = ArticleTranslation._meta
         target = ArticleTranslation._meta.pk
         from_opts = Article._meta
-        return [PathInfo(cls, target, from_opts, opts, cls, False, False)], opts, target, cls
+        return [PathInfo(cls, target, from_opts, opts, cls, False, False)], opts, target, target
 
     @classmethod
     def get_join_sql(cls, connection, qn, lhs_alias, rhs_alias, direct):
