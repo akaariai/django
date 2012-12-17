@@ -9,7 +9,7 @@ import warnings
 from itertools import tee
 
 from django.db import connection
-from django.db.models.query_utils import QueryWrapper
+from django.db.models.query_utils import QueryWrapper, InvalidQuery
 from django.conf import settings
 from django import forms
 from django.core import exceptions, validators
@@ -269,6 +269,9 @@ class Field(object):
     def get_cache_name(self):
         return '_%s_cache' % self.name
 
+    def get_related_cache_name(self):
+        return self.related.get_cache_name()
+
     def get_internal_type(self):
         return self.__class__.__name__
 
@@ -512,6 +515,41 @@ class Field(object):
         if name is not None:
             return '<%s: %s>' % (path, name)
         return '<%s>' % path
+
+    def select_related_descend(self, restricted, requested, load_fields, reverse=False):
+        """
+        Returns True if this field should be used to descend deeper for
+        select_related() purposes. Used by both the query construction code
+        (sql.query.fill_related_selections()) and the model instance creation code
+        (query.get_klass_info()).
+
+        Arguments:
+         * restricted - a boolean field, indicating if the field list has been
+           manually restricted using a requested clause)
+         * requested - The select_related() dictionary.
+         * load_fields - the set of fields to be loaded on this model
+         * reverse - boolean, True if we are checking a reverse select related
+        """
+        if not self.rel:
+            return False
+        if self.rel.parent_link and not reverse:
+            return False
+        if restricted:
+            if reverse and self.related_query_name() not in requested:
+                return False
+            if not reverse and self.name not in requested:
+                return False
+        if not restricted and self.null:
+            return False
+        if load_fields:
+            if self.name not in load_fields:
+                if restricted and self.name in requested:
+                    raise InvalidQuery("Field %s.%s cannot be both deferred"
+                                       " and traversed using select_related"
+                                       " at the same time." %
+                                       (self.model._meta.object_name, self.name))
+                return False
+        return True
 
 class AutoField(Field):
     description = _("Integer")

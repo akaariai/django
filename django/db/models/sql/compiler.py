@@ -4,7 +4,6 @@ from django.core.exceptions import FieldError
 from django.db import transaction
 from django.db.backends.util import truncate_name
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.query_utils import select_related_descend
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
         GET_ITERATOR_CHUNK_SIZE, SelectInfo)
 from django.db.models.sql.datastructures import EmptyResultSet
@@ -263,6 +262,9 @@ class SQLCompiler(object):
         if start_alias:
             seen[None] = start_alias
         for field, model in opts.get_fields_with_model():
+            if field not in opts.fields:
+                # Some sort of virtual field
+                continue
             if from_parent and model is not None and issubclass(from_parent, model):
                 # Avoid loading data for already loaded parents.
                 continue
@@ -406,7 +408,7 @@ class SQLCompiler(object):
 
         # If we get to this point and the field is a relation to another model,
         # append the default ordering for that model.
-        if field.rel and len(joins) > 1 and opts.ordering:
+        if hasattr(field, 'get_path_info') and len(joins) > 1 and opts.ordering:
             # Firstly, avoid infinite loops.
             if not already_seen:
                 already_seen = set()
@@ -441,7 +443,7 @@ class SQLCompiler(object):
         joins_to_promote = [j for j in joins if self.query.alias_refcount[j] < 2]
         alias = joins[-1]
         col = target.column
-        if not field.rel:
+        if not hasattr(field, 'get_path_info'):
             # To avoid inadvertent trimming of a necessary alias, use the
             # refcount to show that we are referencing a non-relation field on
             # the model.
@@ -603,26 +605,29 @@ class SQLCompiler(object):
             # in the field's local model. So, for those fields we want to use
             # the f.model - that is the field's local model.
             field_model = model or f.model
-            if not select_related_descend(f, restricted, requested,
-                                          only_load.get(field_model)):
+            if not f.select_related_descend(restricted, requested,
+                                            only_load.get(field_model)):
                 continue
-            table = f.rel.to._meta.db_table
             promote = nullable or f.null
             alias = self.query.join_parent_model(opts, model, root_alias, {})
-
+            pathinfos, to_opts, _, _ = f.get_path_info()
+            assert len(pathinfos) == 1
+            path = pathinfos[0]
+            table = to_opts.db_table
             alias = self.query.join((alias, table, f.column,
-                    f.rel.get_related_field().column),
-                    promote=promote, join_field=f)
+                                    path.to_field.column),
+                                    promote=promote, join_field=f)
+
             columns, aliases = self.get_default_columns(start_alias=alias,
-                    opts=f.rel.to._meta, as_pairs=True)
+                    opts=to_opts, as_pairs=True)
             self.query.related_select_cols.extend(
-                SelectInfo(col, field) for col, field in zip(columns, f.rel.to._meta.fields))
+                SelectInfo(col, field) for col, field in zip(columns, to_opts.fields))
             if restricted:
                 next = requested.get(f.name, {})
             else:
                 next = False
             new_nullable = f.null or promote
-            self.fill_related_selections(f.rel.to._meta, alias, cur_depth + 1,
+            self.fill_related_selections(to_opts, alias, cur_depth + 1,
                     next, restricted, new_nullable)
 
         if restricted:
@@ -632,8 +637,8 @@ class SQLCompiler(object):
                 if o.field.unique
             ]
             for f, model in related_fields:
-                if not select_related_descend(f, restricted, requested,
-                                              only_load.get(model), reverse=True):
+                if not f.select_related_descend(restricted, requested,
+                                                only_load.get(model), reverse=True):
                     continue
 
                 alias = self.query.join_parent_model(opts, f.rel.to, root_alias, {})
