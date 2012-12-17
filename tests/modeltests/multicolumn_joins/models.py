@@ -7,7 +7,7 @@ What we are interested in is some way to generate multicolumn joins using the
 ORM, not the specific way to do it.
 """
 from django.db import models
-from django.db.models.base import ModelBase
+from django.db.models.options import Options
 from django.db.models.related import PathInfo
 from django.utils.encoding import python_2_unicode_compatible
 from django.utils.translation import get_language
@@ -88,7 +88,7 @@ class FakeRelObject(object):
     def get_path_info(self):
         return FakeFKField.get_path_info(direct=False)
 
-class ArticleMeta(WrappedMeta):
+class ArticleMeta(Options):
 
     def get_field_by_name(self, name):
         if name == 'comments':
@@ -96,20 +96,13 @@ class ArticleMeta(WrappedMeta):
         elif name == 'translation':
             return TranslationField, None, False, False
         else:
-            return self.meta.get_field_by_name(name)
+            return super(ArticleMeta, self).get_field_by_name(name)
 
     def get_fields_with_model(self):
-        return self.meta.get_fields_with_model() + ((TranslationField, None),)
-
-class ArticleBase(ModelBase):
-    def __new__(cls, name, bases, attrs):
-        super_new = super(ArticleBase, cls).__new__(cls, name, bases, attrs)
-        super_new._meta = ArticleMeta(super_new._meta)
-        return super_new
+        return super(ArticleMeta, self).get_fields_with_model() + ((TranslationField, None),)
 
 @python_2_unicode_compatible
 class Article(models.Model):
-    __metaclass__ = ArticleBase
     headline = models.CharField(max_length=100, default='Default headline')
     pub_date = models.DateTimeField()
     data = models.TextField()
@@ -120,27 +113,21 @@ class Article(models.Model):
 
     def __str__(self):
         return self.headline
+Article._meta.__class__ = ArticleMeta
 
 
-class ArticleCommentMeta(WrappedMeta):
+class ArticleCommentMeta(Options):
     def get_field_by_name(self, name):
         if name == 'article':
             return FakeFKField, None, True, False
         else:
-            return self.meta.get_field_by_name(name)
-
-class ArticleCommentBase(ModelBase):
-    def __new__(cls, name, bases, attrs):
-        super_new = super(ArticleCommentBase, cls).__new__(cls, name, bases, attrs)
-        super_new._meta = ArticleCommentMeta(super_new._meta)
-        return super_new
+            return super(ArticleCommentMeta, self).get_field_by_name(name)
 
 class ArticleComment(models.Model):
-    __metaclass__ = ArticleCommentBase
-
     headline = models.CharField(max_length=100)
     pub_date = models.DateTimeField()
     comment = models.TextField()
+ArticleComment._meta.__class__ = ArticleCommentMeta
 
 class ArticleTranslation(models.Model):
     article = models.ForeignKey(Article, related_name='translations')
