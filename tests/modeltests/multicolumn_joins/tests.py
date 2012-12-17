@@ -66,11 +66,15 @@ class ModelTest(TestCase):
             ArticleTranslation.objects.create(article=self.a2, lang='en', title='Title 2')
             # Some ordering stuff still...
             with self.assertNumQueries(1):
-                objs = list(Article.objects.select_related('translation').order_by('translation__title'))
+                qs = Article.objects.select_related('translation').order_by('translation__title')
+                self.assertTrue(str(qs.query).count('JOIN'), 1)
+                objs = list(qs)
                 self.assertEqual(objs[0].translation.title, 'Title')
                 self.assertEqual(objs[1].translation.title, 'Title 2')
             with self.assertNumQueries(1):
-                objs = list(Article.objects.select_related('translation').order_by('-translation__title'))
+                qs = Article.objects.select_related('translation').order_by('-translation__title')
+                self.assertTrue(str(qs.query).count('JOIN'), 1)
+                objs = list(qs)
                 self.assertEqual(objs[0].translation.title, 'Title 2')
                 self.assertEqual(objs[1].translation.title, 'Title')
         finally:

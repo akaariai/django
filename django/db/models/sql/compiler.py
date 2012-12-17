@@ -613,7 +613,7 @@ class SQLCompiler(object):
 
             pathinfos, opts, _, _ = f.get_path_info()
             table = opts.db_table
-            alias = self.query.join((alias, table, f, True), promote=promote)
+            alias = self.query.join((alias, table, f, pathinfos[0].direct), promote=promote)
             columns, aliases = self.get_default_columns(start_alias=alias,
                     opts=opts, as_pairs=True)
             self.query.related_select_cols.extend(

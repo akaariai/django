@@ -939,12 +939,6 @@ class Query(object):
         else:
             reuse = [a for a in existing if a in reuse]
         for alias in reuse:
-            if join_field and self.alias_map[alias].join_field != join_field:
-                # The join_map doesn't contain join_field (mainly because
-                # fields in Query structs are problematic in pickling), so
-                # check that the existing join is created using the same
-                # join_field used for the under work join.
-                continue
             self.ref_alias(alias)
             if promote or (lhs and self.alias_map[lhs].join_type == self.LOUTER):
                 self.promote_joins([alias])
