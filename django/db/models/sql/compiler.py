@@ -274,8 +274,7 @@ class SQLCompiler(object):
                 except KeyError:
                     link_field = opts.get_ancestor_link(model)
                     alias = self.query.join((start_alias, model._meta.db_table,
-                            link_field.column, model._meta.pk.column),
-                            join_field=link_field)
+                                             link_field, True))
                     seen[model] = alias
             else:
                 # If we're starting from the base model of the queryset, the
@@ -480,11 +479,13 @@ class SQLCompiler(object):
         if alias:
             while 1:
                 join = self.query.alias_map[alias]
-                if col != join.rhs_join_col:
+                if not join.direct:
+                    break
+                elif col != join.join_field.column:
                     break
                 self.query.unref_alias(alias)
                 alias = join.lhs_alias
-                col = join.lhs_join_col
+                col = join.join_field.rel.get_related_field().column
         return col, alias
 
     def get_from_clause(self):
@@ -507,22 +508,18 @@ class SQLCompiler(object):
             if not self.query.alias_refcount[alias]:
                 continue
             try:
-                name, alias, join_type, lhs, lhs_col, col, _, join_field = self.query.alias_map[alias]
+                name, alias, join_type, lhs, _, join_field, direct = self.query.alias_map[alias]
             except KeyError:
                 # Extra tables can end up in self.tables, but not in the
                 # alias_map if they aren't in a join. That's OK. We skip them.
                 continue
             alias_str = (alias != name and ' %s' % alias or '')
             if join_type and not first:
-                if join_field and hasattr(join_field, 'get_extra_join_sql'):
-                    extra_cond, extra_params = join_field.get_extra_join_sql(
-                        self.connection, qn, lhs, alias)
-                    from_params.extend(extra_params)
-                else:
-                    extra_cond = ""
-                result.append('%s %s%s ON (%s.%s = %s.%s%s)' %
-                              (join_type, qn(name), alias_str, qn(lhs),
-                               qn2(lhs_col), qn(alias), qn2(col), extra_cond))
+                join_sql, join_params = join_field.get_join_sql(
+                    self.connection, qn, lhs, alias, direct)
+                result.append('%s %s%s ON (%s)' %
+                              (join_type, qn(name), alias_str, join_sql))
+                from_params.extend(join_params)
             else:
                 connector = not first and ', ' or ''
                 result.append('%s%s%s' % (connector, qn(name), alias_str))
@@ -635,18 +632,15 @@ class SQLCompiler(object):
                     if not int_opts.parents[int_model]:
                         int_opts = int_model._meta
                         continue
-                    lhs_col = int_opts.parents[int_model].column
                     link_field = int_opts.get_ancestor_link(int_model)
                     int_opts = int_model._meta
-                    alias = self.query.join((alias, int_opts.db_table, lhs_col,
-                            int_opts.pk.column), promote=promote, join_field=link_field)
+                    alias = self.query.join(
+                        (alias, int_opts.db_table, link_field, True), promote=promote)
                     alias_chain.append(alias)
             else:
                 alias = root_alias
 
-            alias = self.query.join((alias, table, f.column,
-                    f.rel.get_related_field().column),
-                    promote=promote, join_field=f)
+            alias = self.query.join((alias, table, f, True), promote=promote)
             columns, aliases = self.get_default_columns(start_alias=alias,
                     opts=f.rel.to._meta, as_pairs=True)
             self.query.related_select_cols.extend(
@@ -684,18 +678,15 @@ class SQLCompiler(object):
                         if not int_opts.parents[int_model]:
                             int_opts = int_model._meta
                             continue
-                        lhs_col = int_opts.parents[int_model].column
                         link_field = int_opts.get_ancestor_link(int_model)
                         int_opts = int_model._meta
                         alias = self.query.join(
-                            (alias, int_opts.db_table, lhs_col, int_opts.pk.column),
-                            promote=True, join_field=link_field
-                        )
+                            (alias, int_opts.db_table, link_field, True),
+                            promote=True)
                         alias_chain.append(alias)
                 alias = self.query.join(
-                    (alias, table, f.rel.get_related_field().column, f.column),
-                    promote=True, join_field=f
-                )
+                    (alias, table, f, False),
+                    promote=True)
                 from_parent = (opts.model if issubclass(model, opts.model)
                                else None)
                 columns, aliases = self.get_default_columns(start_alias=alias,

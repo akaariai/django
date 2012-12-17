@@ -468,6 +468,9 @@ class BaseDatabaseOperations(object):
         self.connection = connection
         self._cache = None
 
+    def join_sql(self, qn, lhs_alias, rhs_alias, lhs_col, rhs_col):
+        return '%s.%s = %s.%s' % (qn(lhs_alias), qn(lhs_col), qn(rhs_alias), qn(rhs_col))
+
     def autoinc_sql(self, table, column):
         """
         Returns any SQL needed to support auto-incrementing primary keys, or

@@ -24,7 +24,7 @@ GET_ITERATOR_CHUNK_SIZE = 100
 # dictionary in the Query class).
 JoinInfo = namedtuple('JoinInfo',
                       'table_name rhs_alias join_type lhs_alias '
-                      'lhs_join_col rhs_join_col nullable join_field')
+                      'nullable join_field direct')
 
 # PathInfo is used when converting lookups (fk__somecol). The contents
 # describe the join in Model terms (model Options and Fields for both

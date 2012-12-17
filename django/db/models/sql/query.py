@@ -211,6 +211,7 @@ class Query(object):
                 field_id = (model.app_label, model.object_name, join_info.join_field.name)
                 new_alias_map[alias] = join_info._replace(join_field=field_id)
         obj_dict['alias_map'] = new_alias_map
+        del obj_dict['join_map']
         return obj_dict
 
     def __setstate__(self, obj_dict):
@@ -232,7 +233,12 @@ class Query(object):
                 new_alias_map[alias] = join_info._replace(
                     join_field=get_model(field_id[0], field_id[1])._meta.get_field(field_id[2]))
         obj_dict['alias_map'] = new_alias_map
-
+        join_map = obj_dict['join_map'] = {}
+        for alias, join in new_alias_map.items():
+            connection = join.lhs_alias, join.table_name, join.join_field, join.direct
+            if not connection in join_map:
+                join_map[connection] = []
+            join_map[connection].append(alias)
         self.__dict__.update(obj_dict)
 
     def prepare(self):
@@ -498,15 +504,14 @@ class Query(object):
         # Now, add the joins from rhs query into the new query (skipping base
         # table).
         for alias in rhs.tables[1:]:
-            table, _, join_type, lhs, lhs_col, col, nullable, join_field = rhs.alias_map[alias]
+            table, _, join_type, lhs, nullable, join_field, direct = rhs.alias_map[alias]
             promote = (join_type == self.LOUTER)
             # If the left side of the join was already relabeled, use the
             # updated alias.
             lhs = change_map.get(lhs, lhs)
             new_alias = self.join(
-                (lhs, table, lhs_col, col), reuse=reuse, promote=promote,
-                outer_if_first=not conjunction, nullable=nullable,
-                join_field=join_field)
+                (lhs, table, join_field, direct), reuse=reuse, promote=promote,
+                outer_if_first=not conjunction, nullable=nullable)
             # We can't reuse the same join again in the query. If we have two
             # distinct joins for the same connection in rhs query, then the
             # combined query must have two joins, too.
@@ -743,7 +748,7 @@ class Query(object):
         aliases = list(aliases)
         while aliases:
             alias = aliases.pop(0)
-            if self.alias_map[alias].rhs_join_col is None:
+            if self.alias_map[alias].join_field is None:
                 # This is the base table (first FROM entry) - this table
                 # isn't really joined at all in the query, so we should not
                 # alter its join type.
@@ -892,7 +897,7 @@ class Query(object):
         return len([1 for count in self.alias_refcount.values() if count])
 
     def join(self, connection, reuse=REUSE_ALL, promote=False,
-             outer_if_first=False, nullable=False, join_field=None):
+             outer_if_first=False, nullable=False):
         """
         Returns an alias for the join in 'connection', either reusing an
         existing alias for that join or creating a new one. 'connection' is a
@@ -924,8 +929,7 @@ class Query(object):
 
         The 'join_field' is the field we are joining along (if any).
         """
-        lhs, table, lhs_col, col = connection
-        assert lhs is None or join_field is not None
+        lhs, table, join_field, direct = connection
         existing = self.join_map.get(connection, ())
         if reuse == REUSE_ALL:
             reuse = existing
@@ -958,8 +962,7 @@ class Query(object):
             join_type = self.LOUTER
         else:
             join_type = self.INNER
-        join = JoinInfo(table, alias, join_type, lhs, lhs_col, col, nullable,
-                        join_field)
+        join = JoinInfo(table, alias, join_type, lhs, nullable, join_field, direct)
         self.alias_map[alias] = join
         if connection in self.join_map:
             self.join_map[connection] += (alias,)
@@ -986,11 +989,26 @@ class Query(object):
 
         for field, model in opts.get_fields_with_model():
             if model not in seen:
-                link_field = opts.get_ancestor_link(model)
-                seen[model] = self.join(
-                    (root_alias, model._meta.db_table, link_field.column,
-                     model._meta.pk.column), join_field=link_field)
+                self.join_model(opts, model, root_alias, seen)
         self.included_inherited_models = seen
+
+    def join_model(self, opts, model, alias, seen=None):
+        if not seen:
+            seen = {}
+        int_opts = opts
+        for int_model in opts.get_base_chain(model):
+            # Proxy model have elements in base chain
+            # with no parents, assign the new options
+            # object and skip to the next base in that
+            # case
+            if int_model in seen:
+                break
+            if not int_opts.parents[int_model]:
+                int_opts = int_model._meta
+                continue
+            link_field = int_opts.get_ancestor_link(int_model)
+            int_opts = int_model._meta
+            alias = seen[int_model] = self.join((alias, int_opts.db_table, link_field, True))
 
     def remove_inherited_models(self):
         """
@@ -1220,7 +1238,11 @@ class Query(object):
                 if len(join_list) > 1:
                     for alias in join_list:
                         if self.alias_map[alias].join_type == self.LOUTER:
-                            j_col = self.alias_map[alias].rhs_join_col
+                            join = self.alias_map[alias]
+                            if join.direct:
+                                j_col = join.join_field.rel.get_related_field().column
+                            else:
+                                j_col = join.join_field.column
                             # The join promotion logic should never produce
                             # a LOUTER join for the base join - assert that.
                             assert j_col is not None
@@ -1486,9 +1508,8 @@ class Query(object):
                 nullable = self.is_nullable(from_field)
             else:
                 nullable = True
-            connection = alias, opts.db_table, from_field.column, to_field.column
-            alias = self.join(connection, reuse=can_reuse, nullable=nullable,
-                              join_field=join_field)
+            connection = alias, opts.db_table, join_field, direct
+            alias = self.join(connection, reuse=can_reuse, nullable=nullable)
             joins.append(alias)
         return final_field, target, opts, joins, path
 
@@ -1644,18 +1665,11 @@ class Query(object):
 
         try:
             for name in field_names:
-                field, target, u2, joins, u3 = self.setup_joins(
+                field, target, u2, joins, path = self.setup_joins(
                         name.split(LOOKUP_SEP), opts, alias, REUSE_ALL, allow_m2m,
                         True)
+                col, _, joins = self.trim_joins(target, joins, path)
                 final_alias = joins[-1]
-                col = target.column
-                if len(joins) > 1:
-                    join = self.alias_map[final_alias]
-                    if col == join.rhs_join_col:
-                        self.unref_alias(final_alias)
-                        final_alias = join.lhs_alias
-                        col = join.lhs_join_col
-                        joins = joins[:-1]
                 self.promote_joins(joins[1:])
                 self.select.append(SelectInfo((final_alias, col), field))
         except MultiJoin:
@@ -1937,7 +1951,7 @@ class Query(object):
         alias = self.get_initial_alias()
         field, col, opts, joins, extra = self.setup_joins(
                 start.split(LOOKUP_SEP), opts, alias, REUSE_ALL)
-        select_col = self.alias_map[joins[1]].lhs_join_col
+        select_field = self.alias_map[joins[1]].join_field
         select_alias = alias
 
         # The call to setup_joins added an extra reference to everything in
@@ -1950,12 +1964,13 @@ class Query(object):
         # is *always* the same value as lhs).
         for alias in joins[1:]:
             join_info = self.alias_map[alias]
-            if (join_info.lhs_join_col != select_col
-                    or join_info.join_type != self.INNER):
+            if (join_info.join_field != select_field
+                    or not join_info.direct):
                 break
             self.unref_alias(select_alias)
             select_alias = join_info.rhs_alias
-            select_col = join_info.rhs_join_col
+            select_field = join_info.join_field
+        select_col = select_field.rel.get_related_field().column
         self.select = [SelectInfo((select_alias, select_col), None)]
         self.remove_inherited_models()
 

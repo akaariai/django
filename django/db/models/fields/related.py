@@ -1004,6 +1004,13 @@ class ForeignKey(RelatedField, Field):
         )
         Field.__init__(self, **kwargs)
 
+    def get_join_sql(self, connection, qn, lhs_alias, rhs_alias, direct):
+        lhs_col = self.column
+        rhs_col = self.rel.get_related_field().column
+        if not direct:
+            lhs_col, rhs_col = rhs_col, lhs_col
+        return connection.ops.join_sql(qn, lhs_alias, rhs_alias, lhs_col, rhs_col), []
+
     def validate(self, value, model_instance):
         if self.rel.parent_link:
             return

@@ -211,10 +211,14 @@ class GenericRelation(RelatedField, Field):
         """
         return ContentType.objects.get_for_model(self.model)
 
-    def get_extra_join_sql(self, connection, qn, lhs_alias, rhs_alias):
+    def get_join_sql(self, connection, qn, lhs_alias, rhs_alias, direct):
+        rhs_col = self.rel.to._meta.get_field_by_name(self.object_id_field_name)[0].column
+        lhs_col = self.model._meta.pk.column
+        clause1 = connection.ops.join_sql(qn, lhs_alias, rhs_alias, lhs_col, rhs_col)
         extra_col = self.rel.to._meta.get_field_by_name(self.content_type_field_name)[0].column
         contenttype = self.get_content_type().pk
-        return " AND %s.%s = %%s" % (qn(rhs_alias), qn(extra_col)), [contenttype]
+        clause2 = '%s.%s = %%s' % (qn(rhs_alias), qn(extra_col))
+        return "%s AND %s" % (clause1, clause2), [contenttype]
 
     def bulk_related_objects(self, objs, using=DEFAULT_DB_ALIAS):
         """
