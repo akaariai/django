@@ -4,7 +4,6 @@ from django.core.exceptions import FieldError
 from django.db import transaction
 from django.db.backends.util import truncate_name
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.query_utils import select_related_descend
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
         GET_ITERATOR_CHUNK_SIZE, REUSE_ALL, SelectInfo)
 from django.db.models.sql.datastructures import EmptyResultSet
@@ -265,6 +264,9 @@ class SQLCompiler(object):
         if start_alias:
             seen[None] = start_alias
         for field, model in opts.get_fields_with_model():
+            if not hasattr(field, 'column'):
+                # Some sort of virtual field
+                continue
             if from_parent and model is not None and issubclass(from_parent, model):
                 # Avoid loading data for already loaded parents.
                 continue
@@ -603,24 +605,25 @@ class SQLCompiler(object):
             # in the field's local model. So, for those fields we want to use
             # the f.model - that is the field's local model.
             field_model = model or f.model
-            if not select_related_descend(f, restricted, requested,
-                                          only_load.get(field_model)):
+            if not f.select_related_descend(restricted, requested,
+                                            only_load.get(field_model)):
                 continue
-            table = f.rel.to._meta.db_table
             promote = nullable or f.null
             alias = self.query.join_parent_model(opts, model, root_alias, {})
 
+            pathinfos, opts, _, _ = f.get_path_info()
+            table = opts.db_table
             alias = self.query.join((alias, table, f, True), promote=promote)
             columns, aliases = self.get_default_columns(start_alias=alias,
-                    opts=f.rel.to._meta, as_pairs=True)
+                    opts=opts, as_pairs=True)
             self.query.related_select_cols.extend(
-                SelectInfo(col, field) for col, field in zip(columns, f.rel.to._meta.fields))
+                SelectInfo(col, field) for col, field in zip(columns, opts.fields))
             if restricted:
                 next = requested.get(f.name, {})
             else:
                 next = False
             new_nullable = f.null or promote
-            self.fill_related_selections(f.rel.to._meta, alias, cur_depth + 1,
+            self.fill_related_selections(opts, alias, cur_depth + 1,
                     next, restricted, new_nullable)
 
         if restricted:
@@ -630,8 +633,8 @@ class SQLCompiler(object):
                 if o.field.unique
             ]
             for f, model in related_fields:
-                if not select_related_descend(f, restricted, requested,
-                                              only_load.get(model), reverse=True):
+                if not f.select_related_descend(restricted, requested,
+                                                only_load.get(model), reverse=True):
                     continue
 
                 alias = self.query.join_parent_model(opts, f.rel.to, root_alias, {})

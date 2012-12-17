@@ -11,8 +11,7 @@ from django.core import exceptions
 from django.db import connections, router, transaction, IntegrityError
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import AutoField
-from django.db.models.query_utils import (Q, select_related_descend,
-    deferred_class_factory, InvalidQuery)
+from django.db.models.query_utils import (Q, deferred_class_factory, InvalidQuery)
 from django.db.models.deletion import Collector
 from django.db.models import sql
 from django.utils.functional import partition
@@ -1386,21 +1385,22 @@ def get_klass_info(klass, max_depth=0, cur_depth=0, requested=None,
     restricted = requested is not None
 
     related_fields = []
-    for f in klass._meta.fields:
-        if select_related_descend(f, restricted, requested, load_fields):
+    for f, _ in klass._meta.get_fields_with_model():
+        if f.select_related_descend(restricted, requested, load_fields):
+            _, next_opts, _, _ = f.get_path_info()
             if restricted:
                 next = requested[f.name]
             else:
                 next = None
-            klass_info = get_klass_info(f.rel.to, max_depth=max_depth, cur_depth=cur_depth+1,
+            klass_info = get_klass_info(next_opts.model, max_depth=max_depth, cur_depth=cur_depth+1,
                                         requested=next, only_load=only_load)
             related_fields.append((f, klass_info))
 
     reverse_related_fields = []
     if restricted:
         for o in klass._meta.get_all_related_objects():
-            if o.field.unique and select_related_descend(o.field, restricted, requested,
-                                                         only_load.get(o.model), reverse=True):
+            if o.field.unique and o.field.select_related_descend(
+                    restricted, requested, only_load.get(o.model), reverse=True):
                 next = requested[o.field.related_query_name()]
                 parent = klass if issubclass(o.model, klass) else None
                 klass_info = get_klass_info(o.model, max_depth=max_depth, cur_depth=cur_depth+1,
@@ -1414,7 +1414,7 @@ def get_klass_info(klass, max_depth=0, cur_depth=0, requested=None,
     return klass, field_names, field_count, related_fields, reverse_related_fields, pk_idx
 
 
-def get_cached_row(row, index_start, using,  klass_info, offset=0,
+def get_cached_row(row, index_start, using, klass_info, offset=0,
                    parent_data=()):
     """
     Helper function that recursively returns an object with the specified
@@ -1476,7 +1476,7 @@ def get_cached_row(row, index_start, using,  klass_info, offset=0,
             if f.unique and rel_obj is not None:
                 # If the field is unique, populate the
                 # reverse descriptor cache on the related object
-                setattr(rel_obj, f.related.get_cache_name(), obj)
+                setattr(rel_obj, f.get_related_cache_name(), obj)
 
     # Now do the same, but for reverse related objects.
     # Only handle the restricted case - i.e., don't do a depth
@@ -1489,14 +1489,14 @@ def get_cached_row(row, index_start, using,  klass_info, offset=0,
                 parent_data.append((rel_field, getattr(obj, rel_field.attname)))
         # Recursively retrieve the data for the related object
         cached_row = get_cached_row(row, index_end, using, klass_info,
-                                   parent_data=parent_data)
+                                    parent_data=parent_data)
         # If the recursive descent found an object, populate the
         # descriptor caches relevant to the object
         if cached_row:
             rel_obj, index_end = cached_row
             if obj is not None:
                 # populate the reverse descriptor cache
-                setattr(obj, f.related.get_cache_name(), rel_obj)
+                setattr(obj, f.get_related_cache_name(), rel_obj)
             if rel_obj is not None:
                 # If the related object exists, populate
                 # the descriptor cache.

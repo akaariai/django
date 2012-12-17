@@ -38,6 +38,10 @@ class FakeFKField(object):
                 (lhs, headline, rhs, headline, lhs, pub_date, rhs, pub_date)), []
 
 class TranslationField(object):
+    null = True
+    name = 'translation'
+    unique = True
+
     @classmethod
     def get_path_info(cls):
         opts = ArticleTranslation._meta
@@ -53,6 +57,20 @@ class TranslationField(object):
         id = qn('id')
         return ('%s.%s = %s.%s AND %s.%s = %%s' %
                 (lhs, id, rhs, article_id, rhs, lang)), [get_language()]
+
+    @classmethod
+    def select_related_descend(cls, restricted, requested, only_load):
+        if requested and 'translation' in requested:
+            return True
+        return restricted
+
+    @classmethod
+    def get_cache_name(cls):
+        return 'translation'
+
+    @classmethod
+    def get_related_cache_name(cls):
+        return 'article'
 
 class WrappedMeta(object):
     def __init__(self, meta):
@@ -79,6 +97,9 @@ class ArticleMeta(WrappedMeta):
             return TranslationField, None, False, False
         else:
             return self.meta.get_field_by_name(name)
+
+    def get_fields_with_model(self):
+        return self.meta.get_fields_with_model() + ((TranslationField, None),)
 
 class ArticleBase(ModelBase):
     def __new__(cls, name, bases, attrs):
@@ -125,3 +146,8 @@ class ArticleTranslation(models.Model):
     article = models.ForeignKey(Article, related_name='translations')
     lang = models.CharField(max_length=2)
     title = models.CharField(max_length=100)
+
+    class Meta:
+        unique_together = (('article', 'lang'),)
+
+TranslationField.model = ArticleTranslation

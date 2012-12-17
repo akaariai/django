@@ -29,7 +29,7 @@ class ModelTest(TestCase):
     def test_translation_join(self):
         try:
             ArticleTranslation.objects.create(article=self.a1, lang='fi', title='Otsikko')
-            ArticleTranslation.objects.create(article=self.a2, lang='en', title='Title')
+            ArticleTranslation.objects.create(article=self.a1, lang='en', title='Title')
             activate('fi')
             self.assertEqual(Article.objects.filter(translation__title='Otsikko').count(), 1)
             self.assertEqual(Article.objects.filter(translation__title='Title').count(), 0)
@@ -42,5 +42,36 @@ class ModelTest(TestCase):
             self.assertEqual(Article.objects.filter(
                 Q(translation__title='Otsikko') | Q(translation__isnull=True)).count(), 1)
             self.assertEqual(Article.objects.aggregate(Count('translation'))['translation__count'], 1)
+        finally:
+            deactivate()
+
+    def test_select_related(self):
+        ArticleTranslation.objects.create(article=self.a1, lang='fi', title='Otsikko')
+        ArticleTranslation.objects.create(article=self.a1, lang='en', title='Title')
+        qs = Article.objects.select_related('translation').order_by('headline')
+        try:
+            with self.assertNumQueries(1):
+                activate('fi')
+                objs = list(qs)
+                self.assertEqual(objs[0].translation.title, 'Otsikko')
+                # Caching works
+                self.assertIs(objs[0].translation.article, objs[0])
+                self.assertIs(objs[1].translation, None)
+            with self.assertNumQueries(1):
+                activate('en')
+                # .all() to get rid of the cache...
+                objs = list(qs.all())
+                self.assertEqual(objs[0].translation.title, 'Title')
+                self.assertEqual(objs[1].translation, None)
+            ArticleTranslation.objects.create(article=self.a2, lang='en', title='Title 2')
+            # Some ordering stuff still...
+            with self.assertNumQueries(1):
+                objs = list(Article.objects.select_related('translation').order_by('translation__title'))
+                self.assertEqual(objs[0].translation.title, 'Title')
+                self.assertEqual(objs[1].translation.title, 'Title 2')
+            with self.assertNumQueries(1):
+                objs = list(Article.objects.select_related('translation').order_by('-translation__title'))
+                self.assertEqual(objs[0].translation.title, 'Title 2')
+                self.assertEqual(objs[1].translation.title, 'Title')
         finally:
             deactivate()
