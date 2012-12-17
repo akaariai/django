@@ -611,19 +611,19 @@ class SQLCompiler(object):
             promote = nullable or f.null
             alias = self.query.join_parent_model(opts, model, root_alias, {})
 
-            pathinfos, opts, _, _ = f.get_path_info()
-            table = opts.db_table
+            pathinfos, f_opts, _, _ = f.get_path_info()
+            table = f_opts.db_table
             alias = self.query.join((alias, table, f, pathinfos[0].direct), promote=promote)
             columns, aliases = self.get_default_columns(start_alias=alias,
-                    opts=opts, as_pairs=True)
+                    opts=f_opts, as_pairs=True)
             self.query.related_select_cols.extend(
-                SelectInfo(col, field) for col, field in zip(columns, opts.fields))
+                SelectInfo(col, field) for col, field in zip(columns, f_opts.fields))
             if restricted:
                 next = requested.get(f.name, {})
             else:
                 next = False
             new_nullable = f.null or promote
-            self.fill_related_selections(opts, alias, cur_depth + 1,
+            self.fill_related_selections(f_opts, alias, cur_depth + 1,
                     next, restricted, new_nullable)
 
         if restricted:
