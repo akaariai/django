@@ -2,7 +2,7 @@ from __future__ import absolute_import, unicode_literals
 
 from datetime import datetime
 
-from django.db.models import Q
+from django.db.models import Q, Count
 from django.test import TestCase
 from django.utils.translation import activate, deactivate
 
@@ -41,5 +41,6 @@ class ModelTest(TestCase):
                 Q(translation__title='Title') | Q(translation__isnull=True)).count(), 2)
             self.assertEqual(Article.objects.filter(
                 Q(translation__title='Otsikko') | Q(translation__isnull=True)).count(), 1)
+            self.assertEqual(Article.objects.aggregate(Count('translation'))['translation__count'], 1)
         finally:
             deactivate()
