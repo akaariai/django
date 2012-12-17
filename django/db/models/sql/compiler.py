@@ -261,26 +261,14 @@ class SQLCompiler(object):
         qn2 = self.connection.ops.quote_name
         aliases = set()
         only_load = self.deferred_to_columns()
-
+        seen = self.query.included_inherited_models.copy()
         if start_alias:
-            seen = {None: start_alias}
+            seen[None] = start_alias
         for field, model in opts.get_fields_with_model():
             if from_parent and model is not None and issubclass(from_parent, model):
                 # Avoid loading data for already loaded parents.
                 continue
-            if start_alias:
-                try:
-                    alias = seen[model]
-                except KeyError:
-                    link_field = opts.get_ancestor_link(model)
-                    alias = self.query.join((start_alias, model._meta.db_table,
-                                             link_field, True))
-                    seen[model] = alias
-            else:
-                # If we're starting from the base model of the queryset, the
-                # aliases will have already been set up in pre_sql_setup(), so
-                # we can save time here.
-                alias = self.query.included_inherited_models[model]
+            alias = self.query.join_parent_model(opts, model, start_alias, seen)
             table = self.query.alias_map[alias].table_name
             if table in only_load and field.column not in only_load[table]:
                 continue
@@ -620,25 +608,7 @@ class SQLCompiler(object):
                 continue
             table = f.rel.to._meta.db_table
             promote = nullable or f.null
-            if model:
-                int_opts = opts
-                alias = root_alias
-                alias_chain = []
-                for int_model in opts.get_base_chain(model):
-                    # Proxy model have elements in base chain
-                    # with no parents, assign the new options
-                    # object and skip to the next base in that
-                    # case
-                    if not int_opts.parents[int_model]:
-                        int_opts = int_model._meta
-                        continue
-                    link_field = int_opts.get_ancestor_link(int_model)
-                    int_opts = int_model._meta
-                    alias = self.query.join(
-                        (alias, int_opts.db_table, link_field, True), promote=promote)
-                    alias_chain.append(alias)
-            else:
-                alias = root_alias
+            alias = self.query.join_parent_model(opts, model, root_alias, {})
 
             alias = self.query.join((alias, table, f, True), promote=promote)
             columns, aliases = self.get_default_columns(start_alias=alias,
@@ -664,26 +634,8 @@ class SQLCompiler(object):
                                               only_load.get(model), reverse=True):
                     continue
 
+                alias = self.query.join_parent_model(opts, f.rel.to, root_alias, {})
                 table = model._meta.db_table
-                int_opts = opts
-                alias = root_alias
-                alias_chain = []
-                chain = opts.get_base_chain(f.rel.to)
-                if chain is not None:
-                    for int_model in chain:
-                        # Proxy model have elements in base chain
-                        # with no parents, assign the new options
-                        # object and skip to the next base in that
-                        # case
-                        if not int_opts.parents[int_model]:
-                            int_opts = int_model._meta
-                            continue
-                        link_field = int_opts.get_ancestor_link(int_model)
-                        int_opts = int_model._meta
-                        alias = self.query.join(
-                            (alias, int_opts.db_table, link_field, True),
-                            promote=True)
-                        alias_chain.append(alias)
                 alias = self.query.join(
                     (alias, table, f, False),
                     promote=True)
