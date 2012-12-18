@@ -318,6 +318,7 @@ class ModelState(object):
     do things like nicely working primary key updates and automatic saving
     of changed fields only.
     """
+    __slots__ = ['db', 'adding']
 
     def __init__(self):
         self.db, self.adding = None, True
