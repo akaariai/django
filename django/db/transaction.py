@@ -190,12 +190,17 @@ class Transaction(object):
     autocommit, commit_on_success, and commit_manually contain the
     implementations of entering and exiting.
     """
-    def __init__(self, entering, exiting, using):
+    def __init__(self, entering, exiting, using, is_stateful):
         self.entering = entering
         self.exiting = exiting
         self.using = using
+        self.is_stateful = is_stateful
+        self.entered = False
 
     def __enter__(self):
+        if self.is_stateful and self.entered:
+            raise RuntimeError('Each call must use a different instance of this context manager')
+        self.entered = True
         self.entering(self.using, self)
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -204,11 +209,11 @@ class Transaction(object):
     def __call__(self, func):
         @wraps(func)
         def inner(*args, **kwargs):
-            with self:
+            with Transaction(self.entering, self.exiting, self.using, self.is_stateful):
                 return func(*args, **kwargs)
         return inner
 
-def _transaction_func(entering, exiting, using):
+def _transaction_func(entering, exiting, using, is_stateful=False):
     """
     Takes 3 things, an entering function (what to do to start this block of
     transaction management), an exiting function (what to do to end it, on both
@@ -225,8 +230,8 @@ def _transaction_func(entering, exiting, using):
     if using is None:
         using = DEFAULT_DB_ALIAS
     if callable(using):
-        return Transaction(entering, exiting, DEFAULT_DB_ALIAS)(using)
-    return Transaction(entering, exiting, using)
+        return Transaction(entering, exiting, DEFAULT_DB_ALIAS, is_stateful)(using)
+    return Transaction(entering, exiting, using, is_stateful)
 
 def autocommit(using=None):
     """
@@ -317,7 +322,7 @@ def in_tx(using=None):
                         raise
         finally:
             leave_transaction_management(using=using)
-    return _transaction_func(entering, exiting, using)
+    return _transaction_func(entering, exiting, using, is_stateful=True)
 
 def atomic(using=None):
 
@@ -348,4 +353,4 @@ def atomic(using=None):
         finally:
             if not state.savepoint:
                 leave_transaction_management(using=using)
-    return _transaction_func(entering, exiting, using)
+    return _transaction_func(entering, exiting, using, is_stateful=True)
