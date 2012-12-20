@@ -196,10 +196,10 @@ class Transaction(object):
         self.using = using
 
     def __enter__(self):
-        self.entering(self.using)
+        self.entering(self.using, self)
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.exiting(exc_value, self.using)
+        self.exiting(exc_value, self.using, self)
 
     def __call__(self, func):
         @wraps(func)
@@ -228,18 +228,17 @@ def _transaction_func(entering, exiting, using):
         return Transaction(entering, exiting, DEFAULT_DB_ALIAS)(using)
     return Transaction(entering, exiting, using)
 
-
 def autocommit(using=None):
     """
     Decorator that activates commit on save. This is Django's default behavior;
     this decorator is useful if you globally activated transaction management in
     your settings file and want the default behavior in some view functions.
     """
-    def entering(using):
+    def entering(using, state):
         enter_transaction_management(managed=False, using=using)
         managed(False, using=using)
 
-    def exiting(exc_value, using):
+    def exiting(exc_value, using, state):
         leave_transaction_management(using=using)
 
     return _transaction_func(entering, exiting, using)
@@ -251,11 +250,11 @@ def commit_on_success(using=None):
     a rollback is made. This is one of the most common ways to do transaction
     control in Web apps.
     """
-    def entering(using):
+    def entering(using, state):
         enter_transaction_management(using=using)
         managed(True, using=using)
 
-    def exiting(exc_value, using):
+    def exiting(exc_value, using, state):
         try:
             if exc_value is not None:
                 if is_dirty(using=using):
@@ -279,11 +278,74 @@ def commit_manually(using=None):
     own -- it's up to the user to call the commit and rollback functions
     themselves.
     """
-    def entering(using):
+    def entering(using, state):
         enter_transaction_management(using=using)
         managed(True, using=using)
 
-    def exiting(exc_value, using):
+    def exiting(exc_value, using, state):
         leave_transaction_management(using=using)
 
+    return _transaction_func(entering, exiting, using)
+
+def in_tx(using=None):
+    """
+    If there is already a transaction in progress joins that transaction,
+    otherwise works like commit_on_success
+    """
+
+    def entering(using, state):
+        if is_managed(using):
+            state.new_tx = False
+        else:
+            state.new_tx = True
+            enter_transaction_management(using=using)
+            managed(True, using=using)
+
+    def exiting(exc_value, using, state):
+        if not state.new_tx:
+            return
+        try:
+            if exc_value is not None:
+                if is_dirty(using=using):
+                    rollback(using=using)
+            else:
+                if is_dirty(using=using):
+                    try:
+                        commit(using=using)
+                    except:
+                        rollback(using=using)
+                        raise
+        finally:
+            leave_transaction_management(using=using)
+    return _transaction_func(entering, exiting, using)
+
+def atomic(using=None):
+
+    def entering(using, state):
+        if is_managed(using):
+            state.savepoint = savepoint(using)
+        else:
+            state.savepoint = None
+            enter_transaction_management(using=using)
+            managed(True, using=using)
+
+    def exiting(exc_value, using, state):
+        try:
+            if exc_value is not None:
+                if state.savepoint:
+                    savepoint_rollback(state.savepoint, using)
+                elif is_dirty(using=using):
+                    rollback(using=using)
+            else:
+                if state.savepoint:
+                    savepoint_commit(state.savepoint, using)
+                elif is_dirty(using=using):
+                    try:
+                        commit(using=using)
+                    except:
+                        rollback(using=using)
+                        raise
+        finally:
+            if not state.savepoint:
+                leave_transaction_management(using=using)
     return _transaction_func(entering, exiting, using)

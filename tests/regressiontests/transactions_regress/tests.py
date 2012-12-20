@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 
-from django.db import connection, connections, transaction, DEFAULT_DB_ALIAS, DatabaseError
+from django.db import connection, connections, transaction, DEFAULT_DB_ALIAS, DatabaseError, IntegrityError
 from django.db.transaction import commit_on_success, commit_manually, TransactionManagementError
 from django.test import TransactionTestCase, skipUnlessDBFeature
 from django.test.utils import override_settings
@@ -264,3 +264,30 @@ class SavepointTest(TransactionTestCase):
             self.assertEqual(mod2.fld, 1)
 
         work()
+    
+    @skipUnlessDBFeature('uses_savepoints')
+    def test_atomic_inner_fail(self):
+        @transaction.atomic
+        def work():
+            md = Mod.objects.create(fld=1)
+            with self.assertRaises(IntegrityError):
+                with transaction.atomic():
+                    Mod.objects.create(id=md.pk, fld=1)
+        work()
+        self.assertFalse(transaction.is_dirty())
+        transaction.rollback()
+        self.assertEqual(Mod.objects.count(), 1)
+
+    @skipUnlessDBFeature('uses_savepoints')
+    def test_atomic_outer_fail(self):
+        @transaction.atomic
+        def fail():
+            md = Mod.objects.create(fld=1)
+            with transaction.atomic():
+                Mod.objects.create(fld=2)
+            Mod.objects.create(id=md.pk, fld=1)
+        with self.assertRaises(IntegrityError):
+            fail()
+        self.assertFalse(transaction.is_dirty())
+        transaction.rollback()
+        self.assertEqual(Mod.objects.count(), 0)

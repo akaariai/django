@@ -546,94 +546,94 @@ class Model(six.with_metaclass(ModelBase, object)):
         ('raw', 'cls', and 'origin').
         """
         using = using or router.db_for_write(self.__class__, instance=self)
-        assert not (force_insert and (force_update or update_fields))
-        assert update_fields is None or len(update_fields) > 0
-        if cls is None:
-            cls = self.__class__
-            meta = cls._meta
-            if not meta.proxy:
-                origin = cls
-        else:
-            meta = cls._meta
-
-        if origin and not meta.auto_created:
-            signals.pre_save.send(sender=origin, instance=self, raw=raw, using=using,
-                                  update_fields=update_fields)
-
-        # If we are in a raw save, save the object exactly as presented.
-        # That means that we don't try to be smart about saving attributes
-        # that might have come from the parent class - we just save the
-        # attributes we have been given to the class we have been given.
-        # We also go through this process to defer the save of proxy objects
-        # to their actual underlying model.
-        if not raw or meta.proxy:
-            if meta.proxy:
-                org = cls
+        with transaction.in_tx(using):
+            assert not (force_insert and (force_update or update_fields))
+            assert update_fields is None or len(update_fields) > 0
+            if cls is None:
+                cls = self.__class__
+                meta = cls._meta
+                if not meta.proxy:
+                    origin = cls
             else:
-                org = None
-            for parent, field in meta.parents.items():
-                # At this point, parent's primary key field may be unknown
-                # (for example, from administration form which doesn't fill
-                # this field). If so, fill it.
-                if field and getattr(self, parent._meta.pk.attname) is None and getattr(self, field.attname) is not None:
-                    setattr(self, parent._meta.pk.attname, getattr(self, field.attname))
+                meta = cls._meta
 
-                self.save_base(cls=parent, origin=org, using=using,
-                               update_fields=update_fields)
+            if origin and not meta.auto_created:
+                signals.pre_save.send(sender=origin, instance=self, raw=raw, using=using,
+                                      update_fields=update_fields)
 
-                if field:
-                    setattr(self, field.attname, self._get_pk_val(parent._meta))
-            if meta.proxy:
-                return
-
-        if not meta.proxy:
-            non_pks = [f for f in meta.local_fields if not f.primary_key]
-
-            if update_fields:
-                non_pks = [f for f in non_pks if f.name in update_fields or f.attname in update_fields]
-
-            # First, try an UPDATE. If that doesn't update anything, do an INSERT.
-            pk_val = self._get_pk_val(meta)
-            pk_set = pk_val is not None
-            record_exists = True
-            manager = cls._base_manager
-            if pk_set:
-                # Determine if we should do an update (pk already exists, forced update,
-                # no force_insert)
-                if ((force_update or update_fields) or (not force_insert and
-                        manager.using(using).filter(pk=pk_val).exists())):
-                    if force_update or non_pks:
-                        values = [(f, None, (raw and getattr(self, f.attname) or f.pre_save(self, False))) for f in non_pks]
-                        if values:
-                            rows = manager.using(using).filter(pk=pk_val)._update(values)
-                            if force_update and not rows:
-                                raise DatabaseError("Forced update did not affect any rows.")
-                            if update_fields and not rows:
-                                raise DatabaseError("Save with update_fields did not affect any rows.")
+            # If we are in a raw save, save the object exactly as presented.
+            # That means that we don't try to be smart about saving attributes
+            # that might have come from the parent class - we just save the
+            # attributes we have been given to the class we have been given.
+            # We also go through this process to defer the save of proxy objects
+            # to their actual underlying model.
+            if not raw or meta.proxy:
+                if meta.proxy:
+                    org = cls
                 else:
+                    org = None
+                for parent, field in meta.parents.items():
+                    # At this point, parent's primary key field may be unknown
+                    # (for example, from administration form which doesn't fill
+                    # this field). If so, fill it.
+                    if field and getattr(self, parent._meta.pk.attname) is None and getattr(self, field.attname) is not None:
+                        setattr(self, parent._meta.pk.attname, getattr(self, field.attname))
+
+                    self.save_base(cls=parent, origin=org, using=using,
+                                   update_fields=update_fields)
+
+                    if field:
+                        setattr(self, field.attname, self._get_pk_val(parent._meta))
+                if meta.proxy:
+                    return
+
+            if not meta.proxy:
+                non_pks = [f for f in meta.local_fields if not f.primary_key]
+
+                if update_fields:
+                    non_pks = [f for f in non_pks if f.name in update_fields or f.attname in update_fields]
+
+                # First, try an UPDATE. If that doesn't update anything, do an INSERT.
+                pk_val = self._get_pk_val(meta)
+                pk_set = pk_val is not None
+                record_exists = True
+                manager = cls._base_manager
+                if pk_set:
+                    # Determine if we should do an update (pk already exists, forced update,
+                    # no force_insert)
+                    if ((force_update or update_fields) or (not force_insert and
+                            manager.using(using).filter(pk=pk_val).exists())):
+                        if force_update or non_pks:
+                            values = [(f, None, (raw and getattr(self, f.attname) or f.pre_save(self, False))) for f in non_pks]
+                            if values:
+                                rows = manager.using(using).filter(pk=pk_val)._update(values)
+                                if force_update and not rows:
+                                    raise DatabaseError("Forced update did not affect any rows.")
+                                if update_fields and not rows:
+                                    raise DatabaseError("Save with update_fields did not affect any rows.")
+                    else:
+                        record_exists = False
+                if not pk_set or not record_exists:
+                    if meta.order_with_respect_to:
+                        # If this is a model with an order_with_respect_to
+                        # autopopulate the _order field
+                        field = meta.order_with_respect_to
+                        order_value = manager.using(using).filter(**{field.name: getattr(self, field.attname)}).count()
+                        self._order = order_value
+
+                    fields = meta.local_fields
+                    if not pk_set:
+                        if force_update or update_fields:
+                            raise ValueError("Cannot force an update in save() with no primary key.")
+                        fields = [f for f in fields if not isinstance(f, AutoField)]
+
                     record_exists = False
-            if not pk_set or not record_exists:
-                if meta.order_with_respect_to:
-                    # If this is a model with an order_with_respect_to
-                    # autopopulate the _order field
-                    field = meta.order_with_respect_to
-                    order_value = manager.using(using).filter(**{field.name: getattr(self, field.attname)}).count()
-                    self._order = order_value
 
-                fields = meta.local_fields
-                if not pk_set:
-                    if force_update or update_fields:
-                        raise ValueError("Cannot force an update in save() with no primary key.")
-                    fields = [f for f in fields if not isinstance(f, AutoField)]
+                    update_pk = bool(meta.has_auto_field and not pk_set)
+                    result = manager._insert([self], fields=fields, return_id=update_pk, using=using, raw=raw)
 
-                record_exists = False
-
-                update_pk = bool(meta.has_auto_field and not pk_set)
-                result = manager._insert([self], fields=fields, return_id=update_pk, using=using, raw=raw)
-
-                if update_pk:
-                    setattr(self, meta.pk.attname, result)
-            transaction.commit_unless_managed(using=using)
+                    if update_pk:
+                        setattr(self, meta.pk.attname, result)
 
         # Store the database on which the object was saved
         self._state.db = using
@@ -939,16 +939,14 @@ class Model(six.with_metaclass(ModelBase, object)):
 
 # ORDERING METHODS #########################
 
+@transaction.in_tx
 def method_set_order(ordered_obj, self, id_list, using=None):
-    if using is None:
-        using = DEFAULT_DB_ALIAS
     rel_val = getattr(self, ordered_obj._meta.order_with_respect_to.rel.field_name)
     order_name = ordered_obj._meta.order_with_respect_to.name
     # FIXME: It would be nice if there was an "update many" version of update
     # for situations like this.
     for i, j in enumerate(id_list):
         ordered_obj.objects.filter(**{'pk': j, order_name: rel_val}).update(_order=i)
-    transaction.commit_unless_managed(using=using)
 
 
 def method_get_order(ordered_obj, self):
