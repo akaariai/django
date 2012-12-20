@@ -407,6 +407,16 @@ class Model(six.with_metaclass(ModelBase, object)):
         super(Model, self).__init__()
         signals.post_init.send(sender=self.__class__, instance=self)
 
+    @classmethod
+    def from_db(cls, using, values, field_names):
+        new = Empty()
+        new.__class__ = cls
+        new.__dict__ = dict(zip(field_names, values))
+        _state = ModelState()
+        _state.adding, _state.db = False, using
+        new._state = _state
+        return new
+
     def __repr__(self):
         try:
             u = six.text_type(self)

@@ -288,6 +288,9 @@ class QuerySet(object):
                 else:
                     init_list.append(field.attname)
             model_cls = deferred_class_factory(self.model, skip)
+        else:
+            model_cls = self.model
+            init_list = [f.attname for f in model_cls._meta.fields]
 
         # Cache db, model and known_related_object outside the loop
         db = self.db
@@ -302,17 +305,7 @@ class QuerySet(object):
                 obj, _ = get_cached_row(row, index_start, db, klass_info,
                                         offset=len(aggregate_select))
             else:
-                # Omit aggregates in object creation.
-                row_data = row[index_start:aggregate_start]
-                if skip:
-                    obj = model_cls(**dict(zip(init_list, row_data)))
-                else:
-                    obj = model(*row_data)
-
-                # Store the source database of the object
-                obj._state.db = db
-                # This object came from the database; it's not being added.
-                obj._state.adding = False
+                obj = model_cls.from_db(db, row[index_start:aggregate_start], init_list)
 
             if extra_select:
                 for i, k in enumerate(extra_select):
