@@ -520,3 +520,25 @@ class Options(object):
                 # of the chain to the ancestor is that parent
                 # links
                 return self.parents[parent] or parent_link
+
+    def can_fast_init(self, attnames):
+        """
+        Checks if it is possible to skip Model.__init__ and instead use
+        a fast-path for the init.
+
+        The skip can be done if the model doesn't override `__int__`, doesn't
+        have pre or post_init signals and doesn't have setters for the
+        attnames (either through __setattr__ or descriptors).
+        """
+        from django.db.models import Model, signals
+        has_descriptors = False
+        for attname in attnames:
+            if attname in self.model.__dict__ and hasattr(self.model.__dict__[attname], '__set__'):
+                has_descriptors = True
+                break
+        return (
+            self.model.__init__ == Model.__init__ and
+            self.model.__setattr__ == object.__setattr__ and not
+            signals.pre_init.has_listeners(self.model) and not
+            signals.post_init.has_listeners(self.model) and not
+            has_descriptors)

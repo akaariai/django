@@ -408,17 +408,17 @@ class Model(six.with_metaclass(ModelBase, object)):
         signals.post_init.send(sender=self.__class__, instance=self)
 
     @classmethod
-    def from_db(cls, using, values, field_names):
-        init_dict = dict(zip(field_names, values))
-        signals.pre_init.send(sender=cls, args=[], kwargs=init_dict)
-        new = Empty()
-        new.__class__ = cls
-        new.__dict__ = dict(zip(field_names, values))
-        _state = ModelState()
-        _state.adding, _state.db = False, using
-        new._state = _state
-        signals.post_init.send(sender=cls, instance=new)
-        return new
+    def from_db(cls, using, values, field_names, init_with_args, can_fast_init):
+        if can_fast_init:
+            new = Empty()
+            new.__class__ = cls
+            new.__dict__ = dict(zip(field_names, values))
+            new._state = ModelState()
+            new._state.adding, new._state.db = False, using
+            return new
+        elif init_with_args:
+            return cls(*values)
+        return cls(dict(zip(field_names, values)))
 
     def __repr__(self):
         try:

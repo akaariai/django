@@ -295,8 +295,10 @@ class QuerySet(object):
         # Cache db, model and known_related_object outside the loop
         db = self.db
         model = self.model
+        can_fast_init = model._meta.can_fast_init(init_list)
         kro_attname, kro_instance = self._known_related_object or (None, None)
         compiler = self.query.get_compiler(using=db)
+        init_with_kwargs = not bool(skip)
         if fill_cache:
             klass_info = get_klass_info(model, max_depth=max_depth,
                                         requested=requested, only_load=only_load)
@@ -305,7 +307,8 @@ class QuerySet(object):
                 obj, _ = get_cached_row(row, index_start, db, klass_info,
                                         offset=len(aggregate_select))
             else:
-                obj = model_cls.from_db(db, row[index_start:aggregate_start], init_list)
+                obj = model_cls.from_db(db, row[index_start:aggregate_start], init_list,
+                                        init_with_kwargs, can_fast_init)
 
             if extra_select:
                 for i, k in enumerate(extra_select):
