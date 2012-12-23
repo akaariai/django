@@ -108,7 +108,7 @@ class Base(models.Model):
     name = models.CharField(max_length=10)
     type = models.CharField(max_length=10)
     rel = models.ForeignKey(Rel)
-    
+
     def __init__(self, *args, **kwargs):
         # Override init so that fast-path is skipped
         super(Base, self).__init__(*args, **kwargs)

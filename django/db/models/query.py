@@ -16,7 +16,6 @@ from django.db.models.query_utils import (Q, select_related_descend,
 from django.db.models.deletion import Collector
 from django.db.models import sql
 from django.utils import six
-from django.utils.datastructures import SortedDict
 from django.utils.functional import partition
 
 # Used to control how many objects are worked with at once in some cases (e.g.
@@ -1564,8 +1563,6 @@ class RawQuerySet(object):
         else:
             # All model's fields are present in the query.
             model_cls = self.model
-        # For each field of the model, record the query column position matching
-        # that field.
         if need_resolv_columns:
             fields = [self.model_fields.get(c, None) for c in self.columns]
         can_fast_init = model_cls._meta.can_fast_init(model_init_attnames)
