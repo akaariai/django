@@ -414,11 +414,12 @@ class Model(six.with_metaclass(ModelBase, object)):
             new.__class__ = cls
             new.__dict__ = dict(zip(field_names, values))
             new._state = ModelState()
-            new._state.adding, new._state.db = False, using
-            return new
         elif init_with_args:
-            return cls(*values)
-        return cls(dict(zip(field_names, values)))
+            new = cls(*values)
+        else:
+            new = cls(**dict(zip(field_names, values)))
+        new._state.adding, new._state.db = False, using
+        return new
 
     def __repr__(self):
         try:

@@ -1,11 +1,12 @@
 from __future__ import absolute_import, unicode_literals
 
+from django.db.models import signals
 from django.test import TestCase
 from django.utils import six
 
 from .models import (Building, Child, Device, Port, Item, Country, Connection,
     ClientStatus, State, Client, SpecialClient, TUser, Person, Student,
-    Organizer, Class, Enrollment)
+    Organizer, Class, Enrollment, Rel, Base)
 
 
 class SelectRelatedRegressTests(TestCase):
@@ -139,3 +140,15 @@ class SelectRelatedRegressTests(TestCase):
         self.assertEqual(troy.name, 'Troy Buswell')
         self.assertEqual(troy.value, 42)
         self.assertEqual(troy.state.name, 'Western Australia')
+
+    def test_no_fastinit_select_related(self):
+        r1 = Rel.objects.create(name='r1', type='r1t1')
+        b1 = Base.objects.create(name='b1', type='b1t1', rel=r1)
+        qs = Base.objects.select_related('rel').only('type', 'rel__type')
+        self.assertEqual(len(qs), 1)
+        with self.assertNumQueries(0):
+            self.assertEqual(qs[0].type, b1.type)
+            self.assertEqual(qs[0].rel.type, r1.type)
+        with self.assertNumQueries(2):
+            self.assertEqual(qs[0].name, b1.name)
+            self.assertEqual(qs[0].rel.name, r1.name)

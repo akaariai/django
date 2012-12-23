@@ -94,3 +94,21 @@ class Item(models.Model):
 
     def __str__(self):
         return self.name
+
+# Models for fast-path init tests
+class Rel(models.Model):
+    name = models.CharField(max_length=10)
+    type = models.CharField(max_length=10)
+
+    def __init__(self, *args, **kwargs):
+        # Override init so that fast-path is skipped
+        super(Rel, self).__init__(*args, **kwargs)
+
+class Base(models.Model):
+    name = models.CharField(max_length=10)
+    type = models.CharField(max_length=10)
+    rel = models.ForeignKey(Rel)
+    
+    def __init__(self, *args, **kwargs):
+        # Override init so that fast-path is skipped
+        super(Base, self).__init__(*args, **kwargs)

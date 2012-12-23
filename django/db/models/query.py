@@ -15,8 +15,9 @@ from django.db.models.query_utils import (Q, select_related_descend,
     deferred_class_factory, InvalidQuery)
 from django.db.models.deletion import Collector
 from django.db.models import sql
-from django.utils.functional import partition
 from django.utils import six
+from django.utils.datastructures import SortedDict
+from django.utils.functional import partition
 
 # Used to control how many objects are worked with at once in some cases (e.g.
 # when deleting objects).
@@ -292,12 +293,12 @@ class QuerySet(object):
             model_cls = self.model
             init_list = [f.attname for f in model_cls._meta.fields]
 
-        # Cache db, model and known_related_object outside the loop
+        # Pre-calculate & cache everything possible outside the loop.
         db = self.db
         model = self.model
-        can_fast_init = model._meta.can_fast_init(init_list)
         kro_attname, kro_instance = self._known_related_object or (None, None)
         compiler = self.query.get_compiler(using=db)
+        can_fast_init = model._meta.can_fast_init(init_list)
         init_with_kwargs = not bool(skip)
         if fill_cache:
             klass_info = get_klass_info(model, max_depth=max_depth,
@@ -1407,7 +1408,8 @@ def get_klass_info(klass, max_depth=0, cur_depth=0, requested=None,
     else:
         pk_idx = klass._meta.pk_index()
 
-    return klass, field_names, field_count, related_fields, reverse_related_fields, pk_idx
+    can_fast_init = klass._meta.can_fast_init(field_names)
+    return klass, field_names, field_count, related_fields, reverse_related_fields, pk_idx, can_fast_init
 
 
 def get_cached_row(row, index_start, using,  klass_info, offset=0,
@@ -1433,26 +1435,21 @@ def get_cached_row(row, index_start, using,  klass_info, offset=0,
     """
     if klass_info is None:
         return None
-    klass, field_names, field_count, related_fields, reverse_related_fields, pk_idx = klass_info
+    klass, field_names, field_count, related_fields, reverse_related_fields, pk_idx, can_fast_init = klass_info
 
-
-    fields = row[index_start : index_start + field_count]
+    fields = row[index_start: index_start + field_count]
     # If the pk column is None (or the Oracle equivalent ''), then the related
     # object must be non-existent - set the relation to None.
-    if fields[pk_idx] == None or fields[pk_idx] == '':
+    if fields[pk_idx] is None or fields[pk_idx] == '':
         obj = None
     elif field_names:
         fields = list(fields)
         for rel_field, value in parent_data:
             field_names.append(rel_field.attname)
             fields.append(value)
-        obj = klass(**dict(zip(field_names, fields)))
+        obj = klass.from_db(using, fields, field_names, False, can_fast_init)
     else:
-        obj = klass(*fields)
-    # If an object was retrieved, set the database state.
-    if obj:
-        obj._state.db = using
-        obj._state.adding = False
+        obj = klass.from_db(using, fields, klass._meta.attnames, True, can_fast_init)
 
     # Instantiate related fields
     index_end = index_start + field_count + offset
@@ -1525,10 +1522,6 @@ class RawQuerySet(object):
         self.translations = translations or {}
 
     def __iter__(self):
-        # Mapping of attrnames to row column positions. Used for constructing
-        # the model using kwargs, needed when not all model's fields are present
-        # in the query.
-        model_init_field_names = {}
         # A list of tuples of (column name, column position). Used for
         # annotation fields.
         annotation_fields = []
@@ -1544,50 +1537,51 @@ class RawQuerySet(object):
 
         # Find out which columns are model's fields, and which ones should be
         # annotated to the model.
+        attname_to_colpos = {}
         for pos, column in enumerate(self.columns):
             if column in self.model_fields:
-                model_init_field_names[self.model_fields[column].attname] = pos
+                attname_to_colpos[self.model_fields[column].attname] = pos
             else:
                 annotation_fields.append((column, pos))
 
         # Find out which model's fields are not present in the query.
         skip = set()
+        # List of positions of model's fetched fields in the output.
+        field_col_pos = []
+        model_init_attnames = []
         for field in self.model._meta.fields:
-            if field.attname not in model_init_field_names:
+            if field.attname not in attname_to_colpos:
                 skip.add(field.attname)
+            else:
+                # Find out the pos of this field.
+                field_col_pos.append(attname_to_colpos[field.attname])
+                model_init_attnames.append(field.attname)
+
         if skip:
             if self.model._meta.pk.attname in skip:
                 raise InvalidQuery('Raw query must include the primary key')
             model_cls = deferred_class_factory(self.model, skip)
         else:
+            # All model's fields are present in the query.
             model_cls = self.model
-            # All model's fields are present in the query. So, it is possible
-            # to use *args based model instantation. For each field of the model,
-            # record the query column position matching that field.
-            model_init_field_pos = []
-            for field in self.model._meta.fields:
-                model_init_field_pos.append(model_init_field_names[field.attname])
+        # For each field of the model, record the query column position matching
+        # that field.
         if need_resolv_columns:
             fields = [self.model_fields.get(c, None) for c in self.columns]
+        can_fast_init = model_cls._meta.can_fast_init(model_init_attnames)
+        init_with_args = not bool(skip)
         # Begin looping through the query values.
         for values in query:
             if need_resolv_columns:
                 values = compiler.resolve_columns(values, fields)
             # Associate fields to values
-            if skip:
-                model_init_kwargs = {}
-                for attname, pos in six.iteritems(model_init_field_names):
-                    model_init_kwargs[attname] = values[pos]
-                instance = model_cls(**model_init_kwargs)
-            else:
-                model_init_args = [values[pos] for pos in model_init_field_pos]
-                instance = model_cls(*model_init_args)
+            model_init_args = [values[pos] for pos in field_col_pos]
+            instance = model_cls.from_db(
+                db, model_init_args, model_init_attnames,
+                init_with_args, can_fast_init)
             if annotation_fields:
                 for column, pos in annotation_fields:
                     setattr(instance, column, values[pos])
-
-            instance._state.db = db
-            instance._state.adding = False
 
             yield instance
 

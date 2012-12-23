@@ -12,6 +12,7 @@ from django.db.models.loading import get_models, app_cache_ready
 from django.utils import six
 from django.utils.datastructures import SortedDict
 from django.utils.encoding import force_text, smart_text, python_2_unicode_compatible
+from django.utils.functional import cached_property
 from django.utils.translation import activate, deactivate_all, get_language, string_concat
 
 # Calculate the verbose_name by converting from InitialCaps to "lowercase with spaces".
@@ -351,6 +352,10 @@ class Options(object):
         # Internal-only names end with "+" (symmetrical m2m related names being
         # the main example). Trim them.
         return [val for val in names if not val.endswith('+')]
+
+    @cached_property
+    def attnames(self):
+        return [f.attname for f in self.fields]
 
     def init_name_map(self):
         """
