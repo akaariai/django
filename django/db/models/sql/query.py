@@ -18,11 +18,11 @@ from django.db.models.constants import LOOKUP_SEP
 from django.db.models.expressions import ExpressionNode
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.loading import get_model
-from django.db.models.related import PathInfo
+from django.db.models.related import MultiJoin
 from django.db.models.sql import aggregates as base_aggregates_module
 from django.db.models.sql.constants import (QUERY_TERMS, ORDER_DIR, SINGLE,
         ORDER_PATTERN, JoinInfo, SelectInfo)
-from django.db.models.sql.datastructures import EmptyResultSet, Empty, MultiJoin
+from django.db.models.sql.datastructures import EmptyResultSet, Empty
 from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.where import (WhereNode, Constraint, EverythingNode,
     ExtraWhere, AND, OR)
@@ -1306,7 +1306,7 @@ class Query(object):
                 self.where.end_subtree()
         if self.filter_is_sticky:
             self.used_aliases = used_aliases
-
+    
     def names_to_path(self, names, opts, allow_many=False,
                       allow_explicit_fk=True):
         """
@@ -1314,9 +1314,10 @@ class Query(object):
         single name in 'names' can generate multiple PathInfos (m2m for
         example).
 
-        'names' is the path of names to travle, 'opts' is the model Options we
-        start the name resolving from, 'allow_many' and 'allow_explicit_fk'
-        are as for setup_joins().
+        The 'names' is the path of names to travel. The 'allow_many' controls
+        if any multijoin should raise a MultiJoin exception. The
+        'allow_explicit_fk' controls if explicit lookup by field's attname is
+        supported.
 
         Returns a list of PathInfo tuples. In addition returns the final field
         (the last used join field), and target (which is a field guaranteed to
@@ -1324,50 +1325,10 @@ class Query(object):
         """
         path = []
         for pos, name in enumerate(names):
-            if name == 'pk':
-                name = opts.pk.name
-            try:
-                field, model, direct, m2m = opts.get_field_by_name(name)
-            except FieldDoesNotExist:
-                for f in opts.fields:
-                    if allow_explicit_fk and name == f.attname:
-                        # XXX: A hack to allow foo_id to work in values() for
-                        # backwards compatibility purposes. If we dropped that
-                        # feature, this could be removed.
-                        field, model, direct, m2m = opts.get_field_by_name(f.name)
-                        break
-                else:
-                    available = opts.get_all_field_names() + list(self.aggregate_select)
-                    raise FieldError("Cannot resolve keyword %r into field. "
-                                     "Choices are: %s" % (name, ", ".join(available)))
-            # Check if we need any joins for concrete inheritance cases (the
-            # field lives in parent, but we are currently in one of its
-            # children)
-            if model:
-                # The field lives on a base class of the current model.
-                # Skip the chain of proxy to the concrete proxied model
-                proxied_model = opts.concrete_model
-
-                for int_model in opts.get_base_chain(model):
-                    if int_model is proxied_model:
-                        opts = int_model._meta
-                    else:
-                        final_field = opts.parents[int_model]
-                        target = final_field.rel.get_related_field()
-                        opts = int_model._meta
-                        path.append(PathInfo(final_field, target, final_field.model._meta,
-                                             opts, final_field, False, True))
-            if hasattr(field, 'get_path_info'):
-                pathinfos, opts, target, final_field = field.get_path_info()
-                path.extend(pathinfos)
-            else:
-                # Local non-relational field.
-                final_field = target = field
-                break
-        multijoin_pos = None
-        for m2mpos, pathinfo in enumerate(path):
-            if pathinfo.m2m:
-                multijoin_pos = m2mpos
+            opts, field, target, pathinfos, final = opts.get_path_info(
+                name, allow_explicit_fk, self.fail_lookup)
+            path.extend(pathinfos)
+            if final:
                 break
 
         if pos != len(names) - 1:
@@ -1377,9 +1338,16 @@ class Query(object):
                     "the lookup type?" % (name, names[pos + 1]))
             else:
                 raise FieldError("Join on field %r not permitted." % name)
+
+        multijoin_pos = None
+        for m2mpos, pathinfo in enumerate(path):
+            if pathinfo.m2m:
+                multijoin_pos = m2mpos
+                break
         if multijoin_pos is not None and len(path) >= multijoin_pos and not allow_many:
             raise MultiJoin(multijoin_pos + 1)
-        return path, final_field, target
+        return path, field, target
+
 
     def setup_joins(self, names, opts, alias, can_reuse=None, allow_many=True,
                     allow_explicit_fk=False):
@@ -1603,10 +1571,8 @@ class Query(object):
                 # from the model on which the lookup failed.
                 raise
             else:
-                names = sorted(opts.get_all_field_names() + list(self.extra)
-                               + list(self.aggregate_select))
-                raise FieldError("Cannot resolve keyword %r into field. "
-                                 "Choices are: %s" % (name, ", ".join(names)))
+                extra_names=list(self.extra) + list(self.aggregate_select)
+                self.fail_lookup(opts, name, extra_names)
         self.remove_inherited_models()
 
     def add_ordering(self, *ordering):
@@ -1915,6 +1881,13 @@ class Query(object):
             return True
         else:
             return field.null
+
+    def fail_lookup(self, opts, name, extra_names=None):
+        if extra_names is None:
+            extra_names = list(self.aggregate_select)
+        names = sorted(opts.get_all_field_names() + extra_names)
+        raise FieldError("Cannot resolve keyword %r into field. "
+                         "Choices are: %s" % (name, ", ".join(names)))
 
 def get_order_dir(field, default='ASC'):
     """

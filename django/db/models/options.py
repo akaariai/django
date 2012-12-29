@@ -4,7 +4,8 @@ import re
 from bisect import bisect
 
 from django.conf import settings
-from django.db.models.related import RelatedObject
+from django.core.exceptions import FieldError
+from django.db.models.related import RelatedObject, PathInfo
 from django.db.models.fields.related import ManyToManyRel
 from django.db.models.fields import AutoField, FieldDoesNotExist
 from django.db.models.fields.proxy import OrderWrt
@@ -249,6 +250,56 @@ class Options(object):
             self._fill_fields_cache()
         return self._field_name_cache
     fields = property(_fields)
+
+    def get_path_info(self, name, allow_explicit_fk, fail_lookup_callback):
+        """
+        Return PathInfos from this model using field with 'name'.
+
+        'allow_explicit_fk' controls if field.attname lookups are allowed,
+        'fail_lookup' is an callable called when the field with 'name' doesn't
+        exists. Parameters to the fail_lookup are the current opts + field_name.
+        """
+        path = []
+        if name == 'pk':
+            name = self.pk.name
+        try:
+            field, model, direct, m2m = self.get_field_by_name(name)
+        except FieldDoesNotExist:
+            for f in self.fields:
+                if allow_explicit_fk and name == f.attname:
+                    # XXX: A hack to allow foo_id to work in values() for
+                    # backwards compatibility purposes. If we dropped that
+                    # feature, this could be removed.
+                    field, model, direct, m2m = self.get_field_by_name(f.name)
+                    break
+            else:
+                fail_lookup_callback(self, name)
+        # Check if we need any joins for concrete inheritance cases (the
+        # field lives in parent, but we are currently in one of its
+        # children)
+        opts = self
+        if model:
+            # The field lives on a base class of the current model.
+            # Skip the chain of proxy to the concrete proxied model
+            proxied_model = opts.concrete_model
+
+            for int_model in opts.get_base_chain(model):
+                if int_model is proxied_model:
+                    opts = int_model._meta
+                else:
+                    final_field = opts.parents[int_model]
+                    target = final_field.rel.get_related_field()
+                    opts = int_model._meta
+                    path.append(PathInfo(final_field, target, final_field.model._meta,
+                                         opts, final_field, False, True))
+        if hasattr(field, 'get_path_info'):
+            pathinfos, opts, target, final_field = field.get_path_info()
+            path.extend(pathinfos)
+            return opts, final_field, target, path, False
+        else:
+            # Local non-relational field.
+            final_field = target = field
+            return opts, final_field, target, path, True
 
     def get_fields_with_model(self):
         """

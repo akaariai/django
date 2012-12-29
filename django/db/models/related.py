@@ -10,6 +10,15 @@ PathInfo = namedtuple('PathInfo',
                       'from_field to_field from_opts to_opts join_field '
                       'm2m direct')
 
+class MultiJoin(Exception):
+    """
+    Used by join construction code to indicate the point at which a
+    multi-valued join was attempted (if the caller wants to treat that
+    exceptionally).
+    """
+    def __init__(self, level):
+        self.level = level
+
 class BoundRelatedObject(object):
     def __init__(self, related_object, field_mapping, original):
         self.relation = related_object
