@@ -949,7 +949,7 @@ class QuerySet(object):
         opts = self.model._meta
         if self.query.group_by is None:
             field_names = [f.attname for f in opts.fields]
-            self.query.add_fields(field_names, False)
+            self.query.add_fields(field_names)
             self.query.set_group_by()
 
     def _prepare(self):
@@ -1035,7 +1035,7 @@ class ValuesQuerySet(QuerySet):
         self.query.select = []
         if self.extra_names is not None:
             self.query.set_extra_mask(self.extra_names)
-        self.query.add_fields(self.field_names, True)
+        self.query.add_fields(self.field_names)
         if self.aggregate_names is not None:
             self.query.set_aggregate_mask(self.aggregate_names)
 

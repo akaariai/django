@@ -1115,9 +1115,7 @@ class Query(object):
             # uses of None as a query value.
             if lookup != 'exact':
                 raise ValueError("Cannot use None as a query value")
-            lookup = 'isnull'
-            # We want to make Exact handle the value later on.
-            return lookup, True
+            return 'isnull', True
         elif callable(value):
             return lookup, value()
         elif isinstance(value, ExpressionNode):
@@ -1125,8 +1123,7 @@ class Query(object):
             return lookup, SQLEvaluator(value, self, reuse=can_reuse)
         return lookup, value
 
-    def add_aggregate_filter(self, filter_expr, parts, value, negate, connector,
-                             can_reuse):
+    def add_aggregate_filter(self, parts, value, negate, connector, can_reuse):
         """
         Tries to add the given filter_expr as aggregate filter.
 
@@ -1158,11 +1155,8 @@ class Query(object):
         return False
 
     def fail_lookup(self, parts, parts_found, path, field):
-        try:
-            final_opts = path[-1].to_opts
-        except IndexError:
-            final_opts = self.get_meta()
-        if not field.rel:
+        final_opts = path[-1].to_opts if path else self.get_meta()
+        if not field or not field.rel:
             if parts_found == len(parts) - 1:
                 raise FieldError(
                     "Join on field %r not permitted. Did you misspell %r for "
@@ -1172,19 +1166,10 @@ class Query(object):
         else:
             available = final_opts.get_all_field_names() + list(self.aggregate_select)
             raise FieldError("Cannot resolve keyword %r into field. "
-                    "Choices are: %s" % (parts[parts_found], ", ".join(available)))
+                             "Choices are: %s" % (parts[parts_found], ", ".join(available)))
 
-
-    # Plan:
-    #    1. [DONE] Move names_to_path call in the beginning of add_filter (but after lookup resolution)
-    #    2. Move aggregate and names_to_path resolution before lookup resolution.
-    #    3. Resolve the lookups from fields
-    #    4. Introduce Lookup object
-    #    5. Introduce backend.lookups (that is, move the implementation of the lookup
-    #       in there)
-    #    6. Move all possible parts of name resolution to model._meta.
     def add_filter(self, filter_expr, connector=AND, negate=False,
-            can_reuse=None, force_having=False):
+                   can_reuse=None, force_having=False):
         """
         Add a single filter to the query. The 'filter_expr' is a pair:
         (filter_string, value). E.g. ('name__contains', 'fred')
@@ -1206,38 +1191,34 @@ class Query(object):
         parts = arg.split(LOOKUP_SEP)
         if not parts:
             raise FieldError("Cannot parse keyword query %r" % arg)
-        if self.add_aggregate_filter(filter_expr, parts, value, negate, connector,
-                                     can_reuse):
+        if self.add_aggregate_filter(parts, value, negate, connector, can_reuse):
             return
-        opts = self.get_meta()
-        split_multijoin = negate
         path, field, target, multijoin_pos, parts_found = self.names_to_path(
-            parts, opts, allow_explicit_fk=True, multijoin_break=split_multijoin)
-        if split_multijoin and multijoin_pos is not None:
-            self.split_exclude(filter_expr, LOOKUP_SEP.join(parts[:multijoin_pos+1]),
-                    can_reuse)
+            parts, self.get_meta(), allow_explicit_fk=True)
+        if negate and multijoin_pos is not None:
+            self.split_exclude(filter_expr, LOOKUP_SEP.join(parts[:multijoin_pos + 1]),
+                               can_reuse)
             return
         if parts_found == len(parts):
-            lookup = 'exact'
+            lookup_type = 'exact'
         elif parts_found == len(parts) - 1:
-            lookup = parts[-1]
-            if lookup not in self.query_terms:
+            lookup_type = parts[-1]
+            if lookup_type not in self.query_terms:
                 self.fail_lookup(parts, parts_found, path, field)
         else:
             self.fail_lookup(parts, parts_found, path, field)
 
-        lookup, value = self.resolve_value(lookup, value, can_reuse)
+        lookup_type, value = self.resolve_value(lookup_type, value, can_reuse)
         # By default, this is a WHERE clause. If an aggregate is referenced
         # in the value, the filter will be promoted to a HAVING
         having_clause = getattr(value, 'contains_aggregate', False)
 
-
         _, join_list, path = self._setup_joins(
-             path, opts, self.get_initial_alias(), can_reuse)
+            path, self.get_meta(), self.get_initial_alias(), can_reuse)
         if can_reuse is not None:
             can_reuse.update(join_list)
 
-        if (lookup == 'isnull' and value is True and not negate and
+        if (lookup_type == 'isnull' and value is True and not negate and
                 len(join_list) > 1):
             # If the comparison is against NULL, we may need to use some left
             # outer joins when creating the join chain. This is only done when
@@ -1246,22 +1227,22 @@ class Query(object):
 
         # Process the join list to see if we can remove any inner joins from
         # the far end (fewer tables in a query is better). Note that we must
-        # first do the promotion for isnull, as we must promote even the
-        # trimmed joins in this case.
+        # first do the promotion for isnull as the promotion information will
+        # be needed in some cases even if the join is trimmed.
         col, alias, join_list = self.trim_joins(target, join_list, path)
 
         if having_clause or force_having:
             if (alias, col) not in self.group_by:
                 self.group_by.append((alias, col))
-            self.having.add((Constraint(alias, col, field), lookup, value),
-                connector)
+            self.having.add((Constraint(alias, col, field), lookup_type, value),
+                            connector)
         else:
-            self.where.add((Constraint(alias, col, field), lookup, value),
-                connector)
+            self.where.add((Constraint(alias, col, field), lookup_type, value),
+                           connector)
 
         if negate:
             self.promote_joins(join_list)
-            if lookup != 'isnull':
+            if lookup_type != 'isnull':
                 if len(join_list) > 1:
                     for alias in join_list:
                         if self.alias_map[alias].join_type == self.LOUTER:
@@ -1287,7 +1268,6 @@ class Query(object):
                     # SQL like this here: NOT (col IS NOT NULL), where the first NOT
                     # is added in upper layers of the code.
                     self.where.add((Constraint(alias, col, None), 'isnull', False), AND)
-
 
     def add_q(self, q_object, used_aliases=None, force_having=False):
         """
@@ -1343,7 +1323,7 @@ class Query(object):
         if self.filter_is_sticky:
             self.used_aliases = used_aliases
 
-    def names_to_path(self, names, opts, allow_explicit_fk=True, multijoin_break=False):
+    def names_to_path(self, names, opts, allow_explicit_fk=True):
         """
         Walks the names path and turns them PathInfo tuples. Note that a
         single name in 'names' can generate multiple PathInfos (m2m for
@@ -1352,9 +1332,6 @@ class Query(object):
         'names' is the path of names to travle, 'opts' is the model Options we
         start the name resolving from, 'allow_many' and 'allow_explicit_fk'
         are as for setup_joins().
-
-        If 'multijoin_break' is True, then name resolution will break at first
-        multijoin position (first reverse foreign key traversal).
 
         Returns a list of PathInfo tuples. In addition returns the final field
         (the last used join field), and target (which is a field guaranteed to
@@ -1376,9 +1353,7 @@ class Query(object):
                         break
                 else:
                     if pos == 0:
-                        available = opts.get_all_field_names() + list(self.aggregate_select)
-                        raise FieldError("Cannot resolve keyword %r into field. "
-                                "Choices are: %s" % (name, ", ".join(available)))
+                        self.fail_lookup(names, pos, path, None)
                     # This one wasn't found...
                     pos = pos - 1
                     break
@@ -1416,7 +1391,7 @@ class Query(object):
             multijoin_pos = None if len(path) < multijoin_pos else multijoin_pos
         return path, final_field, target, multijoin_pos, pos + 1
 
-    def setup_joins(self, names, opts, alias, can_reuse=None, allow_m2m=True,
+    def setup_joins(self, names, opts, alias, can_reuse=None,
                     allow_explicit_fk=False):
         """
         Compute the necessary table joins for the passage through the fields
@@ -1445,12 +1420,10 @@ class Query(object):
         conversions (convert 'obj' in fk__id=obj to pk val using the foreign
         key field for example).
         """
-        path, final_field, target, multijoin_pos, parts_found = self.names_to_path(
+        path, final_field, target, _, parts_found = self.names_to_path(
             names, opts, allow_explicit_fk)
         if parts_found != len(names):
             self.fail_lookup(names, parts_found, path, final_field)
-        if multijoin_pos and not allow_m2m:
-            raise FieldError("Invalid field name: '%s'" % names[multijoin_pos])
         opts, joins, path = self._setup_joins(path, opts, alias, can_reuse)
         return final_field, target, opts, joins, path
 
@@ -1614,7 +1587,7 @@ class Query(object):
         self.distinct_fields = field_names
         self.distinct = True
 
-    def add_fields(self, field_names, allow_m2m=True):
+    def add_fields(self, field_names):
         """
         Adds the given (model) fields to the select set. The field names are
         added in the order specified.
@@ -1625,7 +1598,7 @@ class Query(object):
         try:
             for name in field_names:
                 field, target, u2, joins, u3 = self.setup_joins(
-                        name.split(LOOKUP_SEP), opts, alias, None, allow_m2m,
+                        name.split(LOOKUP_SEP), opts, alias, None,
                         True)
                 final_alias = joins[-1]
                 col = target.column
