@@ -501,13 +501,13 @@ class Query(object):
         # Now, add the joins from rhs query into the new query (skipping base
         # table).
         for alias in rhs.tables[1:]:
-            table, _, join_type, lhs, lhs_col, col, nullable, join_field = rhs.alias_map[alias]
+            table, _, join_type, lhs, join_cols, nullable, join_field = rhs.alias_map[alias]
             promote = (join_type == self.LOUTER)
             # If the left side of the join was already relabeled, use the
             # updated alias.
             lhs = change_map.get(lhs, lhs)
             new_alias = self.join(
-                (lhs, table, lhs_col, col), reuse=reuse,
+                (lhs, table, join_cols), reuse=reuse,
                 outer_if_first=not conjunction, nullable=nullable,
                 join_field=join_field)
             if promote:
@@ -732,7 +732,7 @@ class Query(object):
         aliases = list(aliases)
         while aliases:
             alias = aliases.pop(0)
-            if self.alias_map[alias].rhs_join_col is None:
+            if self.alias_map[alias].join_cols[0][1] is None:
                 # This is the base table (first FROM entry) - this table
                 # isn't really joined at all in the query, so we should not
                 # alter its join type.
@@ -889,7 +889,7 @@ class Query(object):
             alias = self.tables[0]
             self.ref_alias(alias)
         else:
-            alias = self.join((None, self.model._meta.db_table, None, None))
+            alias = self.join((None, self.model._meta.db_table, None))
         return alias
 
     def count_active_tables(self):
@@ -905,11 +905,12 @@ class Query(object):
         """
         Returns an alias for the join in 'connection', either reusing an
         existing alias for that join or creating a new one. 'connection' is a
-        tuple (lhs, table, lhs_col, col) where 'lhs' is either an existing
-        table alias or a table name. The join correspods to the SQL equivalent
-        of::
+        tuple (lhs, table, join_cols) where 'lhs' is either an existing
+        table alias or a table name. 'join_cols' is a tuple of tuples containing
+        columns to join on ((l_id1, r_id1), (l_id2, r_id2)). The join corresponds
+        to the SQL equivalent of::
 
-            lhs.lhs_col = table.col
+            lhs.l_id1 = table.r_id1 AND lhs.l_id2 = table.r_id2
 
         The 'reuse' parameter can be either None which means all joins
         (matching the connection) are reusable, or it can be a set containing
@@ -926,8 +927,10 @@ class Query(object):
 
         The 'join_field' is the field we are joining along (if any).
         """
-        lhs, table, lhs_col, col = connection
+        lhs, table, join_cols = connection
         assert lhs is None or join_field is not None
+        if join_cols is None:
+            join_cols = ((None, None),)
         existing = self.join_map.get(connection, ())
         if reuse is None:
             reuse = existing
@@ -955,7 +958,7 @@ class Query(object):
             join_type = self.LOUTER
         else:
             join_type = self.INNER
-        join = JoinInfo(table, alias, join_type, lhs, lhs_col, col, nullable,
+        join = JoinInfo(table, alias, join_type, lhs, join_cols, nullable,
                         join_field)
         self.alias_map[alias] = join
         if connection in self.join_map:
@@ -1012,7 +1015,7 @@ class Query(object):
                 continue
             link_field = int_opts.get_ancestor_link(int_model)
             int_opts = int_model._meta
-            connection = (alias, int_opts.db_table, link_field.column, int_opts.pk.column)
+            connection = (alias, int_opts.db_table, link_field.get_joining_columns())
             alias = seen[int_model] = self.join(connection, nullable=False,
                                                 join_field=link_field)
         return alias or seen[None]
@@ -1385,7 +1388,7 @@ class Query(object):
                 nullable = self.is_nullable(join.from_field)
             else:
                 nullable = True
-            connection = alias, opts.db_table, join.from_field.column, join.to_field.column
+            connection = alias, opts.db_table, join.join_field.get_joining_columns(reverse_join=not join.direct)
             reuse = can_reuse if join.m2m else None
             alias = self.join(connection, reuse=reuse,
                               nullable=nullable, join_field=join.join_field)
@@ -1552,10 +1555,10 @@ class Query(object):
                 col = target.column
                 if len(joins) > 1:
                     join = self.alias_map[final_alias]
-                    if col == join.rhs_join_col:
+                    if col == join.join_cols[0][1]:
                         self.unref_alias(final_alias)
                         final_alias = join.lhs_alias
-                        col = join.lhs_join_col
+                        col = join.join_cols[0][0]
                         joins = joins[:-1]
                 self.promote_joins(joins[1:])
                 self.select.append(SelectInfo((final_alias, col), field))
@@ -1633,7 +1636,7 @@ class Query(object):
             opts = self.model._meta
             if not self.select:
                 count = self.aggregates_module.Count(
-                    (self.join((None, opts.db_table, None, None)), opts.pk.column),
+                    (self.join((None, opts.db_table, None)), opts.pk.column),
                     is_summary=True, distinct=True)
             else:
                 # Because of SQL portability issues, multi-column, distinct
