@@ -10,7 +10,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection
 from django.db.models import signals
 from django.db import models, router, DEFAULT_DB_ALIAS
-from django.db.models.fields.related import RelatedField, Field, ManyToManyRel
+from django.db.models.fields.related import ForeignObject, ManyToManyRel
 from django.db.models.related import PathInfo
 from django.forms import ModelForm
 from django.forms.models import BaseModelFormSet, modelformset_factory, save_instance
@@ -149,7 +149,7 @@ class GenericForeignKey(six.with_metaclass(RenameGenericForeignKeyMethods)):
         setattr(instance, self.fk_field, fk)
         setattr(instance, self.cache_attr, value)
 
-class GenericRelation(RelatedField, Field):
+class GenericRelation(ForeignObject):
     """Provides an accessor to generic related objects (e.g. comments)"""
 
     def __init__(self, to, **kwargs):
@@ -167,24 +167,34 @@ class GenericRelation(RelatedField, Field):
         kwargs['blank'] = True
         kwargs['editable'] = False
         kwargs['serialize'] = False
-        Field.__init__(self, **kwargs)
+        super(GenericRelation, self).__init__(
+            to,
+            to_fields=[],
+            from_fields=[self.object_id_field_name],
+            **kwargs)
+
+    def resolve_relation_fields(self):
+        self.to_fields = [self.model._meta.pk.name]
+        return [(self.rel.to._meta.get_field_by_name(self.object_id_field_name)[0],
+                 self.model._meta.pk)]
 
     def get_path_info(self):
-        from_field = self.model._meta.pk
         opts = self.rel.to._meta
         target = opts.get_field_by_name(self.object_id_field_name)[0]
-        # Note that we are using different field for the join_field
-        # than from_field or to_field. This is a hack, but we need the
-        # GenericRelation to generate the extra SQL.
-        return ([PathInfo(from_field, target, self.model._meta, opts, self, True, False)],
-                opts, target, self)
+        # Still need the path from here to parent.
+        return [PathInfo(self.model._meta, opts, (target,), self, True, False)]
 
     def get_choices_default(self):
-        return Field.get_choices(self, include_blank=False)
+        return super(GenericRelation, self).get_choices(include_blank=False)
 
     def value_to_string(self, obj):
         qs = getattr(obj, self.name).all()
         return smart_text([instance._get_pk_val() for instance in qs])
+
+    def get_joining_columns(self, reverse_join=False):
+        if not reverse_join:
+            raise ValueError('GenericRelation only supports reverse joins.')
+        return super(GenericRelation, self).get_joining_columns(reverse_join)
 
     def m2m_db_table(self):
         return self.rel.to._meta.db_table
