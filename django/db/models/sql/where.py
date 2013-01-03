@@ -242,7 +242,7 @@ class WhereNode(tree.Node):
         """
         table_alias, name, db_type = data
         if table_alias:
-            lhs = '%s.%s' % (qn(table_alias), qn(name))
+            lhs = qn((table_alias, name, None))
         else:
             lhs = qn(name)
         return connection.ops.field_cast_sql(db_type) % lhs

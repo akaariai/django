@@ -3,6 +3,7 @@ from django.utils.six.moves import zip
 from django.core.exceptions import FieldError
 from django.db import transaction
 from django.db.backends.util import truncate_name
+from django.db.models.loading import get_models
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.query_utils import select_related_descend
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
@@ -13,6 +14,23 @@ from django.db.models.sql.query import get_order_dir, Query
 from django.db.utils import DatabaseError
 from django.utils import six
 
+class ALL_TABLES(object):
+
+    def __contains__(self, val):
+        return True
+ALL_TABLES = ALL_TABLES()
+
+_table_to_cols_cache = {}
+def get_cols_by_table(tbl):
+    try:
+        return _table_to_cols_cache[tbl]
+    except KeyError:
+        models = get_models(include_auto_created=True, only_installed=False)
+        for model in models:
+            if model._meta.db_table == tbl:
+                _table_to_cols_cache[tbl] = set([f.column for f in model._meta.concrete_model._meta.local_fields])
+                return _table_to_cols_cache[tbl]
+        raise
 
 class SQLCompiler(object):
     def __init__(self, query, connection, using):
@@ -20,6 +38,7 @@ class SQLCompiler(object):
         self.connection = connection
         self.using = using
         self.quote_cache = {}
+        self.duplicate_cols = ALL_TABLES
 
     def pre_sql_setup(self):
         """
@@ -43,6 +62,8 @@ class SQLCompiler(object):
         for table names. This avoids problems with some SQL dialects that treat
         quoted strings specially (e.g. PostgreSQL).
         """
+        if isinstance(name, tuple):
+            return self.quote_pair(name)
         if name in self.quote_cache:
             return self.quote_cache[name]
         if ((name in self.query.alias_map and name not in self.query.table_map) or
@@ -53,6 +74,65 @@ class SQLCompiler(object):
         self.quote_cache[name] = r
         return r
 
+    def quote_pair(self, pair):
+        if pair not in self.quote_cache:
+            if pair[1] in self.duplicate_cols:
+                self.quote_cache[pair] = (
+                    '%s.%s' % (self.quote_name_unless_alias(pair[0]),
+                               self.quote_name_unless_alias(pair[1])))
+            else:
+                self.quote_cache[pair] = self.quote_name_unless_alias(pair[1])
+        return self.quote_cache[pair]
+
+    def get_col_output(self, cols, with_aliases):
+        col_alias_idx = 0
+        result = []
+        for tbl_alias, col_sql, alias in cols:
+            if tbl_alias is not None:
+                col_sql = self.quote_pair((tbl_alias, col_sql))
+            if alias is None and with_aliases and col_sql in self.duplicate_cols:
+                col_alias_idx += 1
+                col_alias = 'Col%d' % col_alias_idx
+                result.append('%s AS %s' % (col_sql, col_alias))
+            elif alias:
+                result.append('%s AS %s' % (col_sql, alias))
+            else:
+                result.append(col_sql)
+        return result
+
+    def get_ordering_output(self, ordering, group_by):
+        result = []
+        for tbl_alias, col_sql, dir in ordering:
+            if not dir:
+                result.append(col_sql)
+            elif tbl_alias:
+                result.append('%s %s' % (self.quote_pair((tbl_alias, col_sql)), dir))
+            else:
+                result.append('%s %s' % (col_sql, dir))
+        group_by_res = []
+        for (tbl_alias, col_sql), params in group_by:
+            if tbl_alias:
+                group_by_res.append((self.quote_pair((tbl_alias, col_sql)), params))
+            else:
+                group_by_res.append((col_sql, params))
+        return result, group_by_res
+
+    def get_distinct_output(self, distinct):
+        return []
+
+    def populate_dupe_cols(self):
+        self.duplicate_cols = set()
+        seen = set()
+        for alias in self.query.tables:
+            if self.query.alias_refcount[alias]:
+                try:
+                    cols = get_cols_by_table(self.query.alias_map[alias].table_name)
+                except KeyError:
+                    self.duplicate_cols = ALL_TABLES
+                    break
+                self.duplicate_cols.update(cols & seen)
+                seen.update(cols)
+                
     def as_sql(self, with_limits=True, with_col_aliases=False):
         """
         Creates the SQL for this query. Returns the SQL string and list of
@@ -71,14 +151,17 @@ class SQLCompiler(object):
         # as the pre_sql_setup will modify query state in a way that forbids
         # another run of it.
         self.refcounts_before = self.query.alias_refcount.copy()
-        out_cols = self.get_columns(with_col_aliases)
-        ordering, ordering_group_by = self.get_ordering()
-
+        cols = self.get_columns()
+        ordering, group_by = self.get_ordering()
         distinct_fields = self.get_distinct()
 
         # This must come after 'select', 'ordering' and 'distinct' -- see
         # docstring of get_from_clause() for details.
         from_, f_params = self.get_from_clause()
+        self.populate_dupe_cols()
+        ordering, ordering_group_by = self.get_ordering_output(ordering, group_by)
+        distinct_fields = self.get_distinct_output(distinct_fields)
+        out_cols = self.get_col_output(cols, with_col_aliases)
 
         qn = self.quote_name_unless_alias
 
@@ -93,7 +176,7 @@ class SQLCompiler(object):
         if self.query.distinct:
             result.append(self.connection.ops.distinct_sql(distinct_fields))
 
-        result.append(', '.join(out_cols + self.query.ordering_aliases))
+        result.append(', '.join(out_cols + [self.quote_name_unless_alias(a) for a in self.query.ordering_aliases]))
 
         result.append('FROM')
         result.extend(from_)
@@ -159,24 +242,18 @@ class SQLCompiler(object):
         obj.bump_prefix()
         return obj.get_compiler(connection=self.connection).as_sql()
 
-    def get_columns(self, with_aliases=False):
+    def get_columns(self):
         """
-        Returns the list of columns to use in the select statement. If no
+        Returns the list of column pairs to use in the select statement. If no
         columns have been specified, returns all columns relating to fields in
         the model.
 
-        If 'with_aliases' is true, any column names that are duplicated
-        (without the table names) are given unique aliases. This is needed in
-        some cases to avoid ambiguity with nested queries.
+        Returns the columns as 3-tupes: (tbl_alias, col, col_alias). This
+        will then generate SQL like SELECT tbl_alias.col AS col_alias FROM ...
         """
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
-        result = ['(%s) AS %s' % (col[0], qn2(alias)) for alias, col in six.iteritems(self.query.extra_select)]
-        aliases = set(self.query.extra_select.keys())
-        if with_aliases:
-            col_aliases = aliases.copy()
-        else:
-            col_aliases = set()
+        result = [(None, '(%s)' % col[0], qn2(alias)) for alias, col in self.query.extra_select.items()]
         if self.query.select:
             only_load = self.deferred_to_columns()
             for col, _ in self.query.select:
@@ -185,79 +262,42 @@ class SQLCompiler(object):
                     table = self.query.alias_map[alias].table_name
                     if table in only_load and column not in only_load[table]:
                         continue
-                    r = '%s.%s' % (qn(alias), qn(column))
-                    if with_aliases:
-                        if col[1] in col_aliases:
-                            c_alias = 'Col%d' % len(col_aliases)
-                            result.append('%s AS %s' % (r, c_alias))
-                            aliases.add(c_alias)
-                            col_aliases.add(c_alias)
-                        else:
-                            result.append('%s AS %s' % (r, qn2(col[1])))
-                            aliases.add(r)
-                            col_aliases.add(col[1])
-                    else:
-                        result.append(r)
-                        aliases.add(r)
-                        col_aliases.add(col[1])
+                    result.append((alias, column, None))
                 else:
-                    result.append(col.as_sql(qn, self.connection))
-
+                    col_sql = col.as_sql(qn, self.connection)
                     if hasattr(col, 'alias'):
-                        aliases.add(col.alias)
-                        col_aliases.add(col.alias)
-
+                        result.append((None, col_sql, col.alias))
+                    else:
+                        result.append((None, col_sql, None))
         elif self.query.default_cols:
-            cols, new_aliases = self.get_default_columns(with_aliases,
-                    col_aliases)
-            result.extend(cols)
-            aliases.update(new_aliases)
+            result.extend(self.get_default_columns())
 
         max_name_length = self.connection.ops.max_name_length()
         result.extend([
-            '%s%s' % (
+            (
+                None,
                 aggregate.as_sql(qn, self.connection),
                 alias is not None
-                    and ' AS %s' % qn(truncate_name(alias, max_name_length))
-                    or ''
+                    and qn(truncate_name(alias, max_name_length))
+                    or None
             )
             for alias, aggregate in self.query.aggregate_select.items()
         ])
 
-        for (table, col), _ in self.query.related_select_cols:
-            r = '%s.%s' % (qn(table), qn(col))
-            if with_aliases and col in col_aliases:
-                c_alias = 'Col%d' % len(col_aliases)
-                result.append('%s AS %s' % (r, c_alias))
-                aliases.add(c_alias)
-                col_aliases.add(c_alias)
-            else:
-                result.append(r)
-                aliases.add(r)
-                col_aliases.add(col)
-
-        self._select_aliases = aliases
+        for r, _ in self.query.related_select_cols:
+            result.append(r)
         return result
 
-    def get_default_columns(self, with_aliases=False, col_aliases=None,
-            start_alias=None, opts=None, as_pairs=False, from_parent=None):
+    def get_default_columns(self, start_alias=None, opts=None, from_parent=None):
         """
         Computes the default columns for selecting every field in the base
         model. Will sometimes be called to pull in related models (e.g. via
         select_related), in which case "opts" and "start_alias" will be given
         to provide a starting point for the traversal.
-
-        Returns a list of strings, quoted appropriately for use in SQL
-        directly, as well as a set of aliases used in the select statement (if
-        'as_pairs' is True, returns a list of (alias, col_name) pairs instead
-        of strings as the first component and None as the second component).
         """
         result = []
         if opts is None:
             opts = self.query.model._meta
-        qn = self.quote_name_unless_alias
-        qn2 = self.connection.ops.quote_name
-        aliases = set()
         only_load = self.deferred_to_columns()
         seen = self.query.included_inherited_models.copy()
         if start_alias:
@@ -270,23 +310,8 @@ class SQLCompiler(object):
             table = self.query.alias_map[alias].table_name
             if table in only_load and field.column not in only_load[table]:
                 continue
-            if as_pairs:
-                result.append((alias, field.column))
-                aliases.add(alias)
-                continue
-            if with_aliases and field.column in col_aliases:
-                c_alias = 'Col%d' % len(col_aliases)
-                result.append('%s.%s AS %s' % (qn(alias),
-                    qn2(field.column), c_alias))
-                col_aliases.add(c_alias)
-                aliases.add(c_alias)
-            else:
-                r = '%s.%s' % (qn(alias), qn2(field.column))
-                result.append(r)
-                aliases.add(r)
-                if with_aliases:
-                    col_aliases.add(field.column)
-        return result, aliases
+            result.append((alias, field.column, None))
+        return result
 
     def get_distinct(self):
         """
@@ -295,16 +320,13 @@ class SQLCompiler(object):
         Note that this method can alter the tables in the query, and thus it
         must be called before get_from_clause().
         """
-        qn = self.quote_name_unless_alias
-        qn2 = self.connection.ops.quote_name
         result = []
         opts = self.query.model._meta
-
         for name in self.query.distinct_fields:
             parts = name.split(LOOKUP_SEP)
             field, col, alias, _, _ = self._setup_joins(parts, opts, None)
             col, alias = self._final_join_removal(col, alias)
-            result.append("%s.%s" % (qn(alias), qn2(col)))
+            result.append((alias, col))
         return result
 
 
@@ -331,7 +353,6 @@ class SQLCompiler(object):
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
         distinct = self.query.distinct
-        select_aliases = self._select_aliases
         result = []
         group_by = []
         ordering_aliases = []
@@ -344,10 +365,9 @@ class SQLCompiler(object):
         # to include the same field more than once in the ordering. We track
         # the table/column pairs we use and discard any after the first use.
         processed_pairs = set()
-
         for field in ordering:
             if field == '?':
-                result.append(self.connection.ops.random_function_sql())
+                result.append((None, self.connection.ops.random_function_sql(), None))
                 continue
             if isinstance(field, int):
                 if field < 0:
@@ -355,12 +375,12 @@ class SQLCompiler(object):
                     field = -field
                 else:
                     order = asc
-                result.append('%s %s' % (field, order))
-                group_by.append((str(field), []))
+                result.append((None, str(field), order))
+                group_by.append(((None, str(field)), []))
                 continue
             col, order = get_order_dir(field, asc)
             if col in self.query.aggregate_select:
-                result.append('%s %s' % (qn(col), order))
+                result.append((None, qn(col), order))
                 continue
             if '.' in field:
                 # This came in through an extra(order_by=...) addition. Pass it
@@ -369,27 +389,27 @@ class SQLCompiler(object):
                 if (table, col) not in processed_pairs:
                     elt = '%s.%s' % (qn(table), col)
                     processed_pairs.add((table, col))
-                    if not distinct or elt in select_aliases:
-                        result.append('%s %s' % (elt, order))
-                        group_by.append((elt, []))
+                    if not distinct:
+                        result.append((None, elt, order))
+                        group_by.append(((None, elt), []))
             elif get_order_dir(field)[0] not in self.query.extra_select:
                 # 'col' is of the form 'field' or 'field1__field2' or
                 # '-field1__field2__field', etc.
                 for table, col, order in self.find_ordering_name(field,
                         self.query.model._meta, default_order=asc):
                     if (table, col) not in processed_pairs:
-                        elt = '%s.%s' % (qn(table), qn2(col))
                         processed_pairs.add((table, col))
-                        if distinct and elt not in select_aliases:
-                            ordering_aliases.append(elt)
-                        result.append('%s %s' % (elt, order))
-                        group_by.append((elt, []))
+                        if distinct:
+                            ordering_aliases.append((table, col))
+                        result.append((table, col, order))
+                        group_by.append(((table, col), []))
             else:
                 elt = qn2(col)
-                if distinct and col not in select_aliases:
+                if distinct:
                     ordering_aliases.append(elt)
-                result.append('%s %s' % (elt, order))
-                group_by.append(self.query.extra_select[col])
+                result.append((None, elt, order))
+                extra_sel = self.query.extra_select[col]
+                group_by.append(((None, extra_sel[0]), extra_sel[1]))
         self.query.ordering_aliases = ordering_aliases
         return result, group_by
 
@@ -543,7 +563,7 @@ class SQLCompiler(object):
             cols = self.query.group_by + select_cols
             for col in cols:
                 if isinstance(col, (list, tuple)):
-                    sql = '%s.%s' % (qn(col[0]), qn(col[1]))
+                    sql = qn((col[0], col[1], None))
                 elif hasattr(col, 'as_sql'):
                     sql = col.as_sql(qn, self.connection)
                 else:
@@ -613,8 +633,7 @@ class SQLCompiler(object):
             alias = self.query.join((alias, table, f.column,
                     f.rel.get_related_field().column),
                     promote=promote, join_field=f)
-            columns, aliases = self.get_default_columns(start_alias=alias,
-                    opts=f.rel.to._meta, as_pairs=True)
+            columns = self.get_default_columns(start_alias=alias, opts=f.rel.to._meta)
             self.query.related_select_cols.extend(
                 SelectInfo(col, field) for col, field in zip(columns, f.rel.to._meta.fields))
             if restricted:
@@ -644,8 +663,8 @@ class SQLCompiler(object):
                 )
                 from_parent = (opts.model if issubclass(model, opts.model)
                                else None)
-                columns, aliases = self.get_default_columns(start_alias=alias,
-                    opts=model._meta, as_pairs=True, from_parent=from_parent)
+                columns = self.get_default_columns(start_alias=alias,
+                                                   opts=model._meta, from_parent=from_parent)
                 self.query.related_select_cols.extend(
                     SelectInfo(col, field) for col, field
                     in zip(columns, model._meta.fields))
