@@ -118,7 +118,10 @@ class SQLCompiler(object):
         return result, group_by_res
 
     def get_distinct_output(self, distinct):
-        return []
+        result = []
+        for tbl_alias, col_sql in distinct:
+            result.append(self.quote_pair((tbl_alias, col_sql)))
+        return result
 
     def populate_dupe_cols(self):
         self.duplicate_cols = set()
@@ -244,10 +247,6 @@ class SQLCompiler(object):
 
     def get_columns(self):
         """
-        Returns the list of column pairs to use in the select statement. If no
-        columns have been specified, returns all columns relating to fields in
-        the model.
-
         Returns the columns as 3-tupes: (tbl_alias, col, col_alias). This
         will then generate SQL like SELECT tbl_alias.col AS col_alias FROM ...
         """
