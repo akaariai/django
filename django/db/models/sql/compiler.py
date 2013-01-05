@@ -87,7 +87,10 @@ class SQLCompiler(object):
     def get_col_output(self, cols, with_aliases):
         col_alias_idx = 0
         result = []
-        for tbl_alias, col_sql, alias in cols:
+        has_field_sel = hasattr(self, 'get_field_select')
+        for tbl_alias, col_sql, alias, field in cols:
+            if has_field_sel and field and tbl_alias:
+                col_sql = self.get_field_select(field, tbl_alias)
             if tbl_alias is not None:
                 col_sql = self.quote_pair((tbl_alias, col_sql))
             if alias is None and with_aliases and col_sql in self.duplicate_cols:
@@ -252,22 +255,22 @@ class SQLCompiler(object):
         """
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
-        result = [(None, '(%s)' % col[0], qn2(alias)) for alias, col in self.query.extra_select.items()]
+        result = [(None, '(%s)' % col[0], qn2(alias), None) for alias, col in self.query.extra_select.items()]
         if self.query.select:
             only_load = self.deferred_to_columns()
-            for col, _ in self.query.select:
+            for col, field in self.query.select:
                 if isinstance(col, (list, tuple)):
                     alias, column = col
                     table = self.query.alias_map[alias].table_name
                     if table in only_load and column not in only_load[table]:
                         continue
-                    result.append((alias, column, None))
+                    result.append((alias, column, None, field))
                 else:
                     col_sql = col.as_sql(qn, self.connection)
                     if hasattr(col, 'alias'):
-                        result.append((None, col_sql, col.alias))
+                        result.append((None, col_sql, col.alias, field))
                     else:
-                        result.append((None, col_sql, None))
+                        result.append((None, col_sql, None, field))
         elif self.query.default_cols:
             result.extend(self.get_default_columns())
 
@@ -278,7 +281,8 @@ class SQLCompiler(object):
                 aggregate.as_sql(qn, self.connection),
                 alias is not None
                     and qn(truncate_name(alias, max_name_length))
-                    or None
+                    or None,
+                None
             )
             for alias, aggregate in self.query.aggregate_select.items()
         ])
@@ -309,7 +313,7 @@ class SQLCompiler(object):
             table = self.query.alias_map[alias].table_name
             if table in only_load and field.column not in only_load[table]:
                 continue
-            result.append((alias, field.column, None))
+            result.append((alias, field.column, None, field))
         return result
 
     def get_distinct(self):
