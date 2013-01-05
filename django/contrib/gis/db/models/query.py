@@ -760,7 +760,7 @@ class GeoQuerySet(QuerySet):
             self.query.add_select_related([field_name])
             compiler = self.query.get_compiler(self.db)
             compiler.pre_sql_setup()
-            for (rel_table, _, _, field), _ in self.query.related_select_cols:
+            for (rel_table, _, _, field) in self.query.related_select_cols:
                 if field == geo_field:
                     return compiler._field_column(geo_field, rel_table)
             raise ValueError("%r not in self.query.related_select_cols" % geo_field)

@@ -120,10 +120,9 @@ class Query(object):
         self.included_inherited_models = {}
 
         # SQL-related attributes
-        # Select and related select clauses as SelectInfo instances.
         # The select is used for cases where we want to set up the select
         # clause to contain other than default fields (values(), annotate(),
-        # subqueries...)
+        # subqueries...). Contains SelectInfo instances.
         self.select = []
         # The related_select_cols is used for columns needed for
         # select_related - this is populated in compile stage.

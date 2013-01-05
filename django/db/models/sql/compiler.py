@@ -6,7 +6,7 @@ from django.db.backends.util import truncate_name
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.query_utils import select_related_descend
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
-        GET_ITERATOR_CHUNK_SIZE, SelectInfo)
+                                            GET_ITERATOR_CHUNK_SIZE)
 from django.db.models.sql.datastructures import EmptyResultSet
 from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.query import get_order_dir, Query
@@ -80,7 +80,7 @@ class SQLCompiler(object):
             # Some custom compilers (gis for example) override the normal
             # col SQL by get_field_select().
             if has_field_sel and field and tbl_alias:
-                col_sql = self.get_field_select(field, tbl_alias)
+                col_sql = self.get_field_select(field, tbl_alias, col_sql)
             elif tbl_alias is not None:
                 col_sql = self.quote_pair((tbl_alias, col_sql))
             if alias is None and with_aliases and col_sql in dupe_cols:
@@ -268,9 +268,9 @@ class SQLCompiler(object):
                 else:
                     col_sql = col.as_sql(qn, self.connection)
                     if hasattr(col, 'alias'):
-                        result.append((None, col_sql, col.alias, field))
+                        result.append((None, col_sql, col.alias, None))
                     else:
-                        result.append((None, col_sql, None, field))
+                        result.append((None, col_sql, None, None))
         elif self.query.default_cols:
             result.extend(self.get_default_columns())
 
@@ -287,8 +287,7 @@ class SQLCompiler(object):
             for alias, aggregate in self.query.aggregate_select.items()
         ])
 
-        for r, _ in self.query.related_select_cols:
-            result.append(r)
+        result.extend(self.query.related_select_cols)
         return result
 
     def get_default_columns(self, start_alias=None, opts=None, from_parent=None):
@@ -543,9 +542,9 @@ class SQLCompiler(object):
         qn = self.quote_name_unless_alias
         result, params = [], []
         if self.query.group_by is not None:
-            select_cols = self.query.select + self.query.related_select_cols
-            # Just the column, not the fields.
-            select_cols = [s[0] for s in select_cols]
+            # Note - we are using the fact that related_select_cols has tbl_alias, col as
+            # first two elements just like self.query.select's col.
+            select_cols = [s.col for s in self.query.select] + self.query.related_select_cols
             if (len(self.query.model._meta.fields) == len(self.query.select)
                     and self.connection.features.allows_group_by_pk):
                 self.query.group_by = [
@@ -556,7 +555,7 @@ class SQLCompiler(object):
             cols = self.query.group_by + select_cols
             for col in cols:
                 if isinstance(col, (list, tuple)):
-                    sql = qn((col[0], col[1], None))
+                    sql = qn((col[0], col[1]))
                 elif hasattr(col, 'as_sql'):
                     sql = col.as_sql(qn, self.connection)
                 else:
@@ -627,8 +626,7 @@ class SQLCompiler(object):
                     f.rel.get_related_field().column),
                     promote=promote, join_field=f)
             columns = self.get_default_columns(start_alias=alias, opts=f.rel.to._meta)
-            self.query.related_select_cols.extend(
-                SelectInfo(col, field) for col, field in zip(columns, f.rel.to._meta.fields))
+            self.query.related_select_cols.extend(columns)
             if restricted:
                 next = requested.get(f.name, {})
             else:
@@ -658,9 +656,7 @@ class SQLCompiler(object):
                                else None)
                 columns = self.get_default_columns(start_alias=alias,
                                                    opts=model._meta, from_parent=from_parent)
-                self.query.related_select_cols.extend(
-                    SelectInfo(col, field) for col, field
-                    in zip(columns, model._meta.fields))
+                self.query.related_select_cols.extend(columns)
                 next = requested.get(f.related_query_name(), {})
                 # Use True here because we are looking at the _reverse_ side of
                 # the relation, which is always nullable.
@@ -710,7 +706,7 @@ class SQLCompiler(object):
                             fields = [f.field for f in self.query.select]
                         else:
                             fields = self.query.model._meta.fields
-                        fields = fields + [f.field for f in self.query.related_select_cols]
+                        fields = fields + [f[3] for f in self.query.related_select_cols]
 
                         # If the field was deferred, exclude it from being passed
                         # into `resolve_columns` because it wasn't selected.
