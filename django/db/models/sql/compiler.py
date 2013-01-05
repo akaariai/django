@@ -19,6 +19,7 @@ class SQLCompiler(object):
         self.connection = connection
         self.using = using
         self.quote_cache = {}
+        self.ordering_cols_amount = 0
 
     def pre_sql_setup(self):
         """
@@ -64,7 +65,7 @@ class SQLCompiler(object):
                            self.quote_name_unless_alias(pair[1])))
         return self.quote_cache[pair]
 
-    def get_col_output(self, cols, with_aliases):
+    def get_col_output(self, cols, ordering, with_aliases):
         """
         Turns the cols (as produced by get_columns()) into SQL.
 
@@ -92,6 +93,17 @@ class SQLCompiler(object):
                 dupe_cols.add(alias)
             else:
                 result.append(col_sql)
+        if self.query.distinct:
+            # In the distinct case all ordering cols must be present in the
+            # query's select clause.
+            existing_cols = set(result)
+            for tbl_alias, col_sql, _ in ordering:
+                if not tbl_alias:
+                    continue
+                sql = self.quote_pair((tbl_alias, col_sql))
+                if sql not in existing_cols:
+                    result.append(sql)
+                    self.ordering_cols_amount += 1
         return result
 
     def get_ordering_output(self, ordering, group_by):
@@ -150,9 +162,9 @@ class SQLCompiler(object):
         # This must come after 'select', 'ordering' and 'distinct' -- see
         # docstring of get_from_clause() for details.
         from_, f_params = self.get_from_clause()
-        ordering, ordering_group_by = self.get_ordering_output(ordering, group_by)
+        ordering_out, group_by_out = self.get_ordering_output(ordering, group_by)
         distinct_fields = self.get_distinct_output(distinct_fields)
-        out_cols = self.get_col_output(cols, with_col_aliases)
+        out_cols = self.get_col_output(cols, ordering, with_col_aliases)
 
         qn = self.quote_name_unless_alias
 
@@ -167,7 +179,7 @@ class SQLCompiler(object):
         if self.query.distinct:
             result.append(self.connection.ops.distinct_sql(distinct_fields))
 
-        result.append(', '.join(out_cols + [self.quote_name_unless_alias(a) for a in self.query.ordering_aliases]))
+        result.append(', '.join(out_cols))
 
         result.append('FROM')
         result.extend(from_)
@@ -177,7 +189,7 @@ class SQLCompiler(object):
             result.append('WHERE %s' % where)
             params.extend(w_params)
 
-        grouping, gb_params = self.get_grouping(ordering_group_by)
+        grouping, gb_params = self.get_grouping(group_by_out)
         if grouping:
             if distinct_fields:
                 raise NotImplementedError(
@@ -192,7 +204,7 @@ class SQLCompiler(object):
             params.extend(h_params)
 
         if ordering:
-            result.append('ORDER BY %s' % ', '.join(ordering))
+            result.append('ORDER BY %s' % ', '.join(ordering_out))
 
         if with_limits:
             if self.query.high_mark is not None:
@@ -327,9 +339,6 @@ class SQLCompiler(object):
         "order by" clause, and the list of SQL elements that need to be added
         to the GROUP BY clause as a result of the ordering.
 
-        Also sets the ordering_aliases attribute on this instance to a list of
-        extra aliases needed in the select.
-
         Determining the ordering SQL can change the tables we need to include,
         so this should be run *before* get_from_clause().
         """
@@ -343,10 +352,8 @@ class SQLCompiler(object):
                         or [])
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
-        distinct = self.query.distinct
         result = []
         group_by = []
-        ordering_aliases = []
         if self.query.standard_ordering:
             asc, desc = ORDER_DIR['ASC']
         else:
@@ -380,9 +387,8 @@ class SQLCompiler(object):
                 if (table, col) not in processed_pairs:
                     elt = '%s.%s' % (qn(table), col)
                     processed_pairs.add((table, col))
-                    if not distinct:
-                        result.append((None, elt, order))
-                        group_by.append(((None, elt), []))
+                    result.append((None, elt, order))
+                    group_by.append(((None, elt), []))
             elif get_order_dir(field)[0] not in self.query.extra_select:
                 # 'col' is of the form 'field' or 'field1__field2' or
                 # '-field1__field2__field', etc.
@@ -390,19 +396,14 @@ class SQLCompiler(object):
                         field, self.query.model._meta, default_order=asc):
                     if (table, col) not in processed_pairs:
                         processed_pairs.add((table, col))
-                        if distinct:
-                            ordering_aliases.append((table, col))
                         result.append((table, col, order))
                         group_by.append(((table, col), []))
             else:
                 # Ordering by extra select col.
                 elt = qn2(col)
-                if distinct:
-                    ordering_aliases.append(elt)
                 result.append((None, elt, order))
                 extra_sel = self.query.extra_select[col]
                 group_by.append(((None, extra_sel[0]), extra_sel[1]))
-        self.query.ordering_aliases = ordering_aliases
         return result, group_by
 
     def find_ordering_name(self, name, opts, alias=None, default_order='ASC',
@@ -760,13 +761,13 @@ class SQLCompiler(object):
         if not result_type:
             return cursor
         if result_type == SINGLE:
-            if self.query.ordering_aliases:
-                return cursor.fetchone()[:-len(self.query.ordering_aliases)]
+            if self.ordering_cols_amount:
+                return cursor.fetchone()[:-self.ordering_cols_amount]
             return cursor.fetchone()
 
         # The MULTI case.
-        if self.query.ordering_aliases:
-            result = order_modified_iter(cursor, len(self.query.ordering_aliases),
+        if self.ordering_cols_amount:
+            result = order_modified_iter(cursor, self.ordering_cols_amount,
                     self.connection.features.empty_fetchmany_value)
         else:
             result = iter((lambda: cursor.fetchmany(GET_ITERATOR_CHUNK_SIZE)),
