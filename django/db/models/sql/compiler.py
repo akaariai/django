@@ -55,6 +55,9 @@ class SQLCompiler(object):
         return r
 
     def quote_pair(self, pair):
+        """
+        Quotes a pair of (tbl_alias, col_alias).
+        """
         if pair not in self.quote_cache:
             self.quote_cache[pair] = (
                 '%s.%s' % (self.quote_name_unless_alias(pair[0]),
@@ -62,14 +65,22 @@ class SQLCompiler(object):
         return self.quote_cache[pair]
 
     def get_col_output(self, cols, with_aliases):
+        """
+        Turns the cols (as produced by get_columns()) into SQL.
+
+        If with_aliases is set, then any column name seen more than once
+        will be given an alias.
+        """
         col_alias_idx = 0
         result = []
         has_field_sel = hasattr(self, 'get_field_select')
         dupe_cols = set()
         for tbl_alias, col_sql, alias, field in cols:
+            # Some custom compilers (gis for example) override the normal
+            # col SQL by get_field_select().
             if has_field_sel and field and tbl_alias:
                 col_sql = self.get_field_select(field, tbl_alias)
-            if tbl_alias is not None:
+            elif tbl_alias is not None:
                 col_sql = self.quote_pair((tbl_alias, col_sql))
             if alias is None and with_aliases and col_sql in dupe_cols:
                 col_alias_idx += 1
@@ -84,6 +95,10 @@ class SQLCompiler(object):
         return result
 
     def get_ordering_output(self, ordering, group_by):
+        """
+        Turns the ordering and group_by into SQL. The format of ordering
+        and group_by is that of get_ordering()
+        """
         result = []
         for tbl_alias, col_sql, dir in ordering:
             if not dir:
@@ -101,11 +116,15 @@ class SQLCompiler(object):
         return result, group_by_res
 
     def get_distinct_output(self, distinct):
+        """
+        Turns the distinct into SQL. The format of distinct is that from
+        get_distinct().
+        """
         result = []
         for tbl_alias, col_sql in distinct:
             result.append(self.quote_pair((tbl_alias, col_sql)))
         return result
-                
+
     def as_sql(self, with_limits=True, with_col_aliases=False):
         """
         Creates the SQL for this query. Returns the SQL string and list of
@@ -216,12 +235,15 @@ class SQLCompiler(object):
 
     def get_columns(self):
         """
-        Returns the columns as 3-tupes: (tbl_alias, col, col_alias). This
-        will then generate SQL like SELECT tbl_alias.col AS col_alias FROM ...
+        Returns the columns as 3-tupes: (tbl_alias, col, col_alias, field).
+        This will then generate SQL like:
+           SELECT tbl_alias.col AS col_alias FROM ...
+        The field is needed for custom compilers (gis for example).
         """
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
-        result = [(None, '(%s)' % col[0], qn2(alias), None) for alias, col in self.query.extra_select.items()]
+        result = [(None, '(%s)' % col[0], qn2(alias), None)
+                  for alias, col in self.query.extra_select.items()]
         if self.query.select:
             only_load = self.deferred_to_columns()
             for col, field in self.query.select:
@@ -245,9 +267,9 @@ class SQLCompiler(object):
             (
                 None,
                 aggregate.as_sql(qn, self.connection),
-                alias is not None
-                    and qn(truncate_name(alias, max_name_length))
-                    or None,
+                (alias is not None
+                 and qn(truncate_name(alias, max_name_length))
+                 or None),
                 None
             )
             for alias, aggregate in self.query.aggregate_select.items()
@@ -284,7 +306,8 @@ class SQLCompiler(object):
 
     def get_distinct(self):
         """
-        Returns a quoted list of fields to use in DISTINCT ON part of the query.
+        Returns a list of (tbl_alias, col) tuples to use in DISTINCT ON part
+        of the query.
 
         Note that this method can alter the tables in the query, and thus it
         must be called before get_from_clause().
@@ -297,7 +320,6 @@ class SQLCompiler(object):
             col, alias = self._final_join_removal(col, alias)
             result.append((alias, col))
         return result
-
 
     def get_ordering(self):
         """
@@ -364,8 +386,8 @@ class SQLCompiler(object):
             elif get_order_dir(field)[0] not in self.query.extra_select:
                 # 'col' is of the form 'field' or 'field1__field2' or
                 # '-field1__field2__field', etc.
-                for table, col, order in self.find_ordering_name(field,
-                        self.query.model._meta, default_order=asc):
+                for table, col, order in self.find_ordering_name(
+                        field, self.query.model._meta, default_order=asc):
                     if (table, col) not in processed_pairs:
                         processed_pairs.add((table, col))
                         if distinct:
@@ -373,6 +395,7 @@ class SQLCompiler(object):
                         result.append((table, col, order))
                         group_by.append(((table, col), []))
             else:
+                # Ordering by extra select col.
                 elt = qn2(col)
                 if distinct:
                     ordering_aliases.append(elt)
