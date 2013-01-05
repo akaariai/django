@@ -3,7 +3,6 @@ from django.utils.six.moves import zip
 from django.core.exceptions import FieldError
 from django.db import transaction
 from django.db.backends.util import truncate_name
-from django.db.models.loading import get_models
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.query_utils import select_related_descend
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
@@ -14,31 +13,12 @@ from django.db.models.sql.query import get_order_dir, Query
 from django.db.utils import DatabaseError
 from django.utils import six
 
-class ALL_TABLES(object):
-
-    def __contains__(self, val):
-        return True
-ALL_TABLES = ALL_TABLES()
-
-_table_to_cols_cache = {}
-def get_cols_by_table(tbl):
-    try:
-        return _table_to_cols_cache[tbl]
-    except KeyError:
-        models = get_models(include_auto_created=True, only_installed=False)
-        for model in models:
-            if model._meta.db_table == tbl:
-                _table_to_cols_cache[tbl] = set([f.column for f in model._meta.concrete_model._meta.local_fields])
-                return _table_to_cols_cache[tbl]
-        raise
-
 class SQLCompiler(object):
     def __init__(self, query, connection, using):
         self.query = query
         self.connection = connection
         self.using = using
         self.quote_cache = {}
-        self.duplicate_cols = ALL_TABLES
 
     def pre_sql_setup(self):
         """
@@ -76,29 +56,29 @@ class SQLCompiler(object):
 
     def quote_pair(self, pair):
         if pair not in self.quote_cache:
-            if pair[1] in self.duplicate_cols:
-                self.quote_cache[pair] = (
-                    '%s.%s' % (self.quote_name_unless_alias(pair[0]),
-                               self.quote_name_unless_alias(pair[1])))
-            else:
-                self.quote_cache[pair] = self.quote_name_unless_alias(pair[1])
+            self.quote_cache[pair] = (
+                '%s.%s' % (self.quote_name_unless_alias(pair[0]),
+                           self.quote_name_unless_alias(pair[1])))
         return self.quote_cache[pair]
 
     def get_col_output(self, cols, with_aliases):
         col_alias_idx = 0
         result = []
         has_field_sel = hasattr(self, 'get_field_select')
+        dupe_cols = set()
         for tbl_alias, col_sql, alias, field in cols:
             if has_field_sel and field and tbl_alias:
                 col_sql = self.get_field_select(field, tbl_alias)
             if tbl_alias is not None:
                 col_sql = self.quote_pair((tbl_alias, col_sql))
-            if alias is None and with_aliases and col_sql in self.duplicate_cols:
+            if alias is None and with_aliases and col_sql in dupe_cols:
                 col_alias_idx += 1
                 col_alias = 'Col%d' % col_alias_idx
                 result.append('%s AS %s' % (col_sql, col_alias))
+                dupe_cols.add(alias)
             elif alias:
                 result.append('%s AS %s' % (col_sql, alias))
+                dupe_cols.add(alias)
             else:
                 result.append(col_sql)
         return result
@@ -125,19 +105,6 @@ class SQLCompiler(object):
         for tbl_alias, col_sql in distinct:
             result.append(self.quote_pair((tbl_alias, col_sql)))
         return result
-
-    def populate_dupe_cols(self):
-        self.duplicate_cols = set()
-        seen = set()
-        for alias in self.query.tables:
-            if self.query.alias_refcount[alias]:
-                try:
-                    cols = get_cols_by_table(self.query.alias_map[alias].table_name)
-                except KeyError:
-                    self.duplicate_cols = ALL_TABLES
-                    break
-                self.duplicate_cols.update(cols & seen)
-                seen.update(cols)
                 
     def as_sql(self, with_limits=True, with_col_aliases=False):
         """
@@ -164,7 +131,6 @@ class SQLCompiler(object):
         # This must come after 'select', 'ordering' and 'distinct' -- see
         # docstring of get_from_clause() for details.
         from_, f_params = self.get_from_clause()
-        self.populate_dupe_cols()
         ordering, ordering_group_by = self.get_ordering_output(ordering, group_by)
         distinct_fields = self.get_distinct_output(distinct_fields)
         out_cols = self.get_col_output(cols, with_col_aliases)
