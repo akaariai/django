@@ -2,6 +2,7 @@ from __future__ import absolute_import
 
 from django.core import management
 from django.contrib.auth.models import User
+from django.db.models.query import EmptyQuerySet
 from django.test import TestCase
 from django.utils.six import StringIO
 
@@ -223,6 +224,19 @@ class ToFieldThroughTests(TestCase):
         self.driver.car_set._remove_items('driver', 'car', self.car)
         self.assertQuerysetEqual(
             self.driver.car_set.all(),[])
+
+    def test_null_query(self):
+        cd = CarDriver(driver=self.driver)
+        c = Car()
+        with self.assertRaises(ValueError):
+            c.drivers.all()
+        c.save()
+        self.assertTrue(isinstance(c.drivers.all(), EmptyQuerySet))
+        c.make = 'Foo'
+        c.save()
+        cd.car = c
+        cd.save()
+        self.assertEqual(list(c.drivers.all()), [self.driver])
 
 
 class ThroughLoadDataTestCase(TestCase):

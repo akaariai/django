@@ -80,7 +80,7 @@ class Driver(models.Model):
 
 @python_2_unicode_compatible
 class CarDriver(models.Model):
-    car = models.ForeignKey('Car', to_field='make')
+    car = models.ForeignKey('Car', to_field='make', null=True)
     driver = models.ForeignKey('Driver', to_field='name')
 
     def __str__(self):

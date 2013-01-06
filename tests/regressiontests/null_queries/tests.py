@@ -1,7 +1,8 @@
 from __future__ import absolute_import
 
-from django.test import TestCase
 from django.core.exceptions import FieldError
+from django.db.models.query import EmptyQuerySet
+from django.test import TestCase
 
 from .models import Poll, Choice, OuterA, Inner, OuterB
 
@@ -44,9 +45,9 @@ class NullQueriesTests(TestCase):
         # Can't use None on anything other than __exact
         self.assertRaises(ValueError, Choice.objects.filter, foo__gt=None)
 
-        # Related managers use __exact=None implicitly if the object hasn't been saved.
         p2 = Poll(question="How?")
-        self.assertEqual(repr(p2.choice_set.all()), '[]')
+        with self.assertRaises(ValueError):
+            p2.choice_set.all()
 
     def test_reverse_relations(self):
         """

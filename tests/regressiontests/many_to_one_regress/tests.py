@@ -111,3 +111,13 @@ class ManyToOneRegressionTests(TestCase):
         # of a model, and interrogate its related field.
         cat = models.ForeignKey(Category)
         self.assertEqual('id', cat.rel.get_related_field().name)
+
+    def test_related_relation_on_none(self):
+        # Test that the <field>_set manager does not join on Null value fields (#17541)
+        Third.objects.create(name='Third 1')
+        Third.objects.create(name='Third 2')
+        th = Third(name="testing")
+        with self.assertRaises(ValueError):
+            th.child_set.count()
+        th.save()
+        self.assertEqual(th.child_set.count(), 0)

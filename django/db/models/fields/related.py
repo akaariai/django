@@ -489,13 +489,19 @@ class ForeignRelatedObjectsDescriptor(object):
                     '%s__%s' % (rel_field.name, attname): getattr(instance, attname)
                 }
                 self.model = rel_model
+                if self.instance._get_pk_val() is None:
+                    raise ValueError('"%r" needs to have a primary key value before '
+                                     'this relationship can be used.' % self.instance)
 
             def get_query_set(self):
                 try:
                     return self.instance._prefetched_objects_cache[rel_field.related_query_name()]
                 except (AttributeError, KeyError):
                     db = self._db or router.db_for_read(self.model, instance=self.instance)
-                    qs = super(RelatedManager, self).get_query_set().using(db).filter(**self.core_filters)
+                    qs = super(RelatedManager, self).get_query_set().using(db)
+                    if getattr(self.instance, attname) is None:
+                        return qs.none()
+                    qs = qs.filter(**self.core_filters)
                     qs._known_related_objects = {rel_field: {self.instance.pk: self.instance}}
                     return qs
 
@@ -514,7 +520,14 @@ class ForeignRelatedObjectsDescriptor(object):
                 cache_name = rel_field.related_query_name()
                 return qs, rel_obj_attr, instance_attr, False, cache_name
 
+            def _check_fk_val(self):
+                if getattr(self.instance, attname) is None:
+                    raise ValueError('"%r" needs to have a value for field "%s" before '
+                                     'this relationship can be used.' %
+                                     (self.instance, attname))
+
             def add(self, *objs):
+                self._check_fk_val()
                 for obj in objs:
                     if not isinstance(obj, self.model):
                         raise TypeError("'%s' instance expected, got %r" % (self.model._meta.object_name, obj))
@@ -523,12 +536,15 @@ class ForeignRelatedObjectsDescriptor(object):
             add.alters_data = True
 
             def create(self, **kwargs):
+                self._check_fk_val()
                 kwargs[rel_field.name] = self.instance
                 db = router.db_for_write(self.model, instance=self.instance)
                 return super(RelatedManager, self.db_manager(db)).create(**kwargs)
             create.alters_data = True
 
             def get_or_create(self, **kwargs):
+                self._check_fk_val()
+                kwargs[rel_field.name] = self.instance
                 # Update kwargs with the related object that this
                 # ForeignRelatedObjectsDescriptor knows about.
                 kwargs[rel_field.name] = self.instance
@@ -539,6 +555,7 @@ class ForeignRelatedObjectsDescriptor(object):
             # remove() and clear() are only provided if the ForeignKey can have a value of null.
             if rel_field.null:
                 def remove(self, *objs):
+                    self._check_fk_val()
                     val = getattr(self.instance, attname)
                     for obj in objs:
                         # Is obj actually part of this descriptor set?
@@ -550,6 +567,7 @@ class ForeignRelatedObjectsDescriptor(object):
                 remove.alters_data = True
 
                 def clear(self):
+                    self._check_fk_val()
                     self.update(**{rel_field.name: None})
                 clear.alters_data = True
 
@@ -575,10 +593,6 @@ def create_many_related_manager(superclass, rel):
             self.through = through
             self.prefetch_cache_name = prefetch_cache_name
             self._fk_val = self._get_fk_val(instance, source_field_name)
-            if self._fk_val is None:
-                raise ValueError('"%r" needs to have a value for field "%s" before '
-                                 'this many-to-many relationship can be used.' %
-                                 (instance, source_field_name))
             # Even if this relation is not to pk, we require still pk value.
             # The wish is that the instance has been already saved to DB,
             # although having a pk value isn't a guarantee of that.
@@ -605,7 +619,10 @@ def create_many_related_manager(superclass, rel):
                 return self.instance._prefetched_objects_cache[self.prefetch_cache_name]
             except (AttributeError, KeyError):
                 db = self._db or router.db_for_read(self.instance.__class__, instance=self.instance)
-                return super(ManyRelatedManager, self).get_query_set().using(db)._next_is_sticky().filter(**self.core_filters)
+                qs = super(ManyRelatedManager, self).get_query_set().using(db)
+                if self._fk_val is None:
+                    return qs.none()
+                return qs._next_is_sticky().filter(**self.core_filters)
 
         def get_prefetch_query_set(self, instances):
             instance = instances[0]
@@ -636,10 +653,17 @@ def create_many_related_manager(superclass, rel):
                     False,
                     self.prefetch_cache_name)
 
+        def _check_has_fk_val(self):
+            if self._fk_val is None:
+                raise ValueError('"%r" needs to have a value for field "%s" before '
+                                 'this many-to-many relationship can be used.' %
+                                 (self.instance, self.source_field_name))
+
         # If the ManyToMany relation has an intermediary model,
         # the add and remove methods do not exist.
         if rel.through._meta.auto_created:
             def add(self, *objs):
+                self._check_has_fk_val()
                 self._add_items(self.source_field_name, self.target_field_name, *objs)
 
                 # If this is a symmetrical m2m relation to self, add the mirror entry in the m2m table
@@ -648,6 +672,7 @@ def create_many_related_manager(superclass, rel):
             add.alters_data = True
 
             def remove(self, *objs):
+                self._check_has_fk_val()
                 self._remove_items(self.source_field_name, self.target_field_name, *objs)
 
                 # If this is a symmetrical m2m relation to self, remove the mirror entry in the m2m table
@@ -656,6 +681,7 @@ def create_many_related_manager(superclass, rel):
             remove.alters_data = True
 
         def clear(self):
+            self._check_has_fk_val()
             self._clear_items(self.source_field_name)
 
             # If this is a symmetrical m2m relation to self, clear the mirror entry in the m2m table
@@ -664,6 +690,7 @@ def create_many_related_manager(superclass, rel):
         clear.alters_data = True
 
         def create(self, **kwargs):
+            self._check_has_fk_val()
             # This check needs to be done here, since we can't later remove this
             # from the method lookup table, as we do with add and remove.
             if not self.through._meta.auto_created:
@@ -676,6 +703,7 @@ def create_many_related_manager(superclass, rel):
         create.alters_data = True
 
         def get_or_create(self, **kwargs):
+            self._check_has_fk_val()
             db = router.db_for_write(self.instance.__class__, instance=self.instance)
             obj, created = \
                 super(ManyRelatedManager, self.db_manager(db)).get_or_create(**kwargs)
@@ -687,6 +715,7 @@ def create_many_related_manager(superclass, rel):
         get_or_create.alters_data = True
 
         def _add_items(self, source_field_name, target_field_name, *objs):
+            self._check_has_fk_val()
             # source_field_name: the PK fieldname in join table for the source object
             # target_field_name: the PK fieldname in join table for the target object
             # *objs - objects to add. Either object instances, or primary keys of object instances.
@@ -740,6 +769,7 @@ def create_many_related_manager(superclass, rel):
                         model=self.model, pk_set=new_ids, using=db)
 
         def _remove_items(self, source_field_name, target_field_name, *objs):
+            self._check_has_fk_val()
             # source_field_name: the PK colname in join table for the source object
             # target_field_name: the PK colname in join table for the target object
             # *objs - objects to remove
@@ -775,6 +805,7 @@ def create_many_related_manager(superclass, rel):
                         model=self.model, pk_set=old_ids, using=db)
 
         def _clear_items(self, source_field_name):
+            self._check_has_fk_val()
             db = router.db_for_write(self.through, instance=self.instance)
             # source_field_name: the PK colname in join table for the source object
             if self.reverse or source_field_name == self.source_field_name:
