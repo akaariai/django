@@ -929,8 +929,6 @@ class Query(object):
         """
         lhs, table, join_cols = connection
         assert lhs is None or join_field is not None
-        if join_cols is None:
-            join_cols = ((None, None),)
         existing = self.join_map.get(connection, ())
         if reuse is None:
             reuse = existing
@@ -958,7 +956,7 @@ class Query(object):
             join_type = self.LOUTER
         else:
             join_type = self.INNER
-        join = JoinInfo(table, alias, join_type, lhs, join_cols, nullable,
+        join = JoinInfo(table, alias, join_type, lhs, join_cols or ((None, None),), nullable,
                         join_field)
         self.alias_map[alias] = join
         if connection in self.join_map:
@@ -1321,16 +1319,19 @@ class Query(object):
                         final_field = opts.parents[int_model]
                         target = final_field.rel.get_related_field()
                         opts = int_model._meta
-                        path.append(PathInfo(final_field, target, final_field.model._meta,
-                                             opts, final_field, False, True))
+                        path.append(PathInfo(final_field, target, final_field.model._meta, opts, final_field, False, True))
             if hasattr(field, 'get_path_info'):
-                pathinfos, opts, target, final_field = field.get_path_info()
+                pathinfos = field.get_path_info()
                 if not allow_many:
                     for inner_pos, p in enumerate(pathinfos):
                         if p.m2m:
                             names_with_path.append((name, pathinfos[0:inner_pos + 1]))
                             raise MultiJoin(pos + 1, names_with_path)
+                last = pathinfos[-1]
                 path.extend(pathinfos)
+                final_field = last.join_field
+                opts = last.to_opts
+                target = last.to_field
                 names_with_path.append((name, pathinfos))
             else:
                 # Local non-relational field.
@@ -1410,7 +1411,10 @@ class Query(object):
         the join.
         """
         for info in reversed(path):
-            if info.to_field == target and info.direct:
+            if len(joins) > 1 and \
+               info.to_field == target and \
+               info.direct and \
+               len(self.alias_map[joins[-1]].join_cols) == 1:
                 target = info.from_field
                 self.unref_alias(joins.pop())
             else:
@@ -1548,18 +1552,14 @@ class Query(object):
 
         try:
             for name in field_names:
-                field, target, u2, joins, u3 = self.setup_joins(
+                field, target, u2, joins, path = self.setup_joins(
                         name.split(LOOKUP_SEP), opts, alias, None, allow_m2m,
                         True)
-                final_alias = joins[-1]
-                col = target.column
-                if len(joins) > 1:
-                    join = self.alias_map[final_alias]
-                    if col == join.join_cols[0][1]:
-                        self.unref_alias(final_alias)
-                        final_alias = join.lhs_alias
-                        col = join.join_cols[0][0]
-                        joins = joins[:-1]
+
+                # Trim last join if possible
+                col, final_alias, remaining_joins = self.trim_joins(target, joins[-2:], path)
+                joins = joins[:-2] + remaining_joins
+
                 self.promote_joins(joins[1:])
                 self.select.append(SelectInfo((final_alias, col), field))
         except MultiJoin:
