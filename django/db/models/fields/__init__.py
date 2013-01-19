@@ -168,6 +168,11 @@ class Field(object):
         not a new copy of that field. So, we use the app cache to load the
         model and then the field back.
         """
+        if not hasattr(self, 'model'):
+            # Aggregation code likes to do some abusing, they are using plain
+            # field instances to be able to convert values. So, give them
+            # back a plain field instance.
+            return self.__class__, ()
         if self.model._deferred:
             # Deferred model will not be found from the app cache.
             raise RuntimeError("Fields of deferred models can't be reduced")
