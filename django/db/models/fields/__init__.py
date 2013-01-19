@@ -9,6 +9,7 @@ import warnings
 from itertools import tee
 
 from django.db import connection
+from django.db.models.loading import get_model
 from django.db.models.query_utils import QueryWrapper
 from django.conf import settings
 from django import forms
@@ -23,6 +24,9 @@ from django.utils.encoding import smart_text, force_text
 from django.utils.ipv6 import clean_ipv6_address
 from django.utils import six
 
+class Empty(object):
+    pass
+
 class NOT_PROVIDED:
     pass
 
@@ -30,6 +34,9 @@ class NOT_PROVIDED:
 # of most "choices" lists.
 BLANK_CHOICE_DASH = [("", "---------")]
 BLANK_CHOICE_NONE = [("", "None")]
+
+def _load_field(app_label, model_name, field_name):
+    return get_model(app_label, model_name)._meta.get_field_by_name(field_name)[0]
 
 class FieldDoesNotExist(Exception):
     pass
@@ -146,6 +153,26 @@ class Field(object):
             obj.rel = copy.copy(self.rel)
         memodict[id(self)] = obj
         return obj
+
+    def __copy__(self):
+        # We need to avoid hitting __reduce__, so define this
+        # slightly weird copy construct.
+        obj = Empty()
+        obj.__class__ = self.__class__
+        obj.__dict__ = self.__dict__.copy()
+        return obj
+
+    def __reduce__(self):
+        """
+        Pickling should return the model._meta.fields instance of the field,
+        not a new copy of that field. So, we use the app cache to load the
+        model and then the field back.
+        """
+        if self.model._deferred:
+            # Deferred model will not be found from the app cache.
+            raise RuntimeError("Fields of deferred models can't be reduced")
+        return _load_field, (self.model._meta.app_label, self.model._meta.object_name,
+                             self.name)
 
     def to_python(self, value):
         """
