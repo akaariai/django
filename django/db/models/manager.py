@@ -139,6 +139,12 @@ class Manager(object):
     def extra(self, *args, **kwargs):
         return self.get_query_set().extra(*args, **kwargs)
 
+    def first(self, *args, **kwargs):
+        return self.get_query_set().first(*args, **kwargs)
+
+    def last(self, *args, **kwargs):
+        return self.get_query_set().last(*args, **kwargs)
+
     def get(self, *args, **kwargs):
         return self.get_query_set().get(*args, **kwargs)
 

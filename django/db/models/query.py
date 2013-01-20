@@ -373,6 +373,31 @@ class QuerySet(object):
 
         return self.query.get_count(using=self.db)
 
+    def first(self, *args, **kwargs):
+        """
+        Performs the query and returns the first object matching the given
+        keyword arguments or None if no match is found.
+        """
+        qs = self
+        if not qs.ordered:
+            qs = qs.order_by('pk')
+        try:
+            return qs.filter(*args, **kwargs)[0]
+        except IndexError:
+            return None
+
+    def last(self, *args, **kwargs):
+        """
+        Performs the query and returns the last object matching the given
+        keyword arguments or None if no match is found.
+        """
+        qs = self
+        if not qs.ordered:
+            qs = qs.order_by('-pk')
+        else:
+            qs = qs.reverse()
+        return qs.first(*args, **kwargs)
+
     def get(self, *args, **kwargs):
         """
         Performs the query and returns a single object matching the given

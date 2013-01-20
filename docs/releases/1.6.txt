@@ -28,8 +28,13 @@ Minor features
   undefined if the given ``QuerySet`` isn't ordered and there are more than
   one ordered values to compare against.
 
-* Added :meth:`~django.db.models.query.QuerySet.earliest` for symmetry with
-  :meth:`~django.db.models.query.QuerySet.latest`.
+* Added ``QuerySet`` method :meth:`~django.db.models.query.QuerySet.earliest`
+  for symmetry with :meth:`~django.db.models.query.QuerySet.latest`.
+
+* Added ``QuerySet`` methods :meth:`~django.db.models.query.QuerySet.first`
+  and :meth:`~django.db.models.query.QuerySet.last` which are convenience
+  methods returning the first or last object matching the filters. Returns
+  ``None`` if there are no objects matching.
 
 Backwards incompatible changes in 1.6
 =====================================

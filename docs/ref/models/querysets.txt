@@ -1232,6 +1232,44 @@ something *other than* a ``QuerySet``.
 These methods do not use a cache (see :ref:`caching-and-querysets`). Rather,
 they query the database each time they're called.
 
+first
+~~~~~
+.. method:: first(*args, **kwargs)
+
+.. versionadded:: 1.6
+
+Returns the first of all objects matching the given lookup parameters, which
+should be in the format described in `Field lookups`_.
+
+``first()`` returns ``None`` if no object was found for the given parameters.
+
+``first()`` returns the first object in the `QuerySet` when multiple objects
+were found, as determined by the ordering in the model or in the
+``QuerySet``.
+
+If the ``QuerySet`` has no ordering defined, then the queryset is
+automatically ordered by the primary key.
+
+Example::
+
+    p = Article.objects.order_by('pub_date').first(title__icontains='django')
+
+Note that ``first()`` is a convenience method, the following code sample is
+equivalent to the above example::
+
+    try:
+        p = Article.objects.order_by('pub_date').filter(title__icontains='django')[0]
+    except IndexError:
+        p = None
+
+last
+~~~~
+.. method:: last(*args, **kwargs)
+
+.. versionadded:: 1.6
+
+Works like  :meth:`first()` except the ordering is reversed.
+
 get
 ~~~
 
@@ -1707,7 +1745,7 @@ Field lookups
 
 Field lookups are how you specify the meat of an SQL ``WHERE`` clause. They're
 specified as keyword arguments to the ``QuerySet`` methods :meth:`filter()`,
-:meth:`exclude()` and :meth:`get()`.
+:meth:`exclude()`, :meth:`get()`, :meth:`first()` and :meth:`last()`.
 
 For an introduction, see :ref:`models and database queries documentation
 <field-lookups-intro>`.
