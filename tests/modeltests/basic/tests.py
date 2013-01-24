@@ -50,6 +50,7 @@ class ModelTest(TestCase):
         self.assertEqual(Article.objects.get(id__exact=a.id), a)
         self.assertEqual(Article.objects.get(headline__startswith='Area woman'), a)
         self.assertEqual(Article.objects.get(pub_date__year=2005), a)
+        self.assertEqual(Article.objects.get(pub_date__year__lt=2006, pub_date__year__gt=2004), a)
         self.assertEqual(Article.objects.get(pub_date__year=2005, pub_date__month=7), a)
         self.assertEqual(Article.objects.get(pub_date__year=2005, pub_date__month=7, pub_date__day=28), a)
         self.assertEqual(Article.objects.get(pub_date__week_day=5), a)

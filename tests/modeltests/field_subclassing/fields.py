@@ -79,7 +79,8 @@ class DivLookup(models.lookups.Lookup):
     def __init__(self, modulo):
         self.modulo = modulo
 
-    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+    def as_sql(self, lhs_clause, value_annotation, rhs_sql, params, field, qn, connection):
+        rhs_format = self.rhs_format(value_annotation, connection, rhs_sql)
         params = [self.modulo] + params
         if connection.vendor != 'sqlite':
             sql = 'mod(%s, %%s) = %s'

@@ -4,7 +4,6 @@ from itertools import repeat
 from django.core import exceptions
 from django.db.models.sql.datastructures import EmptyResultSet
 from django.db.models.lookups.backwards_compat import BackwardsCompatLookup
-from django.db.models.query_utils import QueryWrapper
 from django.db.models.fields import Field
 
 # We have two different paths to solve a lookup. BackwardsCompatLookup tries
@@ -13,7 +12,7 @@ from django.db.models.fields import Field
 # docs is about the new Lookup code path.
 #
 # We are using "lhs" and "rhs" terms here. "lhs" means the the "column" we are
-# comparing against (though it could as well be a computer value, like
+# comparing against (though it could as well be a computed value, like
 # aggregate), "rhs" means the given value, a string or integer for example.
 #
 # When processing a Lookup to SQL, three things need to happen:
@@ -59,12 +58,10 @@ class Lookup(object):
     FIELD_PREPARE = object()
     rhs_prepare = RAW
 
-    def __deepcopy__(self, memo):
-        """
-        I am immutable!
-        """
-        return self
-
+    def __init__(self, nested_lookups=None):
+        if nested_lookups:
+            raise LookupError('The lookup "%s" does not support nested lookups' %
+                              (self.lookup_name))
 
     def make_atom(self, lvalue, value_annotation, params_or_value, qn,
                   connection, field=None):
@@ -83,17 +80,12 @@ class Lookup(object):
         connection respectively.
         """
         field = field or lvalue.field
-        lhs_clause, db_type = self.prepare_lhs(lvalue, qn, connection)
-        params = self.common_normalize(params_or_value, field, qn,
-                                       connection)
-        params = self.normalize_value(params, field, qn, connection)
-        cast_sql = self.cast_sql(value_annotation, connection)
-        if hasattr(params, 'as_sql'):
-            extra, params = params.as_sql(qn, connection)
-        else:
-            extra = ''
-        rhs_format = self.rhs_format(cast_sql, extra)
-        return self.as_sql(lhs_clause, rhs_format, params, lvalue.field, qn, connection)
+        lhs_clause = self.prepare_lhs(lvalue, qn, connection)
+        rhs_sql, params = self.common_normalize(params_or_value, field, qn,
+                                                connection)
+        params = self.normalize_params(params, field, qn, connection)
+        return self.as_sql(lhs_clause, value_annotation, rhs_sql, params, lvalue.field,
+                           qn, connection)
 
     def prepare_lhs(self, lvalue, qn, connection):
         """
@@ -103,16 +95,16 @@ class Lookup(object):
         knows how to turn itself into SQL by an as_sql() method.
         """
         field = lvalue.field
-        db_type = field.db_type(connection) if field else None
         if hasattr(lvalue, 'as_sql'):
-            return lvalue.as_sql(qn, connection), db_type
+            return lvalue.as_sql(qn, connection)
         table_alias, name = lvalue.alias, lvalue.col
         if table_alias:
             lhs = '%s.%s' % (qn(table_alias), qn(name))
         else:
             lhs = qn(name)
-        return connection.ops.field_cast_sql(db_type) % lhs, db_type
-    
+        db_type = field.db_type(connection) if field else None
+        return connection.ops.field_cast_sql(db_type) % lhs
+
     def get_prep_lookup(self, field, value):
         """
         Does some backend independent type checks and conversions to the
@@ -120,8 +112,7 @@ class Lookup(object):
 
         This method is called when the constraint is added to WhereNode. The
         reason we need to do a first-stage prepare is that we will do some
-        type conversions (for example Model -> pk), and also type safety
-        checks are better done at this stage.
+        conversions (for example Model -> pk) and type safety checks.
         """
         if hasattr(value, 'prepare'):
             return value.prepare()
@@ -134,48 +125,62 @@ class Lookup(object):
         return value
 
     def common_normalize(self, value, field, qn, connection):
+        """
+        Normalizes the given value. Usually this means turning the value into
+        types acceptable by the backend (through field.get_db_prep_value).
+
+        If the value is something which knows how to produce SQL, then we do
+        that instead. A lookup of somefield__in=qs is an example of this case.
+        """
+        # We have three different ways of "turn into SQL".
         if hasattr(value, 'get_compiler'):
             value = value.get_compiler(connection=connection)
         if hasattr(value, 'as_sql') or hasattr(value, '_as_sql'):
-            # If the value has a relabel_aliases method, it will need to
-            # be invoked before the final SQL is evaluated
-            if hasattr(value, 'relabel_aliases'):
-                return value
             if hasattr(value, 'as_sql'):
-                sql, params = value.as_sql()
+                return value.as_sql(qn, connection)
             else:
-                sql, params = value._as_sql(connection=connection)
-            return QueryWrapper(('(%s)' % sql), params)
+                return value._as_sql(connection=connection)
         if self.rhs_prepare == self.RAW:
-            value = [value]
+            params = [value]
         elif self.rhs_prepare == self.FIELD_PREPARE:
-            value = [field.get_db_prep_value(value, connection, False)]
+            params = [field.get_db_prep_value(value, connection, False)]
         elif self.rhs_prepare == self.LIST_FIELD_PREPARE:
-            value = [field.get_db_prep_value(v, connection, False) for v in value]
-        return value
+            params = [field.get_db_prep_value(v, connection, False) for v in value]
+        return None, params
 
-    def cast_sql(self, value_annotation, connection):
-        if value_annotation is datetime:
-            return connection.ops.datetime_cast_sql()
-        return '%s'
-
-    def rhs_format(self, cast_sql, extra):
-        format = cast_sql
-        if extra:
-            format = cast_sql % extra
-        return format
-    
-    def normalize_value(self, value, field, qn, connection):
+    def normalize_params(self, params, field, qn, connection):
         """
         A subclass hook for easier value normalization per lookup.
         """
-        return value
+        return params
+
+    def cast_sql(self, value_annotation, connection):
+        """
+        In some cases we need a cast for the column, this produces the cast
+        SQL or just a %s placeholder if no cast is needed...
+        """
+        if value_annotation is datetime:
+            return connection.ops.datetime_cast_sql()
+        else:
+            return "%s"
+
+    def rhs_format(self, value_annotation, connection, rhs_sql):
+        """
+        Create placeholders for the params. Extra can come at least from
+        SQLEvaluator (which is a way to turn F() into SQL).
+        """
+        format = self.cast_sql(value_annotation, connection)
+        if rhs_sql:
+            rhs_sql = '(%s)' % rhs_sql
+            format = format % rhs_sql
+        return format
 
     def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
         raise NotImplementedError
 
 class SimpleLookup(Lookup):
-    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+    def as_sql(self, lhs_clause, value_annotation, extra, params, field, qn, connection):
+        rhs_format = self.rhs_format(value_annotation, connection, extra)
         lhs_clause = connection.ops.lookup_cast(self.lookup_name) % lhs_clause
         rhs_clause = connection.operators[self.lookup_name] % rhs_format
         return '%s %s' % (lhs_clause, rhs_clause), params
@@ -191,7 +196,7 @@ class IsNull(Lookup):
 
     def make_atom(self, lvalue, value_annotation, params_or_value, qn,
                   connection, field=None):
-        lhs_clause, db_type = self.prepare_lhs(lvalue, qn, connection)
+        lhs_clause = self.prepare_lhs(lvalue, qn, connection)
         return ('%s IS %sNULL' % (lhs_clause, (not value_annotation and 'NOT ' or '')), ())
 Field.lookups['isnull'] = IsNull
 
@@ -219,7 +224,7 @@ class PatternLookup(SimpleLookup):
     rhs_prepare = Lookup.RAW
     pattern = ""
 
-    def normalize_value(self, params, field, qn, connection):
+    def normalize_params(self, params, field, qn, connection):
         return [self.pattern % connection.ops.prep_for_like_query(params[0])]
 
 class Contains(PatternLookup):
@@ -253,7 +258,7 @@ class IExact(SimpleLookup):
     lookup_name = 'iexact'
     rhs_prepare = Lookup.RAW
 
-    def normalize_value(self, params, field, qn, connection):
+    def normalize_params(self, params, field, qn, connection):
         return [connection.ops.prep_for_iexact_query(params[0])]
 Field.lookups['iexact'] = IExact
 
@@ -261,24 +266,38 @@ class Year(SimpleLookup):
     lookup_name = 'year'
     rhs_prepare = Lookup.RAW
 
-    def normalize_value(self, params, field, qn, connection):
+    def __init__(self, rest_of_lookups):
+        if rest_of_lookups:
+            from django.db.models.fields import IntegerField
+            self.nested_lookup = IntegerField().get_lookup(rest_of_lookups, None)
+        else:
+            self.nested_lookup = None
+
+    def normalize_params(self, params, field, qn, connection):
+        if self.nested_lookup:
+            return self.nested_lookup.normalize_params(params, field, qn, connection)
         intval = int(params[0])
         if field.get_internal_type() == 'DateField':
             return connection.ops.year_lookup_bounds_for_date_field(intval)
         else:
             return connection.ops.year_lookup_bounds(intval)
 
-    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+    def as_sql(self, lhs_clause, value_annotation, extra, params, field, qn, connection):
+        if self.nested_lookup:
+            return self.nested_lookup.as_sql(
+                connection.ops.date_extract_sql('year', lhs_clause),
+                value_annotation, extra, params, field, qn, connection)
         return '%s BETWEEN %%s AND %%s' % lhs_clause, params
+
 Field.lookups['year'] = Year
 
 class DateBase(SimpleLookup):
     rhs_prepare = Lookup.RAW
 
-    def normalize_value(self, value, field, qn, connection):
-        return [int(value[0])]
+    def normalize_params(self, params, field, qn, connection):
+        return [int(params[0])]
 
-    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+    def as_sql(self, lhs_clause, vale_annotation, extra, params, field, qn, connection):
         return '%s = %%s' % connection.ops.date_extract_sql(self.lookup_name, lhs_clause), params
 
 class Month(DateBase):
@@ -296,22 +315,16 @@ Field.lookups['week_day'] = WeekDay
 class In(SimpleLookup):
     lookup_name = 'in'
     rhs_prepare = Lookup.LIST_FIELD_PREPARE
-    
+
     def cast_sql(self, value_annotation, connection):
         if not value_annotation:
             raise EmptyResultSet
         return '%s'
 
-    def rhs_format(self, cast_sql, extra):
-        """
-        We need these values in as_sql()
-        """
-        return cast_sql, extra
-    
-    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
-        cast_sql, extra = rhs_format
-        if extra:
-            return '%s IN %s' % (lhs_clause, extra), params
+    def as_sql(self, lhs_clause, value_annotation, rhs_sql, params, field, qn, connection):
+        cast_sql = self.cast_sql(value_annotation, connection)
+        if rhs_sql:
+            return '%s IN (%s)' % (lhs_clause, rhs_sql), params
         # Move rest of me into connection...
         max_in_list_size = connection.ops.max_in_list_size()
         if max_in_list_size and len(params) > max_in_list_size:
@@ -337,7 +350,7 @@ class Range(Lookup):
     lookup_name = 'range'
     rhs_prepare = Lookup.LIST_FIELD_PREPARE
 
-    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+    def as_sql(self, lhs_clause, value_annotation, extra, params, field, qn, connection):
         return '%s BETWEEN %%s AND %%s' % lhs_clause, params
 Field.lookups['range'] = Range
 
@@ -345,31 +358,25 @@ class Search(Lookup):
     lookup_name = 'search'
     rhs_prepare = Lookup.RAW
 
-    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+    def as_sql(self, lhs_clause, value_annotation, extra, params, field, qn, connection):
         return connection.ops.fulltext_search_sql(lhs_clause), params
 Field.lookups['search'] = Search
 
 class Regex(Lookup):
     lookup_name = 'regex'
 
-    def rhs_format(self, cast_sql, extra):
-        """
-        We need these values in as_sql()
-        """
-        return cast_sql, extra
-
-    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+    def as_sql(self, lhs_clause, value_annotation, extra, params, field, qn, connection):
         """
         Regex lookups are implemented partly by connection.operators... Except
         when not.
         """
         if self.lookup_name in connection.operators:
             lhs_clause = connection.ops.lookup_cast(self.lookup_name) % lhs_clause
-            rhs_clause = super(Regex, self).rhs_format(*rhs_format)
-            rhs_clause = connection.operators[self.lookup_name] % rhs_clause
+            rhs_format = self.rhs_format(value_annotation, connection, extra)
+            rhs_clause = connection.operators[self.lookup_name] % rhs_format
             return '%s %s' % (lhs_clause, rhs_clause), params
         else:
-            cast_sql, extra = rhs_format
+            cast_sql = self.cast_sql(value_annotation, connection)
             return connection.ops.regex_lookup(self.lookup_name) % (lhs_clause, cast_sql), params
 Field.lookups['regex'] = Regex
 
@@ -418,7 +425,7 @@ class RelatedLookup(Lookup):
             return self.lookup.make_atom(lvalue, value_annotation, params_or_value,
                                          qn, connection)
         return self.lookup.make_atom(lvalue, value_annotation, params_or_value, qn,
-                                connection, field=self.target_field)
+                                     connection, field=self.target_field)
 
     def convert_value(self, value):
         # Value may be a primary key, or an object held in a relation.

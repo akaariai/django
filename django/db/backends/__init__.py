@@ -865,6 +865,9 @@ class BaseDatabaseOperations(object):
         second = '%s-12-31 23:59:59.999999'
         return [first % value, second % value]
 
+    def year_extract(self, col):
+        return 'EXTRACT YEAR FROM %s' % col
+
     def year_lookup_bounds_for_date_field(self, value):
         """
         Returns a two-elements list with the lower and upper bound to be used

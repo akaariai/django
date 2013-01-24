@@ -399,13 +399,18 @@ class Field(object):
 
         In addition this method can raise a FieldError if this field
         specifically disallows one of the default lookups.
+
+        The 'target_field' is used for related field's lookup, and its value
+        will be the targeted field in the related model.
         """
         if self.needs_backwards_compat_lookup():
             from django.db.models.lookups import lookups
+            if len(names) > 1:
+                raise LookupError('The lookup "%s" does not support nested lookups.' % names[0])
             return lookups.BackwardsCompatLookup(names[0])
         lookup_class = self.lookups.get(names[0])
         if lookup_class:
-            return lookup_class()
+            return lookup_class(names[1:])
         return None
 
     def has_default(self):
