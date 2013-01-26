@@ -200,7 +200,7 @@ class Query(object):
         # specified, we pickle the list of field names instead.
         # None is also a possible value; that can pass as-is
         obj_dict['select'] = [
-            (s.col, s.field is not None and s.field.name or None)
+            (s.col, s.field is not None and s.field.name or None, s.lookup)
             for s in obj_dict['select']
         ]
         # alias_map can also contain references to fields.
@@ -222,7 +222,7 @@ class Query(object):
         # Rebuild list of field instances
         opts = obj_dict['model']._meta
         obj_dict['select'] = [
-            SelectInfo(tpl[0], tpl[1] is not None and opts.get_field(tpl[1]) or None)
+            SelectInfo(tpl[0], tpl[1] is not None and opts.get_field(tpl[1]) or None, tpl[2])
             for tpl in obj_dict['select']
         ]
         new_alias_map = {}
@@ -827,8 +827,8 @@ class Query(object):
         self.where.relabel_aliases(change_map)
         self.having.relabel_aliases(change_map)
         if self.group_by:
-            self.group_by = [relabel_column(col) for col in self.group_by]
-        self.select = [SelectInfo(relabel_column(s.col), s.field)
+            self.group_by = [(relabel_column(col[0]), col[1], col[2]) for col in self.group_by]
+        self.select = [SelectInfo(relabel_column(s.col), s.field, s.lookup)
                        for s in self.select]
         self.aggregates = SortedDict(
             (key, relabel_column(col)) for key, col in self.aggregates.items())
@@ -1242,8 +1242,8 @@ class Query(object):
         col, alias, join_list = self.trim_joins(target, join_list, path)
 
         if having_clause or force_having:
-            if (alias, col) not in self.group_by:
-                self.group_by.append((alias, col))
+            if ((alias, col), field, lookup) not in self.group_by:
+                self.group_by.append(((alias, col), field, lookup))
             self.having.add((Constraint(alias, col, field), lookup, value),
                 connector)
         else:
@@ -1495,6 +1495,12 @@ class Query(object):
         if lookup is None and len(parts) == 1:
             lookup = (lookups.BackwardsCompatLookup(parts[0])
                       if parts[0] in self.query_terms else None)
+        # We must not allow BackwardsCompatLookups even in related field case
+        # if the lookup name is not in self.query_terms.
+        if (isinstance(lookup, lookups.RelatedLookup)
+                and isinstance(lookup.lookup, lookups.BackwardsCompatLookup)
+                and lookup.lookup.lookup_name not in self.query_terms):
+            return None
         return lookup
 
     def split_exclude(self, filter_expr, prefix, can_reuse):
@@ -1626,7 +1632,7 @@ class Query(object):
 
         try:
             for name in field_names:
-                field, target, u2, joins, u3, _ = self.setup_joins(
+                field, target, _, joins, _, lookup = self.setup_joins(
                         name.split(LOOKUP_SEP), opts, alias, None, allow_m2m,
                         True)
                 final_alias = joins[-1]
@@ -1639,7 +1645,7 @@ class Query(object):
                         col = join.lhs_join_col
                         joins = joins[:-1]
                 self.promote_joins(joins[1:])
-                self.select.append(SelectInfo((final_alias, col), field))
+                self.select.append(SelectInfo((final_alias, col), field, lookup))
         except FieldError:
             if LOOKUP_SEP in name:
                 # For lookups spanning over relationships, show the error
@@ -1682,19 +1688,12 @@ class Query(object):
         if force_empty:
             self.default_ordering = False
 
-    def set_group_by(self):
+    def set_group_by(self, selectinfos):
         """
-        Expands the GROUP BY clause required by the query.
-
-        This will usually be the set of all non-aggregate fields in the
-        return data. If the database backend supports grouping by the
-        primary key, and the query would be equivalent, the optimization
-        will be made automatically.
+        Expands the GROUP BY clause required by the query. The added values
+        should be SelectInfo instances.
         """
-        self.group_by = []
-
-        for col, _ in self.select:
-            self.group_by.append(col)
+        self.group_by = selectinfos[:]
 
     def add_count_column(self):
         """
@@ -1937,7 +1936,7 @@ class Query(object):
             self.unref_alias(select_alias)
             select_alias = join_info.rhs_alias
             select_col = join_info.rhs_join_col
-        self.select = [SelectInfo((select_alias, select_col), None)]
+        self.select = [SelectInfo((select_alias, select_col), None, None)]
         self.remove_inherited_models()
 
     def is_nullable(self, field):

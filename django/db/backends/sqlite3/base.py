@@ -369,13 +369,16 @@ class SQLiteCursorWrapper(Database.Cursor):
     you'll need to use "%%s".
     """
     def execute(self, query, params=()):
-        query = self.convert_query(query)
         try:
-            return Database.Cursor.execute(self, query, params)
-        except Database.IntegrityError as e:
-            six.reraise(utils.IntegrityError, utils.IntegrityError(*tuple(e.args)), sys.exc_info()[2])
-        except Database.DatabaseError as e:
-            six.reraise(utils.DatabaseError, utils.DatabaseError(*tuple(e.args)), sys.exc_info()[2])
+            query = self.convert_query(query)
+            try:
+                return Database.Cursor.execute(self, query, params)
+            except Database.IntegrityError as e:
+                six.reraise(utils.IntegrityError, utils.IntegrityError(*tuple(e.args)), sys.exc_info()[2])
+            except Database.DatabaseError as e:
+                six.reraise(utils.DatabaseError, utils.DatabaseError(*tuple(e.args)), sys.exc_info()[2])
+        except:
+            raise
 
     def executemany(self, query, param_list):
         query = self.convert_query(query)

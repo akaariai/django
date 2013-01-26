@@ -179,13 +179,15 @@ class SQLCompiler(object):
             col_aliases = set()
         if self.query.select:
             only_load = self.deferred_to_columns()
-            for col, _ in self.query.select:
+            for col, _, lookup in self.query.select:
                 if isinstance(col, (list, tuple)):
                     alias, column = col
                     table = self.query.alias_map[alias].table_name
                     if table in only_load and column not in only_load[table]:
                         continue
                     r = '%s.%s' % (qn(alias), qn(column))
+                    if lookup:
+                        r, params = lookup.as_sql(qn, self.connection, r)
                     if with_aliases:
                         if col[1] in col_aliases:
                             c_alias = 'Col%d' % len(col_aliases)
@@ -201,7 +203,10 @@ class SQLCompiler(object):
                         aliases.add(r)
                         col_aliases.add(col[1])
                 else:
-                    result.append(col.as_sql(qn, self.connection))
+                    if lookup:
+                        result.append(lookup.as_sql(qn, self.connection, col)[0])
+                    else:
+                        result.append(col.as_sql(qn, self.connection))
 
                     if hasattr(col, 'alias'):
                         aliases.add(col.alias)
@@ -224,7 +229,7 @@ class SQLCompiler(object):
             for alias, aggregate in self.query.aggregate_select.items()
         ])
 
-        for (table, col), _ in self.query.related_select_cols:
+        for (table, col), _, _ in self.query.related_select_cols:
             r = '%s.%s' % (qn(table), qn(col))
             if with_aliases and col in col_aliases:
                 c_alias = 'Col%d' % len(col_aliases)
@@ -537,22 +542,22 @@ class SQLCompiler(object):
         if self.query.group_by is not None:
             select_cols = self.query.select + self.query.related_select_cols
             # Just the column, not the fields.
-            select_cols = [s[0] for s in select_cols]
-            if (len(self.query.model._meta.fields) == len(self.query.select)
+            if (self.query.model._meta.pk in [s.field for s in self.query.select]
                     and self.connection.features.allows_group_by_pk):
-                self.query.group_by = [
-                    (self.query.model._meta.db_table, self.query.model._meta.pk.column)
+                select_cols = [
+                    (self.query.model._meta.db_table, self.query.model._meta.pk.column, None)
                 ]
-                select_cols = []
             seen = set()
             cols = self.query.group_by + select_cols
-            for col in cols:
+            for col, field, lookup in cols:
                 if isinstance(col, (list, tuple)):
                     sql = '%s.%s' % (qn(col[0]), qn(col[1]))
                 elif hasattr(col, 'as_sql'):
                     sql = col.as_sql(qn, self.connection)
                 else:
                     sql = '(%s)' % str(col)
+                if lookup:
+                    sql, params = lookup.as_sql(qn, self.connection, sql)
                 if sql not in seen:
                     result.append(sql)
                     seen.add(sql)
@@ -621,7 +626,7 @@ class SQLCompiler(object):
             columns, aliases = self.get_default_columns(start_alias=alias,
                     opts=f.rel.to._meta, as_pairs=True)
             self.query.related_select_cols.extend(
-                SelectInfo(col, field) for col, field in zip(columns, f.rel.to._meta.fields))
+                SelectInfo(col, field, None) for col, field in zip(columns, f.rel.to._meta.fields))
             if restricted:
                 next = requested.get(f.name, {})
             else:
@@ -652,7 +657,7 @@ class SQLCompiler(object):
                 columns, aliases = self.get_default_columns(start_alias=alias,
                     opts=model._meta, as_pairs=True, from_parent=from_parent)
                 self.query.related_select_cols.extend(
-                    SelectInfo(col, field) for col, field
+                    SelectInfo(col, field, None) for col, field
                     in zip(columns, model._meta.fields))
                 next = requested.get(f.related_query_name(), {})
                 # Use True here because we are looking at the _reverse_ side of

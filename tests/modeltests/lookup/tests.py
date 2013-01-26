@@ -709,3 +709,8 @@ class NestedLookupTests(TestCase):
         self.assertQuerysetEqual(
             Article.objects.filter(pub_date__year__in=[2005, 2006]).order_by('-pub_date__year'),
             [repr(self.a3), repr(self.a2)])
+
+    def test_nested_lookups_values(self):
+        self.assertEqual(
+            list(Article.objects.order_by('pk').values_list('pub_date__year', flat=True)),
+            [2004, 2005, 2006, 2007])

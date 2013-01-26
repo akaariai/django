@@ -950,7 +950,7 @@ class QuerySet(object):
         if self.query.group_by is None:
             field_names = [f.attname for f in opts.fields]
             self.query.add_fields(field_names, False)
-            self.query.set_group_by()
+            self.query.set_group_by([])
 
     def _prepare(self):
         return self
@@ -1067,7 +1067,7 @@ class ValuesQuerySet(QuerySet):
         """
         Prepare the query for computing a result that contains aggregate annotations.
         """
-        self.query.set_group_by()
+        self.query.set_group_by(self.query.select)
 
         if self.aggregate_names is not None:
             self.aggregate_names.extend(aggregates)

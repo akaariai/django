@@ -618,3 +618,27 @@ class BaseAggregateTestCase(TestCase):
 
         for a in Author.objects.exclude(pk__in=authors):
             self.assertTrue(max([book.pubdate.year for book in a.book_set.all()]) < 2007)
+
+    def test_nested_lookup_values_groupby(self):
+        # Do a little updating to make sure our data is nice for this
+        # experiment.
+        # Mister pk=2 has two books in year 2008, dates 2008-3-3 and 2008-6-23,
+        # and one in 2007-12-6 (this already exists in fixture)
+        Book.objects.get(pk=2).authors.add(Author.objects.get(pk=2))
+        Book.objects.get(pk=3).authors.add(Author.objects.get(pk=2))
+        # Mister pk=8 has two books, one in 1995-1-15, one 1991-10-15 in the
+        # fixtures.
+        # The query here is doing "group by id, book's publish year", select
+        # maximum date per the group by, fetch id and the maximum date.
+        max_book_date_per_year = Author.objects.filter(
+            pk__in=[2, 8]
+        ).values_list(
+            'id', 'book__pubdate__year'
+        ).annotate(
+            max_date=Max('book__pubdate')
+        ).values_list('id', 'max_date').order_by('pk', 'max_date')
+        self.assertEqual(
+            list(max_book_date_per_year),
+            [(2, datetime.date(2007, 12, 6)), (2, datetime.date(2008, 6, 23)),
+             (8, datetime.date(1991, 10, 15)), (8, datetime.date(1995, 1, 15))]
+        )
