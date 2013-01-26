@@ -7,7 +7,7 @@ from django.db.models.constants import LOOKUP_SEP
 from django.db.models.query_utils import select_related_descend
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
         GET_ITERATOR_CHUNK_SIZE, SelectInfo)
-from django.db.models.sql.datastructures import EmptyResultSet
+from django.db.models.sql.datastructures import EmptyResultSet, Col
 from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.query import get_order_dir, Query
 from django.db.utils import DatabaseError
@@ -307,7 +307,6 @@ class SQLCompiler(object):
             result.append("%s.%s" % (qn(alias), qn2(col)))
         return result
 
-
     def get_ordering(self):
         """
         Returns a tuple containing a list representing the SQL elements in the
@@ -375,15 +374,15 @@ class SQLCompiler(object):
             elif get_order_dir(field)[0] not in self.query.extra_select:
                 # 'col' is of the form 'field' or 'field1__field2' or
                 # '-field1__field2__field', etc.
-                for table, col, order in self.find_ordering_name(field,
+                for col, order in self.find_ordering_name(field,
                         self.query.model._meta, default_order=asc):
-                    if (table, col) not in processed_pairs:
-                        elt = '%s.%s' % (qn(table), qn2(col))
-                        processed_pairs.add((table, col))
+                    elt, params = col.as_sql(qn, self.connection)
+                    if elt not in processed_pairs:
+                        processed_pairs.add(elt)
                         if distinct and elt not in select_aliases:
                             ordering_aliases.append(elt)
                         result.append('%s %s' % (elt, order))
-                        group_by.append((elt, []))
+                        group_by.append((elt, params))
             else:
                 elt = qn2(col)
                 if distinct and col not in select_aliases:
@@ -394,7 +393,7 @@ class SQLCompiler(object):
         return result, group_by
 
     def find_ordering_name(self, name, opts, alias=None, default_order='ASC',
-            already_seen=None):
+                           already_seen=None):
         """
         Returns the table alias (the name might be ambiguous, the alias will
         not be) and column name for ordering by the given 'name' parameter.
@@ -421,7 +420,7 @@ class SQLCompiler(object):
                         order, already_seen))
             return results
         col, alias = self._final_join_removal(col, alias)
-        return [(alias, col, order)]
+        return [(Col(alias, col), order)]
 
     def _setup_joins(self, pieces, opts, alias):
         """

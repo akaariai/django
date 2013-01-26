@@ -99,3 +99,14 @@ class Constraint(object):
     def relabel_aliases(self, change_map):
         if self.alias in change_map:
             self.alias = change_map[self.alias]
+
+class Col(object):
+    def __init__(self, alias, col):
+        self.alias = alias
+        self.col = col
+
+    def clone_and_relabel(self, change_map):
+        return Col(change_map.get(self.alias, self.alias), self.col)
+
+    def as_sql(self, qn, connection):
+        return '%s.%s' % (qn(self.alias), qn(self.col)), []
