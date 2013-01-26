@@ -590,3 +590,31 @@ class BaseAggregateTestCase(TestCase):
                 "datetime.datetime(2008, 1, 1, 0, 0)"
             ]
         )
+
+    def test_nested_lookup_aggregation(self):
+        max_pub_year = Book.objects.aggregate(my=Max('pubdate__year'))['my']
+        self.assertEqual(max_pub_year, 2008)
+
+    def test_nested_lookup_annotation(self):
+        authors = Author.objects.annotate(max_pub_year=Max('book__pubdate__year'))
+        for a in authors:
+            self.assertEqual(a.max_pub_year,
+                             max([book.pubdate.year for book in a.book_set.all()]))
+
+    def test_nested_lookup_annotation_lookup(self):
+        # Annotate on nested lookup
+        authors = Author.objects.annotate(
+            max_pub_year=Max('book__pubdate__year')
+        ).filter(max_pub_year__gte=2007).order_by('pk')
+        for a in authors:
+            self.assertEqual(a.max_pub_year,
+                             max([book.pubdate.year for book in a.book_set.all()]))
+            self.assertTrue(a.max_pub_year >= 2007)
+        # You can also first annotate, then nest lookup on the result...
+        authors2 = Author.objects.annotate(
+            max_pub_year=Max('book__pubdate')
+        ).filter(max_pub_year__year__gte=2007).order_by('pk')
+        self.assertEqual(list(authors), list(authors2))
+
+        for a in Author.objects.exclude(pk__in=authors):
+            self.assertTrue(max([book.pubdate.year for book in a.book_set.all()]) < 2007)

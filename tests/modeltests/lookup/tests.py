@@ -686,3 +686,26 @@ class LookupTests(TestCase):
         self.assertEqual(Player.objects.filter(games__season__gt=333).distinct().count(), 2)
         self.assertEqual(Player.objects.filter(games__season__year__gt=2010).distinct().count(), 2)
         self.assertEqual(Player.objects.filter(games__season__gt__gt=222).distinct().count(), 2)
+
+class NestedLookupTests(TestCase):
+
+    def setUp(self):
+        # Create a couple of Articles.
+        self.au1 = Author(name='Author 1')
+        self.au1.save()
+        self.a1 = Article(headline='Article 1', pub_date=datetime(2004, 3, 26), author=self.au1)
+        self.a1.save()
+        self.a2 = Article(headline='Article 2', pub_date=datetime(2005, 8, 27), author=self.au1)
+        self.a2.save()
+        self.a3 = Article(headline='Article 3', pub_date=datetime(2006, 2, 27), author=self.au1)
+        self.a3.save()
+        self.a4 = Article(headline='Article 4', pub_date=datetime(2007, 5, 28), author=self.au1)
+        self.a4.save()
+
+    def test_nested_lookups(self):
+        self.assertQuerysetEqual(
+            Article.objects.filter(pub_date__year__in=[2005, 2006]).order_by('pk'),
+            [repr(self.a2), repr(self.a3)])
+        self.assertQuerysetEqual(
+            Article.objects.filter(pub_date__year__in=[2005, 2006]).order_by('-pub_date__year'),
+            [repr(self.a3), repr(self.a2)])

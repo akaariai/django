@@ -16,7 +16,7 @@ class Aggregate(object):
     is_computed = False
     sql_template = '%(function)s(%(field)s)'
 
-    def __init__(self, col, source=None, is_summary=False, **extra):
+    def __init__(self, col, source=None, is_summary=False, lookup=None, **extra):
         """Instantiate an SQL aggregate
 
          * col is a column reference describing the subject field
@@ -45,22 +45,25 @@ class Aggregate(object):
         self.source = source
         self.is_summary = is_summary
         self.extra = extra
+        self.lookup = lookup
+        if self.lookup:
+            self.field = self.lookup.retval_field
+        else:
+            # Follow the chain of aggregate sources back until you find an
+            # actual field, or an aggregate that forces a particular output
+            # type. This type of this field will be used to coerce values
+            # retrieved from the database.
+            tmp = self
 
-        # Follow the chain of aggregate sources back until you find an
-        # actual field, or an aggregate that forces a particular output
-        # type. This type of this field will be used to coerce values
-        # retrieved from the database.
-        tmp = self
+            while tmp and isinstance(tmp, Aggregate):
+                if getattr(tmp, 'is_ordinal', False):
+                    tmp = ordinal_aggregate_field
+                elif getattr(tmp, 'is_computed', False):
+                    tmp = computed_aggregate_field
+                else:
+                    tmp = tmp.source
 
-        while tmp and isinstance(tmp, Aggregate):
-            if getattr(tmp, 'is_ordinal', False):
-                tmp = ordinal_aggregate_field
-            elif getattr(tmp, 'is_computed', False):
-                tmp = computed_aggregate_field
-            else:
-                tmp = tmp.source
-
-        self.field = tmp
+            self.field = tmp
 
     def relabel_aliases(self, change_map):
         if isinstance(self.col, (list, tuple)):
@@ -68,7 +71,6 @@ class Aggregate(object):
 
     def as_sql(self, qn, connection):
         "Return the aggregate, rendered as SQL."
-
         if hasattr(self.col, 'as_sql'):
             field_name = self.col.as_sql(qn, connection)
         elif isinstance(self.col, (list, tuple)):
@@ -81,8 +83,8 @@ class Aggregate(object):
             'field': field_name
         }
         params.update(self.extra)
-
-        return self.sql_template % params
+        sql = self.sql_template % params
+        return self.lookup.as_sql(qn, connection, sql) if self.lookup else (sql, [])
 
 
 class Avg(Aggregate):

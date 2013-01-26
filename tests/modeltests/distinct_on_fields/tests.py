@@ -1,10 +1,12 @@
 from __future__ import absolute_import
 
+from datetime import datetime
+
 from django.db.models import Max
 from django.test import TestCase, skipUnlessDBFeature
 from django.test.utils import str_prefix
 
-from .models import Tag, Celebrity, Fan, Staff, StaffTag
+from .models import Tag, Celebrity, Fan, Staff, StaffTag, Post
 
 class DistinctOnTests(TestCase):
     def setUp(self):
@@ -116,3 +118,20 @@ class DistinctOnTests(TestCase):
         with self.assertRaises(NotImplementedError):
             Celebrity.objects.distinct('id').aggregate(Max('id'))
 
+    @skipUnlessDBFeature('can_distinct_on_fields')
+    def test_distinct_nested_lookup(self):
+        p1 = Post.objects.create(title="Post 1", post_date=datetime(2013, 1, 1), view_count=200)
+        p2 = Post.objects.create(title="Post 2", post_date=datetime(2009, 2, 1), view_count=200)
+        p3 = Post.objects.create(title="Post 2", post_date=datetime(2009, 3, 1), view_count=300)
+        p4 = Post.objects.create(title="Post 2", post_date=datetime(2013, 4, 1), view_count=100)
+        p5 = Post.objects.create(title="Post 2", post_date=datetime(2012, 5, 1), view_count=300)
+        # Fetch most popular post per year
+        posts = Post.objects.distinct('post_date__year').order_by('post_date__year', '-view_count')
+        self.assertEqual(posts[0], p3)
+        self.assertEqual(posts[1], p5)
+        self.assertEqual(posts[2], p1)
+        # Fetch least popular post per year
+        posts = Post.objects.distinct('post_date__year').order_by('post_date__year', 'view_count')
+        self.assertEqual(posts[0], p2)
+        self.assertEqual(posts[1], p5)
+        self.assertEqual(posts[2], p4)

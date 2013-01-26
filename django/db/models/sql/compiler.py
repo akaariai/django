@@ -216,7 +216,7 @@ class SQLCompiler(object):
         max_name_length = self.connection.ops.max_name_length()
         result.extend([
             '%s%s' % (
-                aggregate.as_sql(qn, self.connection),
+                aggregate.as_sql(qn, self.connection)[0],
                 alias is not None
                     and ' AS %s' % qn(truncate_name(alias, max_name_length))
                     or ''
@@ -302,9 +302,12 @@ class SQLCompiler(object):
 
         for name in self.query.distinct_fields:
             parts = name.split(LOOKUP_SEP)
-            field, col, alias, _, _ = self._setup_joins(parts, opts, None)
+            field, col, alias, _, _, lookup = self._setup_joins(parts, opts, None)
             col, alias = self._final_join_removal(col, alias)
-            result.append("%s.%s" % (qn(alias), qn2(col)))
+            if lookup:
+                result.append(lookup.as_sql(qn, self.connection, Col(alias, col))[0])
+            else:
+                result.append("%s.%s" % (qn(alias), qn2(col)))
         return result
 
     def get_ordering(self):
@@ -374,15 +377,18 @@ class SQLCompiler(object):
             elif get_order_dir(field)[0] not in self.query.extra_select:
                 # 'col' is of the form 'field' or 'field1__field2' or
                 # '-field1__field2__field', etc.
-                for col, order in self.find_ordering_name(field,
+                for col, lookup, order in self.find_ordering_name(field,
                         self.query.model._meta, default_order=asc):
-                    elt, params = col.as_sql(qn, self.connection)
+                    if lookup:
+                        elt, params = lookup.as_sql(qn, self.connection, col)
+                    else:
+                        elt, params = col.as_sql(qn, self.connection)
                     if elt not in processed_pairs:
                         processed_pairs.add(elt)
                         if distinct and elt not in select_aliases:
                             ordering_aliases.append(elt)
                         result.append('%s %s' % (elt, order))
-                        group_by.append((elt, params))
+                        group_by.append((elt, []))
             else:
                 elt = qn2(col)
                 if distinct and col not in select_aliases:
@@ -401,7 +407,7 @@ class SQLCompiler(object):
         """
         name, order = get_order_dir(name, default_order)
         pieces = name.split(LOOKUP_SEP)
-        field, col, alias, joins, opts = self._setup_joins(pieces, opts, alias)
+        field, col, alias, joins, opts, lookup = self._setup_joins(pieces, opts, alias)
 
         # If we get to this point and the field is a relation to another model,
         # append the default ordering for that model.
@@ -420,7 +426,7 @@ class SQLCompiler(object):
                         order, already_seen))
             return results
         col, alias = self._final_join_removal(col, alias)
-        return [(Col(alias, col), order)]
+        return [(Col(alias, col), lookup, order)]
 
     def _setup_joins(self, pieces, opts, alias):
         """
@@ -433,7 +439,7 @@ class SQLCompiler(object):
         """
         if not alias:
             alias = self.query.get_initial_alias()
-        field, target, opts, joins, _ = self.query.setup_joins(
+        field, target, opts, joins, _, lookup = self.query.setup_joins(
             pieces, opts, alias)
         # We will later on need to promote those joins that were added to the
         # query afresh above.
@@ -450,7 +456,7 @@ class SQLCompiler(object):
         # Ordering or distinct must not affect the returned set, and INNER
         # JOINS for nullable fields could do this.
         self.query.promote_joins(joins_to_promote)
-        return field, col, alias, joins, opts
+        return field, col, alias, joins, opts, lookup
 
     def _final_join_removal(self, col, alias):
         """
@@ -989,7 +995,7 @@ class SQLAggregateCompiler(SQLCompiler):
 
         sql = ('SELECT %s FROM (%s) subquery' % (
             ', '.join([
-                aggregate.as_sql(qn, self.connection)
+                aggregate.as_sql(qn, self.connection)[0]
                 for aggregate in self.query.aggregate_select.values()
             ]),
             self.query.subquery)

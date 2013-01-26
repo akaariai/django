@@ -157,7 +157,6 @@ class WhereNode(tree.Node):
         lvalue, lookup, value_annotation, params_or_value = child
         return lookup.make_atom(lvalue, value_annotation, params_or_value, qn, connection)
 
-
     def relabel_aliases(self, change_map, node=None):
         """
         Relabels the alias values of any children. 'change_map' is a dictionary

@@ -23,7 +23,7 @@ class Aggregate(object):
         return '%s__%s' % (self.lookup, self.name.lower())
     default_alias = property(_default_alias)
 
-    def add_to_query(self, query, alias, col, source, is_summary):
+    def add_to_query(self, query, alias, col, source, is_summary, lookup):
         """Add the aggregate to the nominated query.
 
         This method is used to convert the generic Aggregate definition into a
@@ -42,7 +42,7 @@ class Aggregate(object):
            summary value rather than an annotation.
         """
         klass = getattr(query.aggregates_module, self.name)
-        aggregate = klass(col, source=source, is_summary=is_summary, **self.extra)
+        aggregate = klass(col, source=source, is_summary=is_summary, lookup=lookup, **self.extra)
         query.aggregates[alias] = aggregate
 
 class Avg(Aggregate):

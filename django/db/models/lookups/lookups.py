@@ -5,6 +5,7 @@ from django.core import exceptions
 from django.db.models.sql.datastructures import EmptyResultSet
 from django.db.models.lookups.backwards_compat import BackwardsCompatLookup
 from django.db.models.fields import Field
+from django.utils import six
 
 # We have two different paths to solve a lookup. BackwardsCompatLookup tries
 # to guarantee that Fields with overridden get[_db]_prep_lookup defined will
@@ -80,30 +81,33 @@ class Lookup(object):
         connection respectively.
         """
         field = field or lvalue.field
-        lhs_clause = self.prepare_lhs(lvalue, qn, connection)
-        rhs_sql, params = self.common_normalize(params_or_value, field, qn,
-                                                connection)
-        params = self.normalize_params(params, field, qn, connection)
+        lhs_clause, params = self.prepare_lhs(lvalue, qn, connection)
+        rhs_sql, rhs_params = self.common_normalize(params_or_value, field, qn,
+                                                    connection)
+        rhs_params = self.normalize_params(rhs_params, field, qn, connection)
+        params.extend(rhs_params)
         return self.as_constraint_sql(qn, connection, lhs_clause, value_annotation, rhs_sql, params,
                                       lvalue.field)
 
-    def prepare_lhs(self, lvalue, qn, connection):
+    def prepare_lhs(self, lvalue, qn, connection, lhs_only=False):
         """
         Returns the SQL fragment used for the left-hand side of a column
         constraint (for example, the "T1.foo" portion in the clause
         "WHERE ... T1.foo = 6"). The lvalue can also be something that
         knows how to turn itself into SQL by an as_sql() method.
         """
-        field = lvalue.field
         if hasattr(lvalue, 'as_sql'):
             return lvalue.as_sql(qn, connection)
+        if isinstance(lvalue, six.string_types):
+            return lvalue, []
+        field = lvalue.field
         table_alias, name = lvalue.alias, lvalue.col
         if table_alias:
             lhs = '%s.%s' % (qn(table_alias), qn(name))
         else:
             lhs = qn(name)
         db_type = field.db_type(connection) if field else None
-        return connection.ops.field_cast_sql(db_type) % lhs
+        return connection.ops.field_cast_sql(db_type) % lhs, []
 
     def get_prep_lookup(self, field, value):
         """
@@ -175,15 +179,16 @@ class Lookup(object):
             format = format % rhs_sql
         return format
 
-    def as_constraint_sql(self, qn, connection, lhs_clause, rhs_format, params, field):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, rhs_sql,
+                          params, field):
         raise NotImplementedError
 
-    def as_sql(self, qn, connection, lvalue):
-        return self.prepare_lhs(lvalue, qn, connection)
+    def as_sql(self, qn, connection, col):
+        return self.prepare_lhs(col, qn, connection, lhs_only=True)
 
 class SimpleLookup(Lookup):
-    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params, field):
-        rhs_format = self.rhs_format(value_annotation, connection, extra)
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, rhs_sql, params, field):
+        rhs_format = self.rhs_format(value_annotation, connection, rhs_sql)
         lhs_clause = connection.ops.lookup_cast(self.lookup_name) % lhs_clause
         rhs_clause = connection.operators[self.lookup_name] % rhs_format
         return '%s %s' % (lhs_clause, rhs_clause), params
@@ -200,7 +205,8 @@ class IsNull(Lookup):
     def make_atom(self, lvalue, value_annotation, params_or_value, qn,
                   connection, field=None):
         lhs_clause = self.prepare_lhs(lvalue, qn, connection)
-        return ('%s IS %sNULL' % (lhs_clause, (not value_annotation and 'NOT ' or '')), ())
+        return ('%s IS %sNULL' % (lhs_clause[0], (not value_annotation and 'NOT ' or '')),
+                lhs_clause[1])
 Field.lookups['isnull'] = IsNull
 
 class LessThan(SimpleLookup):
@@ -270,26 +276,37 @@ class Year(SimpleLookup):
     rhs_prepare = Lookup.RAW
 
     def __init__(self, rest_of_lookups):
+        from django.db.models.fields import IntegerField
+        self.retval_field = IntegerField()
         if rest_of_lookups:
-            from django.db.models.fields import IntegerField
-            self.nested_lookup = IntegerField().get_lookup(rest_of_lookups, None)
+            self.nested_lookup = self.retval_field.get_lookup(rest_of_lookups, None)
         else:
             self.nested_lookup = None
 
-    def normalize_params(self, params, field, qn, connection):
+    def common_normalize(self, params, field, qn, connection):
         if self.nested_lookup:
-            return self.nested_lookup.normalize_params(params, field, qn, connection)
+            return self.nested_lookup.common_normalize(params, self.retval_field, qn, connection)
+        else:
+            rhs_sql, params = super(Year, self).common_normalize(params, field, qn, connection)
         intval = int(params[0])
         if field.get_internal_type() == 'DateField':
-            return connection.ops.year_lookup_bounds_for_date_field(intval)
+            return rhs_sql, connection.ops.year_lookup_bounds_for_date_field(intval)
         else:
-            return connection.ops.year_lookup_bounds(intval)
+            return rhs_sql, connection.ops.year_lookup_bounds(intval)
+
+    def prepare_lhs(self, lvalue, qn, connection, lhs_only=False):
+        lhs_clause, params = super(Year, self).prepare_lhs(lvalue, qn, connection)
+        if self.nested_lookup or lhs_only:
+            lhs_clause = connection.ops.date_extract_sql('year', lhs_clause)
+            if self.nested_lookup:
+                lhs_clause, inner_params = self.nested_lookup.prepare_lhs(lhs_clause, qn, connection)
+                params.extend(inner_params)
+        return lhs_clause, params
 
     def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params, field):
         if self.nested_lookup:
-            return self.nested_lookup.as_sql(
-                connection.ops.date_extract_sql('year', lhs_clause),
-                value_annotation, extra, params, field, qn, connection)
+            return self.nested_lookup.as_constraint_sql(
+                qn, connection, lhs_clause, value_annotation, extra, params, field)
         return '%s BETWEEN %%s AND %%s' % lhs_clause, params
 
 Field.lookups['year'] = Year

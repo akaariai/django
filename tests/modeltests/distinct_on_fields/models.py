@@ -44,3 +44,8 @@ class StaffTag(models.Model):
 
     def __str__(self):
         return "%s -> %s" % (self.tag, self.staff)
+
+class Post(models.Model):
+    title = models.TextField()
+    post_date = models.DateTimeField()
+    view_count = models.IntegerField()

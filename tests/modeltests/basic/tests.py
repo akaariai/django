@@ -49,6 +49,7 @@ class ModelTest(TestCase):
         # Django provides a rich database lookup API.
         self.assertEqual(Article.objects.get(id__exact=a.id), a)
         self.assertEqual(Article.objects.get(headline__startswith='Area woman'), a)
+        qs = Article.objects.filter(pub_date__year=2005)
         self.assertEqual(Article.objects.get(pub_date__year=2005), a)
         self.assertEqual(Article.objects.get(pub_date__year__lt=2006, pub_date__year__gt=2004), a)
         self.assertEqual(Article.objects.get(pub_date__year=2005, pub_date__month=7), a)

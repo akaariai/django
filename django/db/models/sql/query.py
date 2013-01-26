@@ -1069,6 +1069,7 @@ class Query(object):
         """
         opts = model._meta
         field_list = aggregate.lookup.split(LOOKUP_SEP)
+        lookup = None
         if len(field_list) == 1 and aggregate.lookup in self.aggregates:
             # Aggregate is over an annotation
             field_name = field_list[0]
@@ -1088,7 +1089,7 @@ class Query(object):
             #   - this is an annotation over a model field
             # then we need to explore the joins that are required.
 
-            field, source, opts, join_list, path = self.setup_joins(
+            field, source, opts, join_list, path, lookup = self.setup_joins(
                 field_list, opts, self.get_initial_alias())
 
             # Process the join chain to see if it can be trimmed
@@ -1108,7 +1109,7 @@ class Query(object):
             col = field_name
 
         # Add the aggregate to the query
-        aggregate.add_to_query(self, alias, col=col, source=source, is_summary=is_summary)
+        aggregate.add_to_query(self, alias, col=col, source=source, is_summary=is_summary, lookup=lookup)
 
     def resolve_value(self, lookup, value, can_reuse):
         if value is None:
@@ -1437,12 +1438,16 @@ class Query(object):
         """
         path, final_field, target, multijoin_pos, parts_found = self.names_to_path(
             names, opts, allow_explicit_fk)
-        if parts_found != len(names):
-            self.fail_lookup(names, parts_found, path, final_field)
+        if parts_found == len(names):
+            lookup = None
+        else:
+            lookup = self.find_lookup(final_field, target, names[parts_found:])
+            if lookup is None:
+                self.fail_lookup(names, parts_found, path, final_field)
         if multijoin_pos and not allow_m2m:
             raise FieldError("Invalid field name: '%s'" % names[multijoin_pos])
         opts, joins, path = self._setup_joins(path, opts, alias, can_reuse)
-        return final_field, target, opts, joins, path
+        return final_field, target, opts, joins, path, lookup
 
     def _setup_joins(self, path, opts, alias, can_reuse):
         """
@@ -1621,7 +1626,7 @@ class Query(object):
 
         try:
             for name in field_names:
-                field, target, u2, joins, u3 = self.setup_joins(
+                field, target, u2, joins, u3, _ = self.setup_joins(
                         name.split(LOOKUP_SEP), opts, alias, None, allow_m2m,
                         True)
                 final_alias = joins[-1]
@@ -1911,7 +1916,7 @@ class Query(object):
         """
         opts = self.model._meta
         alias = self.get_initial_alias()
-        field, col, opts, joins, extra = self.setup_joins(
+        field, col, opts, joins, extra, lookup = self.setup_joins(
                 start.split(LOOKUP_SEP), opts, alias)
         select_col = self.alias_map[joins[1]].lhs_join_col
         select_alias = alias
