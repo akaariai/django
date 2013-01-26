@@ -84,8 +84,8 @@ class Lookup(object):
         rhs_sql, params = self.common_normalize(params_or_value, field, qn,
                                                 connection)
         params = self.normalize_params(params, field, qn, connection)
-        return self.as_sql(lhs_clause, value_annotation, rhs_sql, params, lvalue.field,
-                           qn, connection)
+        return self.as_constraint_sql(qn, connection, lhs_clause, value_annotation, rhs_sql, params,
+                                      lvalue.field)
 
     def prepare_lhs(self, lvalue, qn, connection):
         """
@@ -175,11 +175,14 @@ class Lookup(object):
             format = format % rhs_sql
         return format
 
-    def as_sql(self, lhs_clause, rhs_format, params, field, qn, connection):
+    def as_constraint_sql(self, qn, connection, lhs_clause, rhs_format, params, field):
         raise NotImplementedError
 
+    def as_sql(self, qn, connection, lvalue):
+        return self.prepare_lhs(lvalue, qn, connection)
+
 class SimpleLookup(Lookup):
-    def as_sql(self, lhs_clause, value_annotation, extra, params, field, qn, connection):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params, field):
         rhs_format = self.rhs_format(value_annotation, connection, extra)
         lhs_clause = connection.ops.lookup_cast(self.lookup_name) % lhs_clause
         rhs_clause = connection.operators[self.lookup_name] % rhs_format
@@ -282,7 +285,7 @@ class Year(SimpleLookup):
         else:
             return connection.ops.year_lookup_bounds(intval)
 
-    def as_sql(self, lhs_clause, value_annotation, extra, params, field, qn, connection):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params, field):
         if self.nested_lookup:
             return self.nested_lookup.as_sql(
                 connection.ops.date_extract_sql('year', lhs_clause),
@@ -297,7 +300,7 @@ class DateBase(SimpleLookup):
     def normalize_params(self, params, field, qn, connection):
         return [int(params[0])]
 
-    def as_sql(self, lhs_clause, vale_annotation, extra, params, field, qn, connection):
+    def as_constraint_sql(self, qn, connection, lhs_clause, vale_annotation, extra, params, field):
         return '%s = %%s' % connection.ops.date_extract_sql(self.lookup_name, lhs_clause), params
 
 class Month(DateBase):
@@ -321,7 +324,8 @@ class In(SimpleLookup):
             raise EmptyResultSet
         return '%s'
 
-    def as_sql(self, lhs_clause, value_annotation, rhs_sql, params, field, qn, connection):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, rhs_sql, params,
+                          field):
         cast_sql = self.cast_sql(value_annotation, connection)
         if rhs_sql:
             return '%s IN (%s)' % (lhs_clause, rhs_sql), params
@@ -350,7 +354,7 @@ class Range(Lookup):
     lookup_name = 'range'
     rhs_prepare = Lookup.LIST_FIELD_PREPARE
 
-    def as_sql(self, lhs_clause, value_annotation, extra, params, field, qn, connection):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params, field):
         return '%s BETWEEN %%s AND %%s' % lhs_clause, params
 Field.lookups['range'] = Range
 
@@ -358,14 +362,14 @@ class Search(Lookup):
     lookup_name = 'search'
     rhs_prepare = Lookup.RAW
 
-    def as_sql(self, lhs_clause, value_annotation, extra, params, field, qn, connection):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params, field):
         return connection.ops.fulltext_search_sql(lhs_clause), params
 Field.lookups['search'] = Search
 
 class Regex(Lookup):
     lookup_name = 'regex'
 
-    def as_sql(self, lhs_clause, value_annotation, extra, params, field, qn, connection):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params, field):
         """
         Regex lookups are implemented partly by connection.operators... Except
         when not.
