@@ -1174,16 +1174,6 @@ class Query(object):
             raise FieldError("Cannot resolve keyword %r into field. "
                     "Choices are: %s" % (parts[parts_found], ", ".join(available)))
 
-
-    # Plan:
-    #    1. [DONE] Move names_to_path call in the beginning of add_filter (but after lookup resolution)
-    #    2. [DONE] Move aggregate and names_to_path resolution before lookup resolution.
-    #       [NOTE: The lookup resolution should be moved to names_to_path()]
-    #    3. Resolve the lookups from fields
-    #    4. Introduce Lookup object
-    #    5. Introduce backend.lookups (that is, move the implementation of the lookup
-    #       in there)
-    #    6. Move all possible parts of name resolution to model._meta.
     def add_filter(self, filter_expr, connector=AND, negate=False,
             can_reuse=None, force_having=False):
         """
@@ -1223,13 +1213,9 @@ class Query(object):
         if parts_found == len(parts):
             lookup = field.get_lookup(['exact'], target)
         else:
-            lookup = field.get_lookup(parts[parts_found:], target)
-        if lookup is None and len(parts[parts_found:]) == 1:
-            lookup = parts[-1] if parts[-1] in self.query_terms else None
-        if lookup is None:
-            self.fail_lookup(parts, parts_found, path, field)
-        if isinstance(lookup, six.string_types):
-            lookup = lookups.BackwardsCompatLookup(lookup)
+            lookup = self.find_lookup(field, target, parts[parts_found:])
+            if lookup is None:
+                self.fail_lookup(parts, parts_found, path, field)
 
         lookup, value = self.resolve_value(lookup, value, can_reuse)
         # By default, this is a WHERE clause. If an aggregate is referenced
@@ -1498,6 +1484,13 @@ class Query(object):
             else:
                 break
         return target.column, joins[-1], joins
+
+    def find_lookup(self, field, target, parts):
+        lookup = field.get_lookup(parts, target)
+        if lookup is None and len(parts) == 1:
+            lookup = (lookups.BackwardsCompatLookup(parts[0])
+                      if parts[0] in self.query_terms else None)
+        return lookup
 
     def split_exclude(self, filter_expr, prefix, can_reuse):
         """
