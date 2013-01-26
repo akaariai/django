@@ -11,6 +11,8 @@ from django.utils.encoding import python_2_unicode_compatible
 class Employee(models.Model):
     firstname = models.CharField(max_length=50)
     lastname = models.CharField(max_length=50)
+    date_fired = models.DateTimeField(null=True)
+    date_hired = models.DateTimeField(null=True)
 
     def __str__(self):
         return '%s %s' % (self.firstname, self.lastname)

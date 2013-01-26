@@ -77,6 +77,9 @@ class Aggregate(object):
             field_name = '.'.join([qn(c) for c in self.col])
         else:
             field_name = self.col
+        out_params = []
+        if self.lookup:
+            field_name, out_params = self.lookup.as_sql(qn, connection, field_name)
 
         params = {
             'function': self.sql_function,
@@ -84,8 +87,7 @@ class Aggregate(object):
         }
         params.update(self.extra)
         sql = self.sql_template % params
-        return self.lookup.as_sql(qn, connection, sql) if self.lookup else (sql, [])
-
+        return sql, out_params
 
 class Avg(Aggregate):
     is_computed = True

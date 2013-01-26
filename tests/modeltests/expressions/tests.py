@@ -1,5 +1,7 @@
 from __future__ import absolute_import, unicode_literals
 
+from datetime import datetime
+
 from django.core.exceptions import FieldError
 from django.db.models import F
 from django.test import TestCase
@@ -260,3 +262,21 @@ class ExpressionsTests(TestCase):
             company_ceo_set__num_employees=F('company_ceo_set__num_employees')
         )
         self.assertEqual(str(qs.query).count('JOIN'), 2)
+
+    def test_nested_lookup(self):
+        e1 = Employee.objects.create(
+            firstname='e', lastname='1', date_hired=datetime(2010, 1, 1),
+            date_fired=datetime(2013, 1, 1))
+        e2 = Employee.objects.create(
+            firstname='e', lastname='2', date_hired=datetime(2009, 1, 1),
+            date_fired=datetime(2009, 3, 1))
+        e3 = Employee.objects.create(
+            firstname='e', lastname='3', date_hired=datetime(2010, 5, 1),
+            date_fired=datetime(2011, 3, 1))
+        # Those employees fired in the same year they were hired
+        qs = Employee.objects.filter(date_hired__year=F('date_fired__year'))
+        self.assertEqual(list(qs), [e2])
+        # And those fired in next year or later.
+        qs = Employee.objects.filter(
+            date_fired__year__gte=F('date_hired__year') + 1).order_by('date_hired__year')
+        self.assertEqual(list(qs), [e1, e3])

@@ -84,7 +84,6 @@ class Lookup(object):
         lhs_clause, params = self.prepare_lhs(lvalue, qn, connection)
         rhs_sql, rhs_params = self.common_normalize(params_or_value, field, qn,
                                                     connection)
-        rhs_params = self.normalize_params(rhs_params, field, qn, connection)
         params.extend(rhs_params)
         return self.as_constraint_sql(qn, connection, lhs_clause, value_annotation, rhs_sql, params,
                                       lvalue.field)
@@ -151,12 +150,6 @@ class Lookup(object):
         elif self.rhs_prepare == self.LIST_FIELD_PREPARE:
             params = [field.get_db_prep_value(v, connection, False) for v in value]
         return None, params
-
-    def normalize_params(self, params, field, qn, connection):
-        """
-        A subclass hook for easier value normalization per lookup.
-        """
-        return params
 
     def cast_sql(self, value_annotation, connection):
         """
@@ -233,8 +226,10 @@ class PatternLookup(SimpleLookup):
     rhs_prepare = Lookup.RAW
     pattern = ""
 
-    def normalize_params(self, params, field, qn, connection):
-        return [self.pattern % connection.ops.prep_for_like_query(params[0])]
+    def common_normalize(self, params, field, qn, connection):
+        rhs_sql, params = super(PatternLookup, self).common_normalize(
+            params, field, qn, connection)
+        return rhs_sql, [self.pattern % connection.ops.prep_for_like_query(params[0])]
 
 class Contains(PatternLookup):
     lookup_name = 'contains'
@@ -267,8 +262,10 @@ class IExact(SimpleLookup):
     lookup_name = 'iexact'
     rhs_prepare = Lookup.RAW
 
-    def normalize_params(self, params, field, qn, connection):
-        return [connection.ops.prep_for_iexact_query(params[0])]
+    def common_normalize(self, params, field, qn, connection):
+        rhs_sql, params = super(IExact, self).common_normalize(
+            params, field, qn, connection)
+        return rhs_sql, [connection.ops.prep_for_iexact_query(params[0])]
 Field.lookups['iexact'] = IExact
 
 class Year(SimpleLookup):
@@ -281,7 +278,7 @@ class Year(SimpleLookup):
         if rest_of_lookups:
             self.nested_lookup = self.retval_field.get_lookup(rest_of_lookups, None)
         else:
-            self.nested_lookup = None
+            self.nested_lookup = self.retval_field.get_lookup(['exact'], None)
 
     def common_normalize(self, params, field, qn, connection):
         if self.nested_lookup:
@@ -314,8 +311,10 @@ Field.lookups['year'] = Year
 class DateBase(SimpleLookup):
     rhs_prepare = Lookup.RAW
 
-    def normalize_params(self, params, field, qn, connection):
-        return [int(params[0])]
+    def common_normalize(self, params, field, qn, connection):
+        rhs_sql, params = super(DateBase, self).common_normalize(
+            params, field, qn, connection)
+        return rhs_sql, [int(params[0])]
 
     def as_constraint_sql(self, qn, connection, lhs_clause, vale_annotation, extra, params, field):
         return '%s = %%s' % connection.ops.date_extract_sql(self.lookup_name, lhs_clause), params

@@ -20,13 +20,14 @@ class SQLEvaluator(object):
 
     def relabel_aliases(self, change_map):
         new_cols = []
-        for node, col in self.cols:
+        for node, col, lookup in self.cols:
             if hasattr(col, "relabel_aliases"):
                 col.relabel_aliases(change_map)
-                new_cols.append((node, col))
+                new_cols.append((node, col, lookup))
             else:
                 new_cols.append((node,
-                                (change_map.get(col[0], col[0]), col[1])))
+                                (change_map.get(col[0], col[0]), col[1]),
+                                lookup))
         self.cols = new_cols
 
     #####################################################
@@ -46,7 +47,7 @@ class SQLEvaluator(object):
         if (len(field_list) == 1 and
             node.name in query.aggregate_select.keys()):
             self.contains_aggregate = True
-            self.cols.append((node, query.aggregate_select[node.name]))
+            self.cols.append((node, query.aggregate_select[node.name], None))
         else:
             try:
                 field, source, opts, join_list, path, lookup = query.setup_joins(
@@ -55,7 +56,7 @@ class SQLEvaluator(object):
                 col, _, join_list = query.trim_joins(source, join_list, path)
                 if self.reuse is not None:
                     self.reuse.update(join_list)
-                self.cols.append((node, (join_list[-1], col)))
+                self.cols.append((node, (join_list[-1], col), lookup))
             except FieldDoesNotExist:
                 raise FieldError("Cannot resolve keyword %r into field. "
                                  "Choices are: %s" % (self.name,
@@ -87,16 +88,21 @@ class SQLEvaluator(object):
 
     def evaluate_leaf(self, node, qn, connection):
         col = None
-        for n, c in self.cols:
+        for n, c, lookup in self.cols:
             if n is node:
                 col = c
                 break
         if col is None:
             raise ValueError("Given node not found")
         if hasattr(col, 'as_sql'):
-            return col.as_sql(qn, connection)
+            sql = col.as_sql(qn, connection)
         else:
-            return '%s.%s' % (qn(col[0]), qn(col[1])), []
+            sql = '%s.%s' % (qn(col[0]), qn(col[1])), []
+        if lookup:
+            inner_sql, inner_params = lookup.as_sql(qn, connection, sql[0])
+            inner_params.extend(sql[1])
+            return inner_sql, inner_params
+        return sql
 
     def evaluate_date_modifier_node(self, node, qn, connection):
         timedelta = node.children.pop()

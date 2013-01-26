@@ -71,8 +71,8 @@ class SQLCompiler(object):
         # as the pre_sql_setup will modify query state in a way that forbids
         # another run of it.
         self.refcounts_before = self.query.alias_refcount.copy()
-        out_cols = self.get_columns(with_col_aliases)
-        ordering, ordering_group_by = self.get_ordering()
+        out_cols, col_params = self.get_columns(with_col_aliases)
+        ordering, ordering_params, ordering_group_by = self.get_ordering()
 
         distinct_fields = self.get_distinct()
 
@@ -94,6 +94,7 @@ class SQLCompiler(object):
             result.append(self.connection.ops.distinct_sql(distinct_fields))
 
         result.append(', '.join(out_cols + self.query.ordering_aliases))
+        params.extend(col_params)
 
         result.append('FROM')
         result.extend(from_)
@@ -119,6 +120,7 @@ class SQLCompiler(object):
 
         if ordering:
             result.append('ORDER BY %s' % ', '.join(ordering))
+            params.extend(ordering_params)
 
         if with_limits:
             if self.query.high_mark is not None:
@@ -172,6 +174,7 @@ class SQLCompiler(object):
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
         result = ['(%s) AS %s' % (col[0], qn2(alias)) for alias, col in six.iteritems(self.query.extra_select)]
+        res_params = []
         aliases = set(self.query.extra_select.keys())
         if with_aliases:
             col_aliases = aliases.copy()
@@ -188,6 +191,7 @@ class SQLCompiler(object):
                     r = '%s.%s' % (qn(alias), qn(column))
                     if lookup:
                         r, params = lookup.as_sql(qn, self.connection, r)
+                        res_params.extend(params)
                     if with_aliases:
                         if col[1] in col_aliases:
                             c_alias = 'Col%d' % len(col_aliases)
@@ -204,7 +208,9 @@ class SQLCompiler(object):
                         col_aliases.add(col[1])
                 else:
                     if lookup:
-                        result.append(lookup.as_sql(qn, self.connection, col)[0])
+                        sql, params = lookup.as_sql(qn, self.connection, col)
+                        result.append(sql)
+                        res_params.extend(params)
                     else:
                         result.append(col.as_sql(qn, self.connection))
 
@@ -219,15 +225,11 @@ class SQLCompiler(object):
             aliases.update(new_aliases)
 
         max_name_length = self.connection.ops.max_name_length()
-        result.extend([
-            '%s%s' % (
-                aggregate.as_sql(qn, self.connection)[0],
-                alias is not None
-                    and ' AS %s' % qn(truncate_name(alias, max_name_length))
-                    or ''
-            )
-            for alias, aggregate in self.query.aggregate_select.items()
-        ])
+        for alias, aggregate in self.query.aggregate_select.items():
+            sql, params = aggregate.as_sql(qn, self.connection)
+            alias = ' AS %s' % qn(truncate_name(alias, max_name_length)) if alias else ''
+            result.append('%s%s' % (sql, alias))
+            res_params.extend(params)
 
         for (table, col), _, _ in self.query.related_select_cols:
             r = '%s.%s' % (qn(table), qn(col))
@@ -242,7 +244,7 @@ class SQLCompiler(object):
                 col_aliases.add(col)
 
         self._select_aliases = aliases
-        return result
+        return result, res_params
 
     def get_default_columns(self, with_aliases=False, col_aliases=None,
             start_alias=None, opts=None, as_pairs=False, from_parent=None):
@@ -340,6 +342,7 @@ class SQLCompiler(object):
         distinct = self.query.distinct
         select_aliases = self._select_aliases
         result = []
+        res_params = []
         group_by = []
         ordering_aliases = []
         if self.query.standard_ordering:
@@ -393,6 +396,7 @@ class SQLCompiler(object):
                         if distinct and elt not in select_aliases:
                             ordering_aliases.append(elt)
                         result.append('%s %s' % (elt, order))
+                        res_params.extend(params)
                         group_by.append((elt, []))
             else:
                 elt = qn2(col)
@@ -401,7 +405,7 @@ class SQLCompiler(object):
                 result.append('%s %s' % (elt, order))
                 group_by.append(self.query.extra_select[col])
         self.query.ordering_aliases = ordering_aliases
-        return result, group_by
+        return result, res_params, group_by
 
     def find_ordering_name(self, name, opts, alias=None, default_order='ASC',
                            already_seen=None):
