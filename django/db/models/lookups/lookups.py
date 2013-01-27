@@ -65,6 +65,9 @@ class Lookup(object):
             raise LookupError('The lookup "%s" does not support nested lookups' %
                               (self.lookup_name))
 
+    def __deepcopy__(self, memo):
+        return self  # I am immutable!
+
     def make_atom(self, lvalue, value_annotation, params_or_value, qn,
                   connection, field=None):
         """
