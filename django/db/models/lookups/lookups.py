@@ -59,7 +59,8 @@ class Lookup(object):
     FIELD_PREPARE = object()
     rhs_prepare = RAW
 
-    def __init__(self, nested_lookups=None):
+    def __init__(self, field, nested_lookups):
+        self.field = field
         if nested_lookups:
             raise LookupError('The lookup "%s" does not support nested lookups' %
                               (self.lookup_name))
@@ -80,13 +81,10 @@ class Lookup(object):
         The 'qn' and connection are quote_name_unless_alias and the used
         connection respectively.
         """
-        field = field or lvalue.field
         lhs_clause, params = self.prepare_lhs(lvalue, qn, connection)
-        rhs_sql, rhs_params = self.common_normalize(params_or_value, field, qn,
-                                                    connection)
+        rhs_sql, rhs_params = self.common_normalize(params_or_value, qn, connection)
         params.extend(rhs_params)
-        return self.as_constraint_sql(qn, connection, lhs_clause, value_annotation, rhs_sql, params,
-                                      lvalue.field)
+        return self.as_constraint_sql(qn, connection, lhs_clause, value_annotation, rhs_sql, params)
 
     def prepare_lhs(self, lvalue, qn, connection, lhs_only=False):
         """
@@ -122,12 +120,12 @@ class Lookup(object):
         if hasattr(value, '_prepare'):
             return value._prepare()
         if self.rhs_prepare == self.FIELD_PREPARE:
-            value = field.lookup_prep(self.lookup_name, value)
+            value = self.field.lookup_prep(self.lookup_name, value)
         elif self.rhs_prepare == self.LIST_FIELD_PREPARE:
-            value = [field.lookup_prep(self.lookup_name, v) for v in value]
+            value = [self.field.lookup_prep(self.lookup_name, v) for v in value]
         return value
 
-    def common_normalize(self, value, field, qn, connection):
+    def common_normalize(self, value, qn, connection):
         """
         Normalizes the given value. Usually this means turning the value into
         types acceptable by the backend (through field.get_db_prep_value).
@@ -146,9 +144,9 @@ class Lookup(object):
         if self.rhs_prepare == self.RAW:
             params = [value]
         elif self.rhs_prepare == self.FIELD_PREPARE:
-            params = [field.get_db_prep_value(value, connection, False)]
+            params = [self.field.get_db_prep_value(value, connection, False)]
         elif self.rhs_prepare == self.LIST_FIELD_PREPARE:
-            params = [field.get_db_prep_value(v, connection, False) for v in value]
+            params = [self.field.get_db_prep_value(v, connection, False) for v in value]
         return None, params
 
     def cast_sql(self, value_annotation, connection):
@@ -173,14 +171,14 @@ class Lookup(object):
         return format
 
     def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, rhs_sql,
-                          params, field):
+                          params):
         raise NotImplementedError
 
     def as_sql(self, qn, connection, col):
         return self.prepare_lhs(col, qn, connection, lhs_only=True)
 
 class SimpleLookup(Lookup):
-    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, rhs_sql, params, field):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, rhs_sql, params):
         rhs_format = self.rhs_format(value_annotation, connection, rhs_sql)
         lhs_clause = connection.ops.lookup_cast(self.lookup_name) % lhs_clause
         rhs_clause = connection.operators[self.lookup_name] % rhs_format
@@ -194,6 +192,12 @@ Field.lookups['exact'] = Exact
 class IsNull(Lookup):
     lookup_name = 'isnull'
     rhs_prepare = Lookup.RAW
+
+    def __init__(self, field=None, rest_of_lookups=None):
+        self.field = field
+        if rest_of_lookups:
+            raise LookupError('The lookup "%s" does not support nested lookups' %
+                              (self.lookup_name))
 
     def make_atom(self, lvalue, value_annotation, params_or_value, qn,
                   connection, field=None):
@@ -226,9 +230,9 @@ class PatternLookup(SimpleLookup):
     rhs_prepare = Lookup.RAW
     pattern = ""
 
-    def common_normalize(self, params, field, qn, connection):
+    def common_normalize(self, params, qn, connection):
         rhs_sql, params = super(PatternLookup, self).common_normalize(
-            params, field, qn, connection)
+            params, qn, connection)
         return rhs_sql, [self.pattern % connection.ops.prep_for_like_query(params[0])]
 
 class Contains(PatternLookup):
@@ -262,62 +266,97 @@ class IExact(SimpleLookup):
     lookup_name = 'iexact'
     rhs_prepare = Lookup.RAW
 
-    def common_normalize(self, params, field, qn, connection):
+    def common_normalize(self, params, qn, connection):
         rhs_sql, params = super(IExact, self).common_normalize(
-            params, field, qn, connection)
+            params, qn, connection)
         return rhs_sql, [connection.ops.prep_for_iexact_query(params[0])]
 Field.lookups['iexact'] = IExact
 
-class Year(SimpleLookup):
-    lookup_name = 'year'
-    rhs_prepare = Lookup.RAW
+# The date lookups (__year, __month, ...) could be refactored to use some
+# base classes and then produce efficient SQL for lt, gt, exact and so on
+# lookups. Currently only year__exact is done in this way.
+class YearExact(Exact):
 
-    def __init__(self, rest_of_lookups):
-        from django.db.models.fields import IntegerField
-        self.retval_field = IntegerField()
-        if rest_of_lookups:
-            self.nested_lookup = self.retval_field.get_lookup(rest_of_lookups, None)
-        else:
-            self.nested_lookup = self.retval_field.get_lookup(['exact'], None)
+    def __init__(self, field, rest_of_lookups, source_field):
+        self.source_field = source_field
+        super(YearExact, self).__init__(field, rest_of_lookups)
 
-    def common_normalize(self, params, field, qn, connection):
-        if self.nested_lookup:
-            return self.nested_lookup.common_normalize(params, self.retval_field, qn, connection)
-        else:
-            rhs_sql, params = super(Year, self).common_normalize(params, field, qn, connection)
+    def common_normalize(self, params, qn, connection):
+        rhs_sql, params = super(YearExact, self).common_normalize(params, qn, connection)
+        if rhs_sql:
+            return rhs_sql, params
         intval = int(params[0])
-        if field.get_internal_type() == 'DateField':
+        if self.source_field.get_internal_type() == 'DateField':
             return rhs_sql, connection.ops.year_lookup_bounds_for_date_field(intval)
         else:
             return rhs_sql, connection.ops.year_lookup_bounds(intval)
 
-    def prepare_lhs(self, lvalue, qn, connection, lhs_only=False):
-        lhs_clause, params = super(Year, self).prepare_lhs(lvalue, qn, connection)
-        if self.nested_lookup or lhs_only:
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, rhs_sql,
+                          params):
+        if rhs_sql:
             lhs_clause = connection.ops.date_extract_sql('year', lhs_clause)
-            if self.nested_lookup:
-                lhs_clause, inner_params = self.nested_lookup.prepare_lhs(lhs_clause, qn, connection)
-                params.extend(inner_params)
-        return lhs_clause, params
-
-    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params, field):
-        if self.nested_lookup:
-            return self.nested_lookup.as_constraint_sql(
-                qn, connection, lhs_clause, value_annotation, extra, params, field)
+            return super(YearExact, self).as_constraint_sql(
+                qn, connection, lhs_clause, value_annotation, rhs_sql, params)
         return '%s BETWEEN %%s AND %%s' % lhs_clause, params
 
+
+class Year(SimpleLookup):
+    rhs_prepare = Lookup.RAW
+
+    def __init__(self, field, rest_of_lookups):
+        # Year deals with "exact" specially - it doesn't use extract year from
+        # the col + intereger comparison for performance reasons. It would be a
+        # good idea to do the same for other easy comparisons, too (__lt, __gt,
+        # ...)
+        from django.db.models.fields import IntegerField
+        self.field = IntegerField()
+        if rest_of_lookups and rest_of_lookups[0] != 'exact':
+            self.nested_lookup = self.field.get_lookup(rest_of_lookups, self.field)
+        else:
+            self.nested_lookup = YearExact(self.field, rest_of_lookups, field)
+        self.lookup_name = self.nested_lookup.lookup_name
+
+    def common_normalize(self, params, qn, connection):
+        return self.nested_lookup.common_normalize(params, qn, connection)
+
+    def prepare_lhs(self, lvalue, qn, connection, lhs_only=False):
+        lhs_clause, params = super(Year, self).prepare_lhs(lvalue, qn, connection)
+        if self.nested_lookup.lookup_name != 'exact' or lhs_only:
+            # exact wants the raw date, others want the year extracted out of the date.
+            lhs_clause = connection.ops.date_extract_sql('year', lhs_clause)
+        lhs_clause, inner_params = self.nested_lookup.prepare_lhs(lhs_clause, qn, connection)
+        params.extend(inner_params)
+        return lhs_clause, params
+
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params):
+        return self.nested_lookup.as_constraint_sql(
+            qn, connection, lhs_clause, value_annotation, extra, params)
 Field.lookups['year'] = Year
 
 class DateBase(SimpleLookup):
     rhs_prepare = Lookup.RAW
 
-    def common_normalize(self, params, field, qn, connection):
-        rhs_sql, params = super(DateBase, self).common_normalize(
-            params, field, qn, connection)
-        return rhs_sql, [int(params[0])]
+    def __init__(self, field, rest_of_lookups):
+        from django.db.models.fields import IntegerField
+        self.field = IntegerField()
+        if rest_of_lookups and rest_of_lookups[0] != 'exact':
+            self.nested_lookup = self.retval_field.get_lookup(rest_of_lookups, self.field)
+        else:
+            assert len(rest_of_lookups) <= 1
+            self.nested_lookup = Exact(self.field, rest_of_lookups)
+        self.datetype = self.lookup_name
+        self.lookup_name = self.nested_lookup.lookup_name
 
-    def as_constraint_sql(self, qn, connection, lhs_clause, vale_annotation, extra, params, field):
-        return '%s = %%s' % connection.ops.date_extract_sql(self.lookup_name, lhs_clause), params
+    def prepare_lhs(self, lvalue, qn, connection, lhs_only=False):
+        lhs_clause, params = super(DateBase, self).prepare_lhs(lvalue, qn, connection)
+        return connection.ops.date_extract_sql(self.datetype, lhs_clause), params
+
+    def common_normalize(self, params, qn, connection):
+        return self.nested_lookup.common_normalize(params, qn, connection)
+
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, rhs_sql, params):
+        return self.nested_lookup.as_constraint_sql(qn, connection, lhs_clause, value_annotation,
+                                                    rhs_sql, params)
 
 class Month(DateBase):
     lookup_name = 'month'
@@ -340,8 +379,7 @@ class In(SimpleLookup):
             raise EmptyResultSet
         return '%s'
 
-    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, rhs_sql, params,
-                          field):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, rhs_sql, params):
         cast_sql = self.cast_sql(value_annotation, connection)
         if rhs_sql:
             return '%s IN (%s)' % (lhs_clause, rhs_sql), params
@@ -370,7 +408,7 @@ class Range(Lookup):
     lookup_name = 'range'
     rhs_prepare = Lookup.LIST_FIELD_PREPARE
 
-    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params, field):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params):
         return '%s BETWEEN %%s AND %%s' % lhs_clause, params
 Field.lookups['range'] = Range
 
@@ -378,14 +416,14 @@ class Search(Lookup):
     lookup_name = 'search'
     rhs_prepare = Lookup.RAW
 
-    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params, field):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params):
         return connection.ops.fulltext_search_sql(lhs_clause), params
 Field.lookups['search'] = Search
 
 class Regex(Lookup):
     lookup_name = 'regex'
 
-    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params, field):
+    def as_constraint_sql(self, qn, connection, lhs_clause, value_annotation, extra, params):
         """
         Regex lookups are implemented partly by connection.operators... Except
         when not.

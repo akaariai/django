@@ -1532,8 +1532,8 @@ class Query(object):
         # since we are adding a IN <subquery> clause. This prevents the
         # database from tripping over IN (...,NULL,...) selects and returning
         # nothing
-        alias, col = query.select[0].col
-        query.where.add((Constraint(alias, col, None), lookups.IsNull(), False), AND)
+        (alias, col), field, _ = query.select[0]
+        query.where.add((Constraint(alias, col, None), lookups.IsNull(field, None), False), AND)
         # We need to trim the last part from the prefix.
         trimmed_prefix = LOOKUP_SEP.join(prefix.split(LOOKUP_SEP)[0:-1])
         if not trimmed_prefix:
@@ -1547,7 +1547,7 @@ class Query(object):
                     trimmed_prefix = rel.field.m2m_reverse_target_field_name()
 
         self.add_filter(('%s__in' % trimmed_prefix, query), negate=True,
-                can_reuse=can_reuse)
+                        can_reuse=can_reuse)
 
         # If there's more than one join in the inner query (before any initial
         # bits were trimmed -- which means the last active table is more than
@@ -1560,7 +1560,7 @@ class Query(object):
                                 in query.alias_refcount.items() if count])
         if active_positions > 1:
             self.add_filter(('%s__isnull' % trimmed_prefix, False), negate=True,
-                    can_reuse=can_reuse)
+                            can_reuse=can_reuse)
 
     def set_limits(self, low=None, high=None):
         """

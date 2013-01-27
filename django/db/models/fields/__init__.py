@@ -392,7 +392,7 @@ class Field(object):
         Custom lookup hook. Given in a list of names (for example
         ['date', 'lte']). Returns an (immutable!) Lookup object to be
         used in the query.
-        
+
         Allowed return values are:
             None: This method does not disallow or allow the lookup.
             A Lookup object: A lookup to be used in query
@@ -410,7 +410,7 @@ class Field(object):
             return lookups.BackwardsCompatLookup(names[0])
         lookup_class = self.lookups.get(names[0])
         if lookup_class:
-            return lookup_class(names[1:])
+            return lookup_class(self, names[1:])
         return None
 
     def has_default(self):

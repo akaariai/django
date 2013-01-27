@@ -47,7 +47,7 @@ class Aggregate(object):
         self.extra = extra
         self.lookup = lookup
         if self.lookup:
-            self.field = self.lookup.retval_field
+            self.field = self.lookup.field
         else:
             # Follow the chain of aggregate sources back until you find an
             # actual field, or an aggregate that forces a particular output
