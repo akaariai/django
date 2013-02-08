@@ -1,6 +1,8 @@
 import datetime
 
 from django.db import models
+from django.utils.encoding import python_2_unicode_compatible
+from django.utils.translation import get_language
 
 class Country(models.Model):
     # Table Column Fields
@@ -85,3 +87,39 @@ class Friendship(models.Model):
         from_fields=['to_friend_country_id', 'to_friend_id'],
         to_fields=['person_country_id', 'id'],
         related_name='to_friend')
+
+class ActiveTranslationField(models.ForeignObject):
+    requires_unique_target = False
+
+    def get_extra_join_sql(self, connection, qn, lhs_alias, rhs_alias):
+        return " AND %s.%s = %%s" % (qn(rhs_alias), qn("lang")), [get_language()]
+
+    def get_extra_filter(self):
+        return {'lang': get_language()}
+
+@python_2_unicode_compatible
+class Article(models.Model):
+    pub_date = models.DateTimeField()
+    active_translation = ActiveTranslationField(
+        'ArticleTranslation',
+        from_fields=['id'],
+        to_fields=['article'],
+        related_name='+',
+        null=True)
+
+    def __str__(self):
+        try:
+            return self.active_translation.title
+        except ArticleTranslation.DoesNotExist:
+            return '[No translation found]'
+
+class ArticleTranslation(models.Model):
+    article = models.ForeignKey(Article)
+    lang = models.CharField(max_length='2')
+    title = models.CharField(max_length=100)
+    body = models.TextField()
+    abstract = models.CharField(max_length=400, null=True)
+
+    class Meta:
+        unique_together = ('article', 'lang')
+        ordering = ('active_translation__title',)

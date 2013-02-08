@@ -288,6 +288,7 @@ class ReverseSingleRelatedObjectDescriptor(object):
                 rel_obj = None
             else:
                 params = {rh_field.attname: getattr(instance, lh_field.attname) for lh_field, rh_field in self.field.related_fields}
+                params.update(self.field.get_extra_filter())
                 qs = self.get_query_set(instance=instance)
                 # Assuming the database enforces foreign keys, this won't fail.
                 rel_obj = qs.get(**params)
@@ -901,6 +902,8 @@ class ManyToManyRel(object):
 
 
 class ForeignObject(RelatedField):
+    requires_unique_target = True
+
     def __init__(self, to, from_fields, to_fields, **kwargs):
         self.from_fields = from_fields
         self.to_fields = to_fields
@@ -931,6 +934,9 @@ class ForeignObject(RelatedField):
             related_fields.append((from_field, to_field))
 
         return related_fields
+
+    def get_extra_filter(self):
+        return {}
 
     @property
     def related_fields(self):
@@ -983,49 +989,53 @@ class ForeignObject(RelatedField):
         opts = self.model._meta
         from_opts = self.rel.to._meta
 
-        pathinfos = [PathInfo(from_opts, opts, (opts.pk,),  self, not self.unique, False)]
+        pathinfos = [PathInfo(from_opts, opts, (opts.pk,), self, not self.unique, False)]
         return pathinfos
 
-    def get_lookup_constraint(self, constraint_class, alias, columns, targets, lookup_type, raw_value):
+    def get_lookup_constraint(self, constraint_class, alias, targets, sources, lookup_type,
+                              raw_value):
         from django.db.models.sql.where import SubqueryConstraint, Constraint, AND, OR
         root_constraint = constraint_class()
+        assert len(targets) == len(sources)
 
         def get_normalized_value(value):
 
             from django.db.models import Model
             if isinstance(value, Model):
                 value_list = []
-                for target in targets:
-                    field = target
+                for source in sources:
                     # Account for one-to-one relations when sent a different model
-                    while not isinstance(value, field.model):
-                        field = field.rel.to._meta.get_field(field.rel.field_name)
-                    value_list.append(getattr(value, field.attname))
+                    while not isinstance(value, source.model):
+                        source = source.rel.to._meta.get_field(source.rel.field_name)
+                    value_list.append(getattr(value, source.attname))
                 return tuple(value_list)
             elif not isinstance(value, tuple):
                 return (value,)
             return value
 
         is_multicolumn = len(self.related_fields) > 1
-        if hasattr(raw_value, '_as_sql') or \
-           hasattr(raw_value, 'get_compiler'):
-            root_constraint.add(SubqueryConstraint(alias, columns, [target.name for target in targets], raw_value), AND)
+        if (hasattr(raw_value, '_as_sql') or
+                hasattr(raw_value, 'get_compiler')):
+            root_constraint.add(SubqueryConstraint(alias, [target.column for target in targets],
+                                                   [source.name for source in sources], raw_value),
+                                AND)
         elif lookup_type == 'isnull':
-            root_constraint.add((Constraint(alias, columns[0], None), lookup_type, raw_value), AND)
+            root_constraint.add((Constraint(alias, targets[0].column, None), lookup_type, raw_value), AND)
         elif lookup_type == 'exact' or lookup_type in ['gt', 'lt', 'gte', 'lte'] and not is_multicolumn:
             value = get_normalized_value(raw_value)
-            for index, field in enumerate(targets):
-                root_constraint.add((Constraint(alias, columns[index], field), lookup_type, value[index]), AND)
+            for index, source in enumerate(sources):
+                root_constraint.add((Constraint(alias, targets[index].column, sources[index]), lookup_type,
+                                     value[index]), AND)
         elif lookup_type in ['range', 'in'] and not is_multicolumn:
             values = [get_normalized_value(value) for value in raw_value]
             value = [val[0] for val in values]
-            root_constraint.add((Constraint(alias, columns[0], targets[0]), lookup_type, value), AND)
+            root_constraint.add((Constraint(alias, targets[0].column, sources[0]), lookup_type, value), AND)
         elif lookup_type == 'in':
             values = [get_normalized_value(value) for value in raw_value]
             for value in values:
                 value_constraint = constraint_class()
-                for index, field in enumerate(targets):
-                    value_constraint.add((Constraint(alias, columns[index], field), 'exact', value[index]), AND)
+                for index, target in enumerate(targets):
+                    value_constraint.add((Constraint(alias, target.column, sources[index]), 'exact', value[index]), AND)
                 root_constraint.add(value_constraint, OR)
         else:
             raise TypeError('Related Field has invalid lookup: %s' % lookup_type)
@@ -1059,7 +1069,8 @@ class ForeignKey(ForeignObject):
     }
     description = _("Foreign Key (type determined by related field)")
 
-    def __init__(self, to, to_field=None, rel_class=ManyToOneRel, **kwargs):
+    def __init__(self, to, to_field=None, rel_class=ManyToOneRel,
+                 db_constraint=True, **kwargs):
         try:
             to_name = to._meta.object_name.lower()
         except AttributeError:  # to._meta doesn't exist, so it must be RECURSIVE_RELATIONSHIP_CONSTANT
@@ -1073,6 +1084,8 @@ class ForeignKey(ForeignObject):
 
         if 'db_index' not in kwargs:
             kwargs['db_index'] = True
+
+        self.db_constraint = db_constraint
 
         kwargs['rel'] = rel_class(to, to_field,
             related_name=kwargs.pop('related_name', None),
