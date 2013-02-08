@@ -1,8 +1,9 @@
 import datetime
 from operator import attrgetter
 
-from .models import Country, Person, Group, Membership, Friendship
+from .models import Country, Person, Group, Membership, Friendship, Article, ArticleTranslation
 from django.test import TestCase
+from django.utils.translation import activate
 
 class MultiColumnFKTests(TestCase):
     def setUp(self):
@@ -262,3 +263,33 @@ class MultiColumnFKTests(TestCase):
 
         normal_groups_lists = [list(p.groups.all()) for p in Person.objects.all()]
         self.assertEqual(groups_lists, normal_groups_lists)
+
+    def test_translations(self):
+        activate('fi')
+        a1 = Article.objects.create(pub_date=datetime.datetime.now())
+        at1_fi = ArticleTranslation(article=a1, lang='fi', title='Otsikko', body='Diipadaapa')
+        at1_fi.save()
+        at2_en = ArticleTranslation(article=a1, lang='en', title='Title', body='Lalalalala')
+        at2_en.save()
+        with self.assertNumQueries(1):
+            fetched = Article.objects.select_related('active_translation').get(active_translation__title='Otsikko')
+            self.assertTrue(fetched.active_translation.title == 'Otsikko')
+        a2 = Article.objects.create(pub_date=datetime.datetime.now())
+        at2_fi = ArticleTranslation(article=a2, lang='fi', title='Atsikko', body='Diipadaapa',
+                                    abstract='dipad')
+        at2_fi.save()
+        a3 = Article.objects.create(pub_date=datetime.datetime.now())
+        at3_en = ArticleTranslation(article=a3, lang='en', title='A title', body='lalalalala',
+                                    abstract='lala')
+        at3_en.save()
+        self.assertEqual(
+            list(Article.objects.filter(active_translation__abstract=None)),
+            [a1, a3])
+        self.assertEqual(
+            list(Article.objects.filter(active_translation__abstract=None,
+                                        active_translation__pk__isnull=False)),
+            [a1])
+        activate('en')
+        self.assertEqual(
+            list(Article.objects.filter(active_translation__abstract=None)),
+            [a1, a2])

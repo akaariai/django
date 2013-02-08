@@ -150,15 +150,16 @@ def get_validation_errors(outfile, app=None):
                     continue
 
                 # Make sure the related field specified by a ForeignKey is unique
-                if len(f.foreign_related_fields) > 1:
-                    has_unique_field = False
-                    for rel_field in f.foreign_related_fields:
-                        has_unique_field = has_unique_field or rel_field.unique
-                    if not has_unique_field:
-                        e.add(opts, "Field combination '%s' under model '%s' must have a unique=True constraint" % (','.join([rel_field.name for rel_field in f.foreign_related_fields]), f.rel.to.__name__))
-                else:
-                    if not f.foreign_related_fields[0].unique:
-                        e.add(opts, "Field '%s' under model '%s' must have a unique=True constraint." % (f.foreign_related_fields[0].name, f.rel.to.__name__))
+                if f.requires_unique_target:
+                    if len(f.foreign_related_fields) > 1:
+                        has_unique_field = False
+                        for rel_field in f.foreign_related_fields:
+                            has_unique_field = has_unique_field or rel_field.unique
+                        if not has_unique_field:
+                            e.add(opts, "Field combination '%s' under model '%s' must have a unique=True constraint" % (','.join([rel_field.name for rel_field in f.foreign_related_fields]), f.rel.to.__name__))
+                    else:
+                        if not f.foreign_related_fields[0].unique:
+                            e.add(opts, "Field '%s' under model '%s' must have a unique=True constraint." % (f.foreign_related_fields[0].name, f.rel.to.__name__))
 
                 rel_opts = f.rel.to._meta
                 rel_name = RelatedObject(f.rel.to, cls, f).get_accessor_name()

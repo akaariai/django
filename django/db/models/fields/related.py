@@ -288,6 +288,7 @@ class ReverseSingleRelatedObjectDescriptor(object):
                 rel_obj = None
             else:
                 params = {rh_field.attname: getattr(instance, lh_field.attname) for lh_field, rh_field in self.field.related_fields}
+                params.update(self.field.get_extra_filter())
                 qs = self.get_query_set(instance=instance)
                 # Assuming the database enforces foreign keys, this won't fail.
                 rel_obj = qs.get(**params)
@@ -897,6 +898,8 @@ class ManyToManyRel(object):
 
 
 class ForeignObject(RelatedField):
+    requires_unique_target = True
+
     def __init__(self, to, from_fields, to_fields, **kwargs):
         self.from_fields = from_fields
         self.to_fields = to_fields
@@ -928,6 +931,9 @@ class ForeignObject(RelatedField):
             related_fields.append((from_field, to_field))
 
         return related_fields
+
+    def get_extra_filter(self):
+        return {}
 
     @property
     def related_fields(self):
