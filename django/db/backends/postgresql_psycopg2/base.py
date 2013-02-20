@@ -46,8 +46,8 @@ class CursorWrapper(object):
     particular exception instances and reraise them with the right types.
     """
 
-    def __init__(self, cursor):
-        self.cursor = cursor
+    def __init__(self, cursor, connection):
+        self.cursor, self.connection = cursor, connection
 
     def execute(self, query, args=None):
         try:
@@ -149,6 +149,8 @@ class DatabaseWrapper(BaseDatabaseWrapper):
                 exc_info=sys.exc_info()
             )
             raise
+        finally:
+            self.set_clean()
 
     @cached_property
     def pg_version(self):
@@ -203,9 +205,18 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         self.connection.set_isolation_level(self.isolation_level)
 
     def create_cursor(self):
+        """
+        if (self.connection.get_transaction_status() != psycopg2.extensions.TRANSACTION_STATUS_IDLE
+                and not self.is_dirty()):
+            raise Exception("The underlying connection is in transaction, but "
+                            "the connection isn't dirty!")
+        if (self.connection.get_transaction_status() == psycopg2.extensions.TRANSACTION_STATUS_IDLE
+                and self.is_dirty()):
+            raise Exception("The connection is not in transaction, but dirty...")
+        """
         cursor = self.connection.cursor()
         cursor.tzinfo_factory = utc_tzinfo_factory if settings.USE_TZ else None
-        return CursorWrapper(cursor)
+        return CursorWrapper(cursor, self)
 
     def _enter_transaction_management(self, managed):
         """
@@ -233,9 +244,15 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         try:
             if self.connection is not None:
                 self.connection.set_isolation_level(level)
+            if level == psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT:
+                self.set_clean()
         finally:
             self.isolation_level = level
             self.features.uses_savepoints = bool(level)
+
+    def set_dirty(self):
+        if self.transaction_state or not self.features.uses_autocommit:
+            super(DatabaseWrapper, self).set_dirty()
 
     def _commit(self):
         if self.connection is not None:
