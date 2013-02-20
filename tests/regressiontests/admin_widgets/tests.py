@@ -542,17 +542,6 @@ class HorizontalVerticalFilterSeleniumFirefoxTests(AdminSeleniumWebDriverTestCas
             self.assertEqual(self.has_css_class(choose_all_link, 'active'), choose_all)
             self.assertEqual(self.has_css_class(remove_all_link, 'active'), remove_all)
 
-    def wait_page_loaded(self):
-        from selenium.common.exceptions import TimeoutException
-        try:
-            # Wait for the next page to be loaded
-            self.wait_loaded_tag('body')
-        except TimeoutException:
-            # IE7 occasionnally returns an error "Internet Explorer cannot
-            # display the webpage" and doesn't load the next page. We just
-            # ignore it.
-            pass
-
     def execute_basic_operations(self, mode, field_name):
         from_box = '#id_%s_from' % field_name
         to_box = '#id_%s_to' % field_name
