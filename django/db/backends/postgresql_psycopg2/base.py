@@ -251,7 +251,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             self.features.uses_savepoints = bool(level)
 
     def set_dirty(self):
-        if self.transaction_state or not self.features.uses_autocommit:
+        if self.is_managed() or not self.features.uses_autocommit:
             super(DatabaseWrapper, self).set_dirty()
 
     def _commit(self):
