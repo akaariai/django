@@ -17,11 +17,8 @@ def upath(path):
     return path
 
 RUNTESTS_DIR = os.path.abspath(os.path.dirname(upath(__file__)))
-try:
-    import django
-except ImportError:
-    sys.path.insert(0, os.path.dirname(RUNTESTS_DIR))  # 'tests/../'
-    import django
+sys.path.insert(0, os.path.dirname(RUNTESTS_DIR))  # 'tests/../'
+import django
 
 from django import contrib
 from django.utils._os import upath
