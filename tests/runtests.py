@@ -306,10 +306,9 @@ if __name__ == "__main__":
     options, args = parser.parse_args()
     if options.settings:
         os.environ['DJANGO_SETTINGS_MODULE'] = options.settings
-    elif "DJANGO_SETTINGS_MODULE" not in os.environ:
-        parser.error("DJANGO_SETTINGS_MODULE is not set in the environment. "
-                      "Set it or use --settings.")
     else:
+        if "DJANGO_SETTINGS_MODULE" not in os.environ:
+            os.environ['DJANGO_SETTINGS_MODULE'] = 'test_sqlite'
         options.settings = os.environ['DJANGO_SETTINGS_MODULE']
 
     if options.liveserver is not None:
