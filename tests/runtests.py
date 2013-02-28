@@ -5,6 +5,24 @@ import subprocess
 import sys
 import tempfile
 
+def upath(path):
+    """
+    Separate version of django.utils._os.upath. The django.utils version isn't
+    usable here, as upath is needed for RUNTESTS_DIR which is needed for the
+    try-except of import django.
+    """
+    if sys.version_info[0] == 3:
+        fs_encoding = sys.getfilesystemencoding() or sys.getdefaultencoding()
+        return path.decode(fs_encoding)
+    return path
+
+RUNTESTS_DIR = os.path.abspath(os.path.dirname(upath(__file__)))
+try:
+    import django
+except ImportError:
+    sys.path.insert(0, os.path.dirname(RUNTESTS_DIR))  # 'tests/../'
+    import django
+
 from django import contrib
 from django.utils._os import upath
 from django.utils import six
@@ -13,7 +31,6 @@ CONTRIB_DIR_NAME = 'django.contrib'
 
 TEST_TEMPLATE_DIR = 'templates'
 
-RUNTESTS_DIR = os.path.abspath(os.path.dirname(upath(__file__)))
 CONTRIB_DIR = os.path.dirname(upath(contrib.__file__))
 TEMP_DIR = tempfile.mkdtemp(prefix='django_')
 os.environ['DJANGO_TEST_TEMP_DIR'] = TEMP_DIR
