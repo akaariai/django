@@ -29,10 +29,13 @@ class Creator(object):
     def __get__(self, obj, type=None):
         if obj is None:
             raise AttributeError('Can only be accessed via an instance.')
+        if self.field.raw_name in obj.__dict__:
+            obj.__dict__[self.field.name] = self.field.to_python(
+                obj.__dict__.pop(self.field.raw_name))
         return obj.__dict__[self.field.name]
 
     def __set__(self, obj, value):
-        obj.__dict__[self.field.name] = self.field.to_python(value)
+        obj.__dict__[self.field.raw_name] = value
 
 def make_contrib(superclass, func=None):
     """
@@ -48,6 +51,7 @@ def make_contrib(superclass, func=None):
             func(self, cls, name)
         else:
             super(superclass, self).contribute_to_class(cls, name)
+        self.raw_name = '__raw_%s' % self.name
         setattr(cls, self.name, Creator(self))
 
     return contribute_to_class

@@ -292,13 +292,18 @@ class QuerySet(object):
                 if field.name not in load_fields:
                     skip.add(field.attname)
                 else:
-                    init_list.append(field.attname)
+                    init_list.append(field.raw_name)
             model_cls = deferred_class_factory(self.model, skip)
+        else:
+            model_cls = self.model
+            init_list = [f.raw_name for f in model_cls._meta.fields]
 
-        # Cache db and model outside the loop
+        # Pre-calculate & cache everything possible outside the loop.
         db = self.db
         model = self.model
         compiler = self.query.get_compiler(using=db)
+        can_fast_init = model._meta.can_fast_init(init_list)
+        init_with_kwargs = not bool(skip)
         if fill_cache:
             klass_info = get_klass_info(model, max_depth=max_depth,
                                         requested=requested, only_load=only_load)
@@ -307,17 +312,8 @@ class QuerySet(object):
                 obj, _ = get_cached_row(row, index_start, db, klass_info,
                                         offset=len(aggregate_select))
             else:
-                # Omit aggregates in object creation.
-                row_data = row[index_start:aggregate_start]
-                if skip:
-                    obj = model_cls(**dict(zip(init_list, row_data)))
-                else:
-                    obj = model(*row_data)
-
-                # Store the source database of the object
-                obj._state.db = db
-                # This object came from the database; it's not being added.
-                obj._state.adding = False
+                obj = model_cls.from_db(db, row[index_start:aggregate_start], init_list,
+                                        init_with_kwargs, can_fast_init)
 
             if extra_select:
                 for i, k in enumerate(extra_select):
@@ -1310,7 +1306,7 @@ def get_klass_info(klass, max_depth=0, cur_depth=0, requested=None,
                 # child models.
                 continue
             else:
-                init_list.append(field.attname)
+                init_list.append(field.raw_name)
         # Retrieve all the requested fields
         field_count = len(init_list)
         if skip:
@@ -1330,7 +1326,7 @@ def get_klass_info(klass, max_depth=0, cur_depth=0, requested=None,
                                if not issubclass(from_parent, p)]
             # Load local fields, too...
             non_seen_models.append(klass)
-            field_names = [f.attname for f in klass._meta.fields
+            field_names = [f.raw_name for f in klass._meta.fields
                            if f.model in non_seen_models]
             field_count = len(field_names)
         # Try to avoid populating field_names variable for perfomance reasons.
@@ -1363,11 +1359,12 @@ def get_klass_info(klass, max_depth=0, cur_depth=0, requested=None,
                                             requested=next, only_load=only_load, from_parent=parent)
                 reverse_related_fields.append((o.field, klass_info))
     if field_names:
-        pk_idx = field_names.index(klass._meta.pk.attname)
+        pk_idx = field_names.index(klass._meta.pk.raw_name)
     else:
         pk_idx = klass._meta.pk_index()
 
-    return klass, field_names, field_count, related_fields, reverse_related_fields, pk_idx
+    can_fast_init = klass._meta.can_fast_init(field_names)
+    return klass, field_names, field_count, related_fields, reverse_related_fields, pk_idx, can_fast_init
 
 
 def get_cached_row(row, index_start, using,  klass_info, offset=0,
@@ -1393,26 +1390,21 @@ def get_cached_row(row, index_start, using,  klass_info, offset=0,
     """
     if klass_info is None:
         return None
-    klass, field_names, field_count, related_fields, reverse_related_fields, pk_idx = klass_info
+    klass, field_names, field_count, related_fields, reverse_related_fields, pk_idx, can_fast_init = klass_info
 
-
-    fields = row[index_start : index_start + field_count]
+    fields = row[index_start: index_start + field_count]
     # If the pk column is None (or the Oracle equivalent ''), then the related
     # object must be non-existent - set the relation to None.
-    if fields[pk_idx] == None or fields[pk_idx] == '':
+    if fields[pk_idx] is None or fields[pk_idx] == '':
         obj = None
     elif field_names:
         fields = list(fields)
         for rel_field, value in parent_data:
-            field_names.append(rel_field.attname)
+            field_names.append(rel_field.raw_name)
             fields.append(value)
-        obj = klass(**dict(zip(field_names, fields)))
+        obj = klass.from_db(using, fields, field_names, False, can_fast_init)
     else:
-        obj = klass(*fields)
-    # If an object was retrieved, set the database state.
-    if obj:
-        obj._state.db = using
-        obj._state.adding = False
+        obj = klass.from_db(using, fields, klass._meta.raw_names, True, can_fast_init)
 
     # Instantiate related fields
     index_end = index_start + field_count + offset
@@ -1442,7 +1434,7 @@ def get_cached_row(row, index_start, using,  klass_info, offset=0,
         parent_data = []
         for rel_field, rel_model in klass_info[0]._meta.get_fields_with_model():
             if rel_model is not None and isinstance(obj, rel_model):
-                parent_data.append((rel_field, getattr(obj, rel_field.attname)))
+                parent_data.append((rel_field, getattr(obj, rel_field.raw_name)))
         # Recursively retrieve the data for the related object
         cached_row = get_cached_row(row, index_end, using, klass_info,
                                    parent_data=parent_data)
@@ -1460,7 +1452,7 @@ def get_cached_row(row, index_start, using,  klass_info, offset=0,
                 # Populate related object caches using parent data.
                 for rel_field, _ in parent_data:
                     if rel_field.rel:
-                        setattr(rel_obj, rel_field.attname, getattr(obj, rel_field.attname))
+                        setattr(rel_obj, rel_field.raw_name, getattr(obj, rel_field.raw_name))
                         try:
                             cached_obj = getattr(obj, rel_field.get_cache_name())
                             setattr(rel_obj, rel_field.get_cache_name(), cached_obj)
@@ -1485,10 +1477,6 @@ class RawQuerySet(object):
         self.translations = translations or {}
 
     def __iter__(self):
-        # Mapping of attrnames to row column positions. Used for constructing
-        # the model using kwargs, needed when not all model's fields are present
-        # in the query.
-        model_init_field_names = {}
         # A list of tuples of (column name, column position). Used for
         # annotation fields.
         annotation_fields = []
@@ -1504,50 +1492,49 @@ class RawQuerySet(object):
 
         # Find out which columns are model's fields, and which ones should be
         # annotated to the model.
+        raw_name_to_colpos = {}
         for pos, column in enumerate(self.columns):
             if column in self.model_fields:
-                model_init_field_names[self.model_fields[column].attname] = pos
+                raw_name_to_colpos[self.model_fields[column].raw_name] = pos
             else:
                 annotation_fields.append((column, pos))
 
         # Find out which model's fields are not present in the query.
         skip = set()
+        # List of positions of model's fetched fields in the output.
+        field_col_pos = []
+        model_init_raw_names = []
         for field in self.model._meta.fields:
-            if field.attname not in model_init_field_names:
+            if field.raw_name not in raw_name_to_colpos:
                 skip.add(field.attname)
+            else:
+                # Find out the pos of this field.
+                field_col_pos.append(raw_name_to_colpos[field.raw_name])
+                model_init_raw_names.append(field.raw_name)
+
         if skip:
             if self.model._meta.pk.attname in skip:
                 raise InvalidQuery('Raw query must include the primary key')
             model_cls = deferred_class_factory(self.model, skip)
         else:
+            # All model's fields are present in the query.
             model_cls = self.model
-            # All model's fields are present in the query. So, it is possible
-            # to use *args based model instantation. For each field of the model,
-            # record the query column position matching that field.
-            model_init_field_pos = []
-            for field in self.model._meta.fields:
-                model_init_field_pos.append(model_init_field_names[field.attname])
         if need_resolv_columns:
             fields = [self.model_fields.get(c, None) for c in self.columns]
+        can_fast_init = model_cls._meta.can_fast_init(model_init_raw_names)
+        init_with_args = not bool(skip)
         # Begin looping through the query values.
         for values in query:
             if need_resolv_columns:
                 values = compiler.resolve_columns(values, fields)
             # Associate fields to values
-            if skip:
-                model_init_kwargs = {}
-                for attname, pos in six.iteritems(model_init_field_names):
-                    model_init_kwargs[attname] = values[pos]
-                instance = model_cls(**model_init_kwargs)
-            else:
-                model_init_args = [values[pos] for pos in model_init_field_pos]
-                instance = model_cls(*model_init_args)
+            model_init_args = [values[pos] for pos in field_col_pos]
+            instance = model_cls.from_db(
+                db, model_init_args, model_init_raw_names,
+                init_with_args, can_fast_init)
             if annotation_fields:
                 for column, pos in annotation_fields:
                     setattr(instance, column, values[pos])
-
-            instance._state.db = db
-            instance._state.adding = False
 
             yield instance
 
@@ -1600,7 +1587,7 @@ class RawQuerySet(object):
             converter = connections[self.db].introspection.table_name_converter
             self._model_fields = {}
             for field in self.model._meta.fields:
-                name, column = field.get_attname_column()
+                _, column = field.get_attname_column()
                 self._model_fields[converter(column)] = field
         return self._model_fields
 

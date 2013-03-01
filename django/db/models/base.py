@@ -416,6 +416,22 @@ class Model(six.with_metaclass(ModelBase)):
         super(Model, self).__init__()
         signals.post_init.send(sender=self.__class__, instance=self)
 
+    @classmethod
+    def from_db(cls, using, values, field_names, init_with_args, can_fast_init):
+        if can_fast_init:
+            new = Empty()
+            new.__class__ = cls
+            new.__dict__ = dict(zip(field_names, values))
+            new._state = ModelState()
+            new._state.adding, new._state.db = False, using
+            return new
+        elif init_with_args:
+            new = cls(*values)
+        else:
+            new = cls(**dict(zip(field_names, values)))
+        new._state.adding, new._state.db = False, using
+        return new
+
     def __repr__(self):
         try:
             u = six.text_type(self)

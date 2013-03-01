@@ -12,6 +12,7 @@ from django.db.models.loading import get_models, app_cache_ready
 from django.utils import six
 from django.utils.datastructures import SortedDict
 from django.utils.encoding import force_text, smart_text, python_2_unicode_compatible
+from django.utils.functional import cached_property
 from django.utils.translation import activate, deactivate_all, get_language, string_concat
 
 # Calculate the verbose_name by converting from InitialCaps to "lowercase with spaces".
@@ -362,6 +363,10 @@ class Options(object):
         # the main example). Trim them.
         return [val for val in names if not val.endswith('+')]
 
+    @cached_property
+    def raw_names(self):
+        return [f.raw_name for f in self.fields]
+
     def init_name_map(self):
         """
         Initialises the field name -> field object mapping.
@@ -530,3 +535,17 @@ class Options(object):
                 # of the chain to the ancestor is that parent
                 # links
                 return self.parents[parent] or parent_link
+
+    def can_fast_init(self, attnames):
+        """
+        Checks if it is possible to skip Model.__init__ and instead use
+        a fast-path for the init.
+
+        The skip can be done if the model doesn't override `__int__`, doesn't
+        have pre or post_init signals and doesn't have setters for the
+        attnames (either through __setattr__ or descriptors).
+        """
+        from django.db.models import Model
+        return (
+            self.model.__init__ == Model.__init__ and
+            self.model.__setattr__ == object.__setattr__)

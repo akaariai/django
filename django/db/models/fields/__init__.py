@@ -248,6 +248,7 @@ class Field(object):
         if not self.name:
             self.name = name
         self.attname, self.column = self.get_attname_column()
+        self.raw_name = self.attname
         if self.verbose_name is None and self.name:
             self.verbose_name = self.name.replace('_', ' ')
 

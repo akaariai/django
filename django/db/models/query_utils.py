@@ -166,12 +166,16 @@ def select_related_descend(field, restricted, requested, load_fields, reverse=Fa
 # This function is needed because data descriptors must be defined on a class
 # object, not an instance, to have any effect.
 
+_cls_cache = {}
 def deferred_class_factory(model, attrs):
     """
     Returns a class object that is a copy of "model" with the specified "attrs"
     being replaced with DeferredAttribute objects. The "pk_value" ties the
     deferred attributes to a particular instance of the model.
     """
+    cache_key = model, frozenset(attrs)
+    if cache_key in _cls_cache:
+        return _cls_cache[cache_key]
     class Meta:
         proxy = True
         app_label = model._meta.app_label
@@ -188,7 +192,9 @@ def deferred_class_factory(model, attrs):
     overrides["Meta"] = Meta
     overrides["__module__"] = model.__module__
     overrides["_deferred"] = True
-    return type(str(name), (model,), overrides)
+    ret = type(str(name), (model,), overrides)
+    _cls_cache[cache_key] = ret
+    return ret
 
 # The above function is also used to unpickle model instances with deferred
 # fields.
