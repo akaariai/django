@@ -1,6 +1,7 @@
 from django.core.exceptions import FieldError
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import FieldDoesNotExist
+import copy
 
 class SQLEvaluator(object):
     def __init__(self, expression, query, allow_joins=True, reuse=None):
@@ -11,6 +12,17 @@ class SQLEvaluator(object):
         self.contains_aggregate = False
         self.reuse = reuse
         self.expression.prepare(self, query, allow_joins)
+
+    def clone(self):
+        clone = copy.copy(self)
+        clone.cols = []
+        for col in self.cols:
+            if hasattr(col, 'clone'):
+                clone.cols.append(col.clone())
+            else:
+                clone.cols.append(col)
+        return clone
+
 
     def prepare(self):
         return self

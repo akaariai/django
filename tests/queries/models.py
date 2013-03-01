@@ -454,3 +454,8 @@ class Program(models.Model):
 class Channel(models.Model):
     programs = models.ManyToManyField(Program)
     identifier = models.OneToOneField(Identifier)
+
+class MyObject(models.Model):
+    parent = models.ForeignKey('self', null=True, blank=True, related_name='children')
+    data = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)

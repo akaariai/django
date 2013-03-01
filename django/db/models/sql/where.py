@@ -291,8 +291,11 @@ class WhereNode(tree.Node):
             children=[], connector=self.connector, negated=self.negated)
         for child in self.children:
             if isinstance(child, tuple):
+                c3 = child[3]
+                if hasattr(c3, 'clone'):
+                    c3 = c3.clone()
                 clone.children.append(
-                    (child[0].clone(), child[1], child[2], child[3]))
+                    (child[0].clone(), child[1], child[2], c3))
             else:
                 clone.children.append(child.clone())
         return clone
