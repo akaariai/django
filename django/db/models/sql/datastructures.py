@@ -32,11 +32,6 @@ class Date(object):
         self.col = col
         self.lookup_type = lookup_type
 
-    def relabel_aliases(self, change_map):
-        c = self.col
-        if isinstance(c, (list, tuple)):
-            self.col = (change_map.get(c[0], c[0]), c[1])
-
     def as_sql(self, qn, connection):
         if isinstance(self.col, (list, tuple)):
             col = '%s.%s' % tuple([qn(c) for c in self.col])
@@ -52,11 +47,6 @@ class DateTime(object):
         self.col = col
         self.lookup_type = lookup_type
         self.tzname = tzname
-
-    def relabel_aliases(self, change_map):
-        c = self.col
-        if isinstance(c, (list, tuple)):
-            self.col = (change_map.get(c[0], c[0]), c[1])
 
     def as_sql(self, qn, connection):
         if isinstance(self.col, (list, tuple)):

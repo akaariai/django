@@ -18,17 +18,6 @@ class SQLEvaluator(object):
     def as_sql(self, qn, connection):
         return self.expression.evaluate(self, qn, connection)
 
-    def relabel_aliases(self, change_map):
-        new_cols = []
-        for node, col in self.cols:
-            if hasattr(col, "relabel_aliases"):
-                col.relabel_aliases(change_map)
-                new_cols.append((node, col))
-            else:
-                new_cols.append((node,
-                                (change_map.get(col[0], col[0]), col[1])))
-        self.cols = new_cols
-
     #####################################################
     # Vistor methods for initial expression preparation #
     #####################################################
@@ -51,11 +40,11 @@ class SQLEvaluator(object):
             try:
                 field, source, opts, join_list, path = query.setup_joins(
                     field_list, query.get_meta(),
-                    query.get_initial_alias(), self.reuse)
+                    query.get_initial_alias()[0], self.reuse)
                 target, _, join_list = query.trim_joins(source, join_list, path)
                 if self.reuse is not None:
                     self.reuse.update(join_list)
-                self.cols.append((node, (join_list[-1], target.column)))
+                self.cols.append((node, (query.alias_map[join_list[-1]].alias_id, target.column)))
             except FieldDoesNotExist:
                 raise FieldError("Cannot resolve keyword %r into field. "
                                  "Choices are: %s" % (self.name,

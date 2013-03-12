@@ -56,15 +56,16 @@ class DeleteQuery(Query):
         """
         innerq = query.query
         # Make sure the inner query has at least one table in use.
-        innerq.get_initial_alias()
+        inner_alias, inner_alias_id = innerq.get_initial_alias()
         # The same for our new query.
-        self.get_initial_alias()
+        outer_alias, outer_alias_id = self.get_initial_alias()
         innerq_used_tables = [t for t in innerq.tables
                               if innerq.alias_refcount[t]]
         if ((not innerq_used_tables or innerq_used_tables == self.tables)
             and not len(innerq.having)):
             # There is only the base table in use in the query, and there are
             # no aggregate filtering going on.
+            self.alias_redirects[inner_alias_id] = outer_alias
             self.where = innerq.where
         else:
             pk = query.model._meta.pk
@@ -77,7 +78,7 @@ class DeleteQuery(Query):
                 return
             else:
                 innerq.clear_select_clause()
-                innerq.select = [SelectInfo((self.get_initial_alias(), pk.column), None)]
+                innerq.select = [SelectInfo((inner_alias_id, pk.column), None)]
                 values = innerq
             where = self.where_class()
             where.add((Constraint(None, pk.column, pk), 'in', values), AND)
@@ -232,7 +233,7 @@ class DateQuery(Query):
             result = self.setup_joins(
                 field_name.split(LOOKUP_SEP),
                 self.get_meta(),
-                self.get_initial_alias(),
+                self.get_initial_alias()[0],
             )
         except FieldError:
             raise FieldDoesNotExist("%s has no field named '%s'" % (

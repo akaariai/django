@@ -1,8 +1,6 @@
 """
 Classes to represent the default SQL aggregate functions
 """
-import copy
-
 from django.db.models.fields import IntegerField, FloatField
 
 # Fake fields used to identify aggregate types in data-conversion operations.
@@ -62,15 +60,6 @@ class Aggregate(object):
                 tmp = tmp.source
 
         self.field = tmp
-
-    def clone(self):
-        # Different aggregates have different init methods, so use copy here
-        # deepcopy is not needed, as self.col is only changing variable.
-        return copy.copy(self)
-
-    def relabel_aliases(self, change_map):
-        if isinstance(self.col, (list, tuple)):
-            self.col = (change_map.get(self.col[0], self.col[0]), self.col[1])
 
     def as_sql(self, qn, connection):
         "Return the aggregate, rendered as SQL with parameters."

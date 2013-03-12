@@ -344,9 +344,8 @@ class Field(object):
         if hasattr(value, 'get_compiler'):
             value = value.get_compiler(connection=connection)
         if hasattr(value, 'as_sql') or hasattr(value, '_as_sql'):
-            # If the value has a relabel_aliases method, it will need to
-            # be invoked before the final SQL is evaluated
-            if hasattr(value, 'relabel_aliases'):
+            # Why this is needed?
+            if hasattr(value, 'evaluate_node'):
                 return value
             if hasattr(value, 'as_sql'):
                 sql, params = value.as_sql()

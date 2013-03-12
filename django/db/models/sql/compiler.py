@@ -2,7 +2,6 @@ import datetime
 
 from django.conf import settings
 from django.core.exceptions import FieldError
-from django.db import transaction
 from django.db.backends.util import truncate_name
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.query_utils import select_related_descend
@@ -46,6 +45,8 @@ class SQLCompiler(object):
         for table names. This avoids problems with some SQL dialects that treat
         quoted strings specially (e.g. PostgreSQL).
         """
+        if isinstance(name, int):
+            name = self.query.alias_redirects[name]
         if name in self.quote_cache:
             return self.quote_cache[name]
         if ((name in self.query.alias_map and name not in self.query.table_map) or
@@ -187,11 +188,12 @@ class SQLCompiler(object):
             only_load = self.deferred_to_columns()
             for col, _ in self.query.select:
                 if isinstance(col, (list, tuple)):
-                    alias, column = col
+                    alias_id, column = col
+                    alias = self.query.alias_redirects[alias_id]
                     table = self.query.alias_map[alias].table_name
                     if table in only_load and column not in only_load[table]:
                         continue
-                    r = '%s.%s' % (qn(alias), qn(column))
+                    r = '%s.%s' % (qn(alias_id), qn(column))
                     if with_aliases:
                         if col[1] in col_aliases:
                             c_alias = 'Col%d' % len(col_aliases)
@@ -266,7 +268,7 @@ class SQLCompiler(object):
         aliases = set()
         only_load = self.deferred_to_columns()
         if not start_alias:
-            start_alias = self.query.get_initial_alias()
+            start_alias, _ = self.query.get_initial_alias()
         # The 'seen_models' is used to optimize checking the needed parent
         # alias for a given field. This also includes None -> start_alias to
         # be used by local fields.
@@ -444,7 +446,7 @@ class SQLCompiler(object):
         must match. Executing SQL where this is not true is an error.
         """
         if not alias:
-            alias = self.query.get_initial_alias()
+            alias, _ = self.query.get_initial_alias()
         field, target, opts, joins, _ = self.query.setup_joins(
             pieces, opts, alias)
         # We will later on need to promote those joins that were added to the
@@ -503,7 +505,7 @@ class SQLCompiler(object):
             if not self.query.alias_refcount[alias]:
                 continue
             try:
-                name, alias, join_type, lhs, lhs_col, col, _, join_field = self.query.alias_map[alias]
+                name, alias, join_type, lhs, lhs_col, col, _, join_field, _ = self.query.alias_map[alias]
             except KeyError:
                 # Extra tables can end up in self.tables, but not in the
                 # alias_map if they aren't in a join. That's OK. We skip them.
@@ -524,7 +526,7 @@ class SQLCompiler(object):
                 result.append('%s%s%s' % (connector, qn(name), alias_str))
             first = False
         for t in self.query.extra_tables:
-            alias, unused = self.query.table_alias(t)
+            alias, _, _ = self.query.table_alias(t)
             # Only add the alias if it's not already present (the table_alias()
             # calls increments the refcount, so an alias refcount of one means
             # this is the only reference.
@@ -598,7 +600,7 @@ class SQLCompiler(object):
 
         if not opts:
             opts = self.query.get_meta()
-            root_alias = self.query.get_initial_alias()
+            root_alias, _ = self.query.get_initial_alias()
             self.query.related_select_cols = []
         only_load = self.query.get_loaded_field_names()
 

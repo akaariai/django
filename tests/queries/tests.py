@@ -25,7 +25,7 @@ from .models import (Annotation, Article, Author, Celebrity, Child, Cover,
     SpecialCategory, OneToOneCategory, NullableName, ProxyCategory,
     SingleObject, RelatedObject, ModelA, ModelD, Responsibility, Job,
     JobResponsibilities, BaseA, Identifier, Program, Channel, Page, Paragraph,
-    Chapter, Book)
+    Chapter, Book, MyObject)
 
 
 class BaseQuerysetTest(TestCase):
@@ -2661,3 +2661,13 @@ class ManyToManyExcludeTest(TestCase):
         self.assertNotIn(b1, q)
         self.assertIn(b2, q)
         self.assertIn(b3, q)
+
+class FooTest(TestCase):
+    def test_foo(self):
+        parents = MyObject.objects.filter(Q(parent=F('id'))).order_by('-created_at')[:10]
+        children = MyObject.objects.filter(parent__in=parents).exclude(parent=F('id'))
+        q1 = str(parents.query)
+        children.count()
+        q2 = str(parents.query)
+        self.assertEqual(q1, q2)
+        len(parents)

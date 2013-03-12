@@ -96,7 +96,10 @@ class Query(object):
     INNER = 'INNER JOIN'
     LOUTER = 'LEFT OUTER JOIN'
 
+    # A counter for all aliases created by Django.
+    alias_counter = 0
     alias_prefix = 'T'
+
     query_terms = QUERY_TERMS
     aggregates_module = base_aggregates_module
 
@@ -105,6 +108,7 @@ class Query(object):
     def __init__(self, model, where=WhereNode):
         self.model = model
         self.alias_refcount = {}
+        self.alias_redirects = {}
         # alias_map is the most important data structure regarding joins.
         # It's used for recording which joins exist in the query and what
         # type they are. The key is the alias of the joined table (possibly
@@ -143,7 +147,7 @@ class Query(object):
         self.select_related = False
 
         # SQL aggregate-related attributes
-        self.aggregates = SortedDict() # Maps alias -> SQL aggregate function
+        self.aggregates = SortedDict()  # Maps alias -> SQL aggregate function
         self.aggregate_select_mask = None
         self._aggregate_select_cache = None
 
@@ -268,6 +272,7 @@ class Query(object):
         obj.__class__ = klass or self.__class__
         obj.model = self.model
         obj.alias_refcount = self.alias_refcount.copy()
+        obj.alias_redirects = self.alias_redirects.copy()
         obj.alias_map = self.alias_map.copy()
         obj.table_map = self.table_map.copy()
         obj.join_map = self.join_map.copy()
@@ -294,8 +299,7 @@ class Query(object):
         obj.select_for_update_nowait = self.select_for_update_nowait
         obj.select_related = self.select_related
         obj.related_select_cols = []
-        obj.aggregates = SortedDict((k, v.clone())
-                                    for k, v in self.aggregates.items())
+        obj.aggregates = self.aggregates.copy()
         if self.aggregate_select_mask is None:
             obj.aggregate_select_mask = None
         else:
@@ -497,11 +501,13 @@ class Query(object):
         reuse = set() if conjunction else set(self.tables)
         # Base table must be present in the query - this is the same
         # table on both sides.
-        self.get_initial_alias()
+        lhs_alias, _ = self.get_initial_alias()
+        rhs_alias, rhs_alias_id = rhs.get_initial_alias()
+        self.alias_redirects[rhs_alias_id] = lhs_alias
         # Now, add the joins from rhs query into the new query (skipping base
         # table).
         for alias in rhs.tables[1:]:
-            table, _, join_type, lhs, lhs_col, col, nullable, join_field = rhs.alias_map[alias]
+            table, _, join_type, lhs, lhs_col, col, nullable, join_field, alias_id = rhs.alias_map[alias]
             promote = (join_type == self.LOUTER)
             # If the left side of the join was already relabeled, use the
             # updated alias.
@@ -510,6 +516,7 @@ class Query(object):
                 (lhs, table, lhs_col, col), reuse=reuse,
                 outer_if_first=not conjunction, nullable=nullable,
                 join_field=join_field)
+            self.alias_redirects[alias_id] = new_alias
             if promote:
                 self.promote_joins([new_alias])
             # We can't reuse the same join again in the query. If we have two
@@ -538,7 +545,6 @@ class Query(object):
         # one.
         if rhs.where:
             w = rhs.where.clone()
-            w.relabel_aliases(change_map)
             if not self.where:
                 # Since 'self' matches everything, add an explicit "include
                 # everything" where-constraint so that connections between the
@@ -553,15 +559,7 @@ class Query(object):
         self.where.add(w, connector)
 
         # Selection columns and extra extensions are those provided by 'rhs'.
-        self.select = []
-        for col, field in rhs.select:
-            if isinstance(col, (list, tuple)):
-                new_col = change_map.get(col[0], col[0]), col[1]
-                self.select.append(SelectInfo(new_col, field))
-            else:
-                item = col.clone()
-                item.relabel_aliases(change_map)
-                self.select.append(SelectInfo(item, field))
+        self.select = rhs.select[:]
 
         if connector == OR:
             # It would be nice to be able to handle this, but the queries don't
@@ -667,7 +665,6 @@ class Query(object):
             for model, values in six.iteritems(seen):
                 callback(target, model, values)
 
-
     def deferred_to_columns_cb(self, target, model, fields):
         """
         Callback used by deferred_to_columns(). The "target" parameter should
@@ -679,7 +676,6 @@ class Query(object):
         for field in fields:
             target[table].add(field.column)
 
-
     def table_alias(self, table_name, create=False):
         """
         Returns a table alias for the given table_name and whether this is a
@@ -690,21 +686,25 @@ class Query(object):
         """
         current = self.table_map.get(table_name)
         if not create and current:
-            alias = current[0]
+            alias, alias_id = current[0]
             self.alias_refcount[alias] += 1
-            return alias, False
+            return alias, alias_id, False
 
         # Create a new alias for this table.
+        # Hmmh, two threads might get the same ID...
+        alias_id = Query.alias_counter
+        Query.alias_counter += 1
         if current:
             alias = '%s%d' % (self.alias_prefix, len(self.alias_map) + 1)
-            current.append(alias)
+            current.append((alias, alias_id))
         else:
             # The first occurence of a table uses the table name directly.
             alias = table_name
-            self.table_map[alias] = [alias]
+            self.table_map[alias] = [(alias, alias_id)]
         self.alias_refcount[alias] = 1
+        self.alias_redirects[alias_id] = alias
         self.tables.append(alias)
-        return alias, True
+        return alias, alias_id, True
 
     def ref_alias(self, alias):
         """ Increases the reference count for this alias. """
@@ -770,24 +770,6 @@ class Query(object):
         alias_usage_counts), is not used by every child of the ORed filter,
         and isn't pre-existing needs to be promoted to LOUTER join.
 
-        Some examples (assume all joins used are nullable):
-            - existing filter: a__f1=foo
-            - add filter: b__f1=foo|b__f2=foo
-            In this case we should not promote either of the joins (using INNER
-            doesn't remove results). We correctly avoid join promotion, because
-            a is not used in this branch, and b is used two times.
-
-            - add filter a__f1=foo|b__f2=foo
-            In this case we should promote both a and b, otherwise they will
-            remove results. We will also correctly do that as both aliases are
-            used, and in addition both are used only once while there are two
-            filters.
-
-            - existing: a__f1=bar
-            - add filter: a__f2=foo|b__f2=foo
-            We will not promote a as it is previously used. If the join results
-            in null, the existing filter can't succeed.
-
         The above (and some more) are tested in queries.DisjunctionPromotionTests
         """
         for alias, use_count in alias_usage_counts.items():
@@ -802,23 +784,9 @@ class Query(object):
         """
         assert set(change_map.keys()).intersection(set(change_map.values())) == set()
 
-        def relabel_column(col):
-            if isinstance(col, (list, tuple)):
-                old_alias = col[0]
-                return (change_map.get(old_alias, old_alias), col[1])
-            else:
-                col.relabel_aliases(change_map)
-                return col
-        # 1. Update references in "select" (normal columns plus aliases),
-        # "group by", "where" and "having".
-        self.where.relabel_aliases(change_map)
-        self.having.relabel_aliases(change_map)
-        if self.group_by:
-            self.group_by = [relabel_column(col) for col in self.group_by]
-        self.select = [SelectInfo(relabel_column(s.col), s.field)
-                       for s in self.select]
-        self.aggregates = SortedDict(
-            (key, relabel_column(col)) for key, col in self.aggregates.items())
+        # 1. Update the alias_redirects
+        for ident, alias in self.alias_redirects.items():
+            self.alias_redirects[ident] = change_map.get(alias, alias)
 
         # 2. Rename the alias in the internal table/alias datastructures.
         for ident, aliases in self.join_map.items():
@@ -835,9 +803,9 @@ class Query(object):
             del self.alias_map[old_alias]
 
             table_aliases = self.table_map[alias_data.table_name]
-            for pos, alias in enumerate(table_aliases):
+            for pos, (alias, alias_id) in enumerate(table_aliases):
                 if alias == old_alias:
-                    table_aliases[pos] = new_alias
+                    table_aliases[pos] = (new_alias, alias_id)
                     break
             for pos, alias in enumerate(self.tables):
                 if alias == old_alias:
@@ -890,7 +858,7 @@ class Query(object):
             self.ref_alias(alias)
         else:
             alias = self.join((None, self.model._meta.db_table, None, None))
-        return alias
+        return alias, self.alias_map[alias].alias_id
 
     def count_active_tables(self):
         """
@@ -944,7 +912,7 @@ class Query(object):
             return alias
 
         # No reuse is possible, so we need a new alias.
-        alias, _ = self.table_alias(table, True)
+        alias, alias_id, _ = self.table_alias(table, True)
         if not lhs:
             # Not all tables need to be joined to anything. No join type
             # means the later columns are ignored.
@@ -956,7 +924,7 @@ class Query(object):
         else:
             join_type = self.INNER
         join = JoinInfo(table, alias, join_type, lhs, lhs_col, col, nullable,
-                        join_field)
+                        join_field, alias_id)
         self.alias_map[alias] = join
         if connection in self.join_map:
             self.join_map[connection] += (alias,)
@@ -1067,7 +1035,7 @@ class Query(object):
             # then we need to explore the joins that are required.
 
             field, source, opts, join_list, path = self.setup_joins(
-                field_list, opts, self.get_initial_alias())
+                field_list, opts, self.get_initial_alias()[0])
 
             # Process the join chain to see if it can be trimmed
             target, _, join_list = self.trim_joins(source, join_list, path)
@@ -1077,7 +1045,7 @@ class Query(object):
             # in order for zeros to be returned for those aggregates.
             self.promote_joins(join_list, True)
 
-            col = (join_list[-1], target.column)
+            col = (self.alias_map[join_list[-1]].alias_id, target.column)
         else:
             # The simplest cases. No joins required -
             # just reference the provided column alias.
@@ -1166,7 +1134,7 @@ class Query(object):
                 return
 
         opts = self.get_meta()
-        alias = self.get_initial_alias()
+        alias, _ = self.get_initial_alias()
         allow_many = not negate
 
         try:
@@ -1192,14 +1160,14 @@ class Query(object):
         # promotion must happen before join trimming to have the join type
         # information available when reusing joins.
         target, alias, join_list = self.trim_joins(target, join_list, path)
-
+        alias_id = self.alias_map[alias].alias_id
         if having_clause or force_having:
-            if (alias, target.column) not in self.group_by:
-                self.group_by.append((alias, target.column))
-            self.having.add((Constraint(alias, target.column, field), lookup_type, value),
+            if (alias_id, target.column) not in self.group_by:
+                self.group_by.append((alias_id, target.column))
+            self.having.add((Constraint(alias_id, target.column, field), lookup_type, value),
                 connector)
         else:
-            self.where.add((Constraint(alias, target.column, field), lookup_type, value),
+            self.where.add((Constraint(alias_id, target.column, field), lookup_type, value),
                 connector)
 
         if negate:
@@ -1215,7 +1183,7 @@ class Query(object):
                 # (col IS NULL OR col != someval)
                 #   <=>
                 # NOT (col IS NOT NULL AND col = someval).
-                self.where.add((Constraint(alias, target.column, None), 'isnull', False), AND)
+                self.where.add((Constraint(alias_id, target.column, None), 'isnull', False), AND)
 
     def add_q(self, q_object, used_aliases=None, force_having=False):
         """
@@ -1541,7 +1509,7 @@ class Query(object):
         Adds the given (model) fields to the select set. The field names are
         added in the order specified.
         """
-        alias = self.get_initial_alias()
+        alias, alias_id = self.get_initial_alias()
         opts = self.get_meta()
 
         try:
@@ -1559,7 +1527,8 @@ class Query(object):
                         col = join.lhs_join_col
                         joins = joins[:-1]
                 self.promote_joins(joins[1:])
-                self.select.append(SelectInfo((final_alias, col), field))
+                alias_id = self.alias_map[final_alias].alias_id
+                self.select.append(SelectInfo((alias_id, col), field))
         except MultiJoin:
             raise FieldError("Invalid field name: '%s'" % name)
         except FieldError:
@@ -1849,7 +1818,8 @@ class Query(object):
                 select_field = path.to_field
                 self.unref_alias(self.tables[join_pos])
                 join_pos += 1
-        self.select = [SelectInfo((select_alias, select_field.column), select_field)]
+        select_alias_id = self.alias_map[select_alias].alias_id
+        self.select = [SelectInfo((select_alias_id, select_field.column), select_field)]
         self.remove_inherited_models()
         return join_pos
 
