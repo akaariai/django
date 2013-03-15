@@ -435,7 +435,11 @@ class SQLiteCursorWrapper(Database.Cursor):
     """
     def execute(self, query, params=()):
         query = self.convert_query(query)
-        return Database.Cursor.execute(self, query, params)
+        try:
+            return Database.Cursor.execute(self, query, params)
+        except:
+            print(query)
+            raise
 
     def executemany(self, query, param_list):
         query = self.convert_query(query)

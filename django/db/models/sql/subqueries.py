@@ -8,7 +8,7 @@ from django.db import connections
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import DateField, DateTimeField, FieldDoesNotExist
 from django.db.models.sql.constants import *
-from django.db.models.sql.datastructures import Date, DateTime
+from django.db.models.sql.datastructures import Date, DateTime, Col
 from django.db.models.sql.query import Query
 from django.db.models.sql.where import AND, Constraint
 from django.utils.functional import Promise
@@ -42,9 +42,10 @@ class DeleteQuery(Query):
         """
         if not field:
             field = self.model._meta.pk
+        alias = self.get_initial_alias()
         for offset in range(0, len(pk_list), GET_ITERATOR_CHUNK_SIZE):
             where = self.where_class()
-            where.add((Constraint(None, field.column, field), 'in',
+            where.add((Constraint(Col(field, alias), field), 'in',
                        pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]), AND)
             self.do_query(self.model._meta.db_table, where, using=using)
 
@@ -56,9 +57,9 @@ class DeleteQuery(Query):
         """
         innerq = query.query
         # Make sure the inner query has at least one table in use.
-        innerq.get_initial_alias()
+        innerq_alias = innerq.get_initial_alias()
         # The same for our new query.
-        self.get_initial_alias()
+        alias = self.get_initial_alias()
         innerq_used_tables = [t for t in innerq.tables
                               if innerq.alias_refcount[t]]
         if ((not innerq_used_tables or innerq_used_tables == self.tables)
@@ -77,10 +78,10 @@ class DeleteQuery(Query):
                 return
             else:
                 innerq.clear_select_clause()
-                innerq.select = [SelectInfo((self.get_initial_alias(), pk.column), None)]
+                innerq.select = [SelectInfo(Col(pk, innerq_alias), None)]
                 values = innerq
             where = self.where_class()
-            where.add((Constraint(None, pk.column, pk), 'in', values), AND)
+            where.add((Constraint(Col(pk, alias), pk), 'in', values), AND)
             self.where = where
         self.get_compiler(using).execute_sql(None)
 
@@ -114,9 +115,10 @@ class UpdateQuery(Query):
     def update_batch(self, pk_list, values, using):
         pk_field = self.model._meta.pk
         self.add_update_values(values)
+        alias = self.get_initial_alias()
         for offset in range(0, len(pk_list), GET_ITERATOR_CHUNK_SIZE):
             self.where = self.where_class()
-            self.where.add((Constraint(None, pk_field.column, pk_field), 'in',
+            self.where.add((Constraint(Col(pk_field, alias), pk_field), 'in',
                             pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]),
                            AND)
             self.get_compiler(using).execute_sql(None)

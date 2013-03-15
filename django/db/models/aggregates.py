@@ -36,7 +36,7 @@ class Aggregate(object):
         return '%s__%s' % (self.lookup, self.name.lower())
     default_alias = property(_default_alias)
 
-    def add_to_query(self, query, alias, col, source, is_summary):
+    def add_to_query(self, query, alias, col, is_summary):
         """Add the aggregate to the nominated query.
 
         This method is used to convert the generic Aggregate definition into a
@@ -45,17 +45,14 @@ class Aggregate(object):
          * query is the backend-specific query instance to which the aggregate
            is to be added.
          * col is a column reference describing the subject field
-           of the aggregate. It can be an alias, or a tuple describing
-           a table and column name.
-         * source is the underlying field or aggregate definition for
-           the column reference. If the aggregate is not an ordinal or
-           computed type, this reference is used to determine the coerced
-           output type of the aggregate.
+           of the aggregate. It is something that has as_sql() and
+           relabeled_clone() methods, and field attribute describing the
+           result type of the column.
          * is_summary is a boolean that is set True if the aggregate is a
            summary value rather than an annotation.
         """
         klass = getattr(query.aggregates_module, self.name)
-        aggregate = klass(col, source=source, is_summary=is_summary, **self.extra)
+        aggregate = klass(col, is_summary=is_summary, **self.extra)
         query.aggregates[alias] = aggregate
 
 class Avg(Aggregate):

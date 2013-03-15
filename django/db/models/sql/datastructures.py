@@ -3,6 +3,41 @@ Useful auxilliary data structures for query construction. Not useful outside
 the SQL domain.
 """
 
+class Col(object):
+    def __init__(self, field, alias):
+        self.field = field
+        self.alias = alias
+
+    def as_sql(self, qn, connection):
+        return '%s.%s' % (qn(self.alias), qn(self.field.column)), []
+
+    def relabeled_clone(self, relabels):
+        if self.alias in relabels:
+            return Col(self.field, relabels[self.alias])
+        else:
+            return self
+
+class Star(object):
+    field = None
+
+    def relabeled_clone(self, relabels):
+        return self
+
+    def as_sql(self, qn, connection):
+        return '*', []
+
+class Ref(object):
+
+    def __init__(self, ref, field):
+        self.ref = ref
+        self.field = field
+
+    def relabeled_clone(self, relabels):
+        return self
+
+    def as_sql(self, qn, connection):
+        return qn(self.ref), []
+
 class EmptyResultSet(Exception):
     pass
 
@@ -31,6 +66,7 @@ class Date(object):
     def __init__(self, col, lookup_type):
         self.col = col
         self.lookup_type = lookup_type
+        self.field = None
 
     def relabeled_clone(self, change_map):
         return self.__class__((change_map.get(self.col[0], self.col[0]), self.col[1]))
@@ -50,6 +86,7 @@ class DateTime(object):
         self.col = col
         self.lookup_type = lookup_type
         self.tzname = tzname
+        self.field = None
 
     def relabeled_clone(self, change_map):
         return self.__class__((change_map.get(self.col[0], self.col[0]), self.col[1]))

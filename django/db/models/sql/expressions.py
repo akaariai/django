@@ -47,25 +47,8 @@ class SQLEvaluator(object):
                 child.prepare(self, query, allow_joins)
 
     def prepare_leaf(self, node, query, allow_joins):
-        if not allow_joins and LOOKUP_SEP in node.name:
-            raise FieldError("Joined field references are not permitted in this query")
-
-        field_list = node.name.split(LOOKUP_SEP)
-        if node.name in query.aggregates:
-            self.cols.append((node, query.aggregate_select[node.name]))
-        else:
-            try:
-                field, source, opts, join_list, path = query.setup_joins(
-                    field_list, query.get_meta(),
-                    query.get_initial_alias(), self.reuse)
-                target, _, join_list = query.trim_joins(source, join_list, path)
-                if self.reuse is not None:
-                    self.reuse.update(join_list)
-                self.cols.append((node, (join_list[-1], target.column)))
-            except FieldDoesNotExist:
-                raise FieldError("Cannot resolve keyword %r into field. "
-                                 "Choices are: %s" % (self.name,
-                                                      [f.name for f in self.opts.fields]))
+        self.cols.append((node, query.resolve_ref(node.name, reuse=self.reuse,
+                                                  allow_joins=allow_joins)))
 
     ##################################################
     # Vistor methods for final expression evaluation #

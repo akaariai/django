@@ -17,7 +17,7 @@ class Aggregate(object):
     is_computed = False
     sql_template = '%(function)s(%(field)s)'
 
-    def __init__(self, col, source=None, is_summary=False, **extra):
+    def __init__(self, col, is_summary=False, **extra):
         """Instantiate an SQL aggregate
 
          * col is a column reference describing the subject field
@@ -43,9 +43,9 @@ class Aggregate(object):
 
         """
         self.col = col
-        self.source = source
         self.is_summary = is_summary
         self.extra = extra
+        self.source = self.col.field
 
         # Follow the chain of aggregate sources back until you find an
         # actual field, or an aggregate that forces a particular output
@@ -65,21 +65,14 @@ class Aggregate(object):
 
     def relabeled_clone(self, change_map):
         clone = copy.copy(self)
-        if isinstance(self.col, (list, tuple)):
-            clone.col = (change_map.get(self.col[0], self.col[0]), self.col[1])
+        clone.col = self.col.relabeled_clone(change_map)
         return clone
 
     def as_sql(self, qn, connection):
         "Return the aggregate, rendered as SQL with parameters."
         params = []
 
-        if hasattr(self.col, 'as_sql'):
-            field_name, params = self.col.as_sql(qn, connection)
-        elif isinstance(self.col, (list, tuple)):
-            field_name = '.'.join([qn(c) for c in self.col])
-        else:
-            field_name = self.col
-
+        field_name, params = self.col.as_sql(qn, connection)
         substitutions = {
             'function': self.sql_function,
             'field': field_name

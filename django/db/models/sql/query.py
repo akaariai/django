@@ -23,7 +23,7 @@ from django.db.models.related import PathInfo
 from django.db.models.sql import aggregates as base_aggregates_module
 from django.db.models.sql.constants import (QUERY_TERMS, ORDER_DIR, SINGLE,
         ORDER_PATTERN, JoinInfo, SelectInfo)
-from django.db.models.sql.datastructures import EmptyResultSet, Empty, MultiJoin
+from django.db.models.sql.datastructures import EmptyResultSet, Empty, MultiJoin, Col, Star, Ref
 from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.where import (WhereNode, Constraint, EverythingNode,
     ExtraWhere, AND, OR, EmptyWhere)
@@ -379,9 +379,10 @@ class Query(object):
 
             # Remove any aggregates marked for reduction from the subquery
             # and move them to the outer AggregateQuery.
+            relabels = dict((alias, 'subquery') for alias in self.tables)
             for alias, aggregate in self.aggregate_select.items():
                 if aggregate.is_summary:
-                    query.aggregate_select[alias] = aggregate
+                    query.aggregate_select[alias] = aggregate.relabeled_clone(relabels)
                     del obj.aggregate_select[alias]
 
             try:
@@ -1010,48 +1011,16 @@ class Query(object):
         """
         Adds a single aggregate expression to the Query
         """
-        opts = model._meta
-        field_list = aggregate.lookup.split(LOOKUP_SEP)
-        if len(field_list) == 1 and aggregate.lookup in self.aggregates:
-            # Aggregate is over an annotation
-            field_name = field_list[0]
-            col = field_name
-            source = self.aggregates[field_name]
+        if aggregate.lookup in self.aggregates:
             if not is_summary:
                 raise FieldError("Cannot compute %s('%s'): '%s' is an aggregate" % (
-                    aggregate.name, field_name, field_name))
-        elif ((len(field_list) > 1) or
-            (field_list[0] not in [i.name for i in opts.fields]) or
-            self.group_by is None or
-            not is_summary):
-            # If:
-            #   - the field descriptor has more than one part (foo__bar), or
-            #   - the field descriptor is referencing an m2m/m2o field, or
-            #   - this is a reference to a model field (possibly inherited), or
-            #   - this is an annotation over a model field
-            # then we need to explore the joins that are required.
-
-            field, source, opts, join_list, path = self.setup_joins(
-                field_list, opts, self.get_initial_alias())
-
-            # If the aggregate references a model or field that requires a join,
-            # those joins must be LEFT OUTER - empty join rows must be returned
-            # in order for zeros to be returned for those aggregates.
-            self.promote_joins(join_list, True)
-
-            # Process the join chain to see if it can be trimmed
-            target, _, join_list = self.trim_joins(source, join_list, path)
-
-            col = (join_list[-1], target.column)
+                    aggregate.name, aggregate.lookup, aggregate.lookup))
+            col = Ref(aggregate.lookup, self.aggregates[aggregate.lookup].source)
         else:
-            # The simplest cases. No joins required -
-            # just reference the provided column alias.
-            field_name = field_list[0]
-            source = opts.get_field(field_name)
-            col = field_name
-
+            col = self.resolve_ref(
+                aggregate.lookup, promote=True)
         # Add the aggregate to the query
-        aggregate.add_to_query(self, alias, col=col, source=source, is_summary=is_summary)
+        aggregate.add_to_query(self, alias, col=col, is_summary=is_summary)
 
     def build_filter(self, filter_expr, branch_negated=False, current_negated=False,
                      can_reuse=None):
@@ -1156,7 +1125,7 @@ class Query(object):
         # promotion must happen before join trimming to have the join type
         # information available when reusing joins.
         target, alias, join_list = self.trim_joins(target, join_list, path)
-        clause.add((Constraint(alias, target.column, field), lookup_type, value),
+        clause.add((Constraint(Col(target, alias), field), lookup_type, value),
                    AND)
         if current_negated and (lookup_type != 'isnull' or value is False):
             self.promote_joins(join_list)
@@ -1171,7 +1140,7 @@ class Query(object):
                 # (col IS NULL OR col != someval)
                 #   <=>
                 # NOT (col IS NOT NULL AND col = someval).
-                clause.add((Constraint(alias, target.column, None), 'isnull', False), AND)
+                clause.add((Constraint(Col(target, alias), None), 'isnull', False), AND)
         return clause
 
     def add_filter(self, filter_clause):
@@ -1419,6 +1388,28 @@ class Query(object):
                 break
         return target, joins[-1], joins
 
+    def resolve_ref(self, name, reuse=None, allow_joins=True, allow_m2m=True,
+                    allow_explicit_fk=False, promote=False):
+        if name in self.aggregates:
+            return self.aggregates[name]
+        try:
+            field, target, _, joins, path = self.setup_joins(
+                name.split(LOOKUP_SEP), self.get_meta(), self.get_initial_alias(), can_reuse=reuse,
+                allow_many=allow_m2m, allow_explicit_fk=allow_explicit_fk)
+        except FieldError:
+            raise FieldError("Cannot resolve keyword %r into field. "
+                             "Choices are: %s" % (name,
+                                                  [f.name for f in self.get_meta().fields]))
+        if reuse is not None:
+            reuse.update(joins)
+        if promote:
+            self.promote_joins(joins)
+        target, _, joins = self.trim_joins(target, joins, path)
+        if len(joins) > 1 and not allow_joins:
+            raise FieldError("Joined field references are not permitted in this query")
+
+        return Col(target, joins[-1])
+
     def split_exclude(self, filter_expr, prefix, can_reuse, names_with_path):
         """
         When doing an exclude against any kind of N-to-many relation, we need
@@ -1546,17 +1537,13 @@ class Query(object):
         Adds the given (model) fields to the select set. The field names are
         added in the order specified.
         """
-        alias = self.get_initial_alias()
-        opts = self.get_meta()
-
         try:
             for name in field_names:
-                field, target, u2, joins, path = self.setup_joins(
-                        name.split(LOOKUP_SEP), opts, alias, None, allow_m2m,
-                        True)
-                self.promote_joins(joins)
-                target, _, joins = self.trim_joins(target, joins, path)
-                self.select.append(SelectInfo((joins[-1], target.column), field))
+                ref = self.resolve_ref(
+                    name, allow_m2m=allow_m2m, allow_explicit_fk=True,
+                    promote=True
+                )
+                self.select.append(SelectInfo(ref, ref.field))
         except MultiJoin:
             raise FieldError("Invalid field name: '%s'" % name)
         except FieldError:
@@ -1565,6 +1552,7 @@ class Query(object):
                 # from the model on which the lookup failed.
                 raise
             else:
+                opts = self.get_meta()
                 names = sorted(opts.get_all_field_names() + list(self.extra)
                                + list(self.aggregate_select))
                 raise FieldError("Cannot resolve keyword %r into field. "
@@ -1622,7 +1610,7 @@ class Query(object):
         """
         if not self.distinct:
             if not self.select:
-                count = self.aggregates_module.Count('*', is_summary=True)
+                count = self.aggregates_module.Count(Star(), is_summary=True)
             else:
                 assert len(self.select) == 1, \
                         "Cannot add count col with multiple cols in 'select': %r" % self.select
@@ -1638,8 +1626,8 @@ class Query(object):
                 # counts need a sub-query -- see get_count() for details.
                 assert len(self.select) == 1, \
                         "Cannot add count col with multiple cols in 'select'."
-
-                count = self.aggregates_module.Count(self.select[0].col, distinct=True)
+                count = self.aggregates_module.Count(self.select[0].col,
+                                                     distinct=True)
             # Distinct handling is done in Count(), so don't do it at this
             # level.
             self.distinct = False

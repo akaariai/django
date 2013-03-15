@@ -158,7 +158,7 @@ class WhereNode(tree.Node):
                 cols.extend(child.get_cols())
             else:
                 if isinstance(child[0], Constraint):
-                    cols.append((child[0].alias, child[0].col))
+                    cols.append((child[0].col.alias, child[0].col.field.column))
                 if hasattr(child[3], 'get_cols'):
                     cols.extend(child[3].get_cols())
         return cols
@@ -342,8 +342,8 @@ class Constraint(object):
     An object that can be passed to WhereNode.add() and knows how to
     pre-process itself prior to including in the WhereNode.
     """
-    def __init__(self, alias, col, field):
-        self.alias, self.col, self.field = alias, col, field
+    def __init__(self, col, field):
+        self.col, self.field = col, field
 
     def __getstate__(self):
         """Save the state of the Constraint for pickling.
@@ -396,13 +396,13 @@ class Constraint(object):
         except ObjectDoesNotExist:
             raise EmptyShortCircuit
 
-        return (self.alias, self.col, db_type), params
+        return (self.col.alias, self.col.field.column, db_type), params
 
     def relabeled_clone(self, change_map):
-        if self.alias not in change_map:
+        if self.col.alias not in change_map:
             return self
         else:
             new = Empty()
             new.__class__ = self.__class__
-            new.alias, new.col, new.field = change_map[self.alias], self.col, self.field
+            new.col, new.field = self.col.relabeled_clone(change_map), self.field
             return new
