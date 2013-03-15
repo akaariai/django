@@ -33,7 +33,7 @@ class SQLCompiler(object):
         # cleaned. We are not using a clone() of the query here.
         """
         if not self.query.tables:
-            self.query.join((None, self.query.model._meta.db_table, None, None))
+            self.query.get_initial_alias()
         if (not self.query.select and self.query.default_cols and not
                 self.query.included_inherited_models):
             self.query.setup_inherited_models()
@@ -314,11 +314,9 @@ class SQLCompiler(object):
 
         for name in self.query.distinct_fields:
             parts = name.split(LOOKUP_SEP)
-            field, col, alias, _, _ = self._setup_joins(parts, opts, None)
-            col, alias = self._final_join_removal(col, alias)
+            col, alias = self._setup_joins(parts, opts)
             result.append("%s.%s" % (qn(alias), qn2(col)))
         return result
-
 
     def get_ordering(self):
         """
@@ -387,11 +385,13 @@ class SQLCompiler(object):
             elif get_order_dir(field)[0] not in self.query.extra_select:
                 # 'col' is of the form 'field' or 'field1__field2' or
                 # '-field1__field2__field', etc.
-                for table, col, order in self.find_ordering_name(field,
-                        self.query.model._meta, default_order=asc):
-                    if (table, col) not in processed_pairs:
-                        elt = '%s.%s' % (qn(table), qn2(col))
-                        processed_pairs.add((table, col))
+                opts = self.query.get_meta()
+                for order, path in self.expand_ordering(
+                        field, opts, set(), default_order=asc):
+                    col, alias = self._setup_joins(path.split(LOOKUP_SEP), opts)
+                    if (alias, col) not in processed_pairs:
+                        elt = '%s.%s' % (qn(alias), qn2(col))
+                        processed_pairs.add((alias, col))
                         if distinct and elt not in select_aliases:
                             ordering_aliases.append(elt)
                         result.append('%s %s' % (elt, order))
@@ -405,8 +405,7 @@ class SQLCompiler(object):
         self.query.ordering_aliases = ordering_aliases
         return result, group_by
 
-    def find_ordering_name(self, name, opts, alias=None, default_order='ASC',
-            already_seen=None):
+    def expand_ordering(self, name, opts, already_seen, default_order='ASC'):
         """
         Returns the table alias (the name might be ambiguous, the alias will
         not be) and column name for ordering by the given 'name' parameter.
@@ -414,28 +413,25 @@ class SQLCompiler(object):
         """
         name, order = get_order_dir(name, default_order)
         pieces = name.split(LOOKUP_SEP)
-        field, col, alias, joins, opts = self._setup_joins(pieces, opts, alias)
+        path, final_field, target = self.query.names_to_path(pieces, opts, True, False)
+        if not path:
+            return [(order, name)]
+        to_opts = path[-1].to_opts
+        if (opts, path[-1].to_opts) in already_seen:
+            raise FieldError('Infinite loop caused by ordering.')
+        elif final_field.rel and path and to_opts.ordering:
+            already_seen.add((opts, to_opts))
+            names = []
+            for to_opts_order in to_opts.ordering:
+                additions = self.expand_ordering(
+                    to_opts_order, to_opts, already_seen, order)
+                names.extend([(next_order, name + LOOKUP_SEP + addition)
+                              for next_order, addition in additions])
+        else:
+            names = [(order, name)]
+        return names
 
-        # If we get to this point and the field is a relation to another model,
-        # append the default ordering for that model.
-        if field.rel and len(joins) > 1 and opts.ordering:
-            # Firstly, avoid infinite loops.
-            if not already_seen:
-                already_seen = set()
-            join_tuple = tuple([self.query.alias_map[j].table_name for j in joins])
-            if join_tuple in already_seen:
-                raise FieldError('Infinite loop caused by ordering.')
-            already_seen.add(join_tuple)
-
-            results = []
-            for item in opts.ordering:
-                results.extend(self.find_ordering_name(item, opts, alias,
-                        order, already_seen))
-            return results
-        col, alias = self._final_join_removal(col, alias)
-        return [(alias, col, order)]
-
-    def _setup_joins(self, pieces, opts, alias):
+    def _setup_joins(self, pieces, opts):
         """
         A helper method for get_ordering and get_distinct. This method will
         call query.setup_joins, handle refcounts and then promote the joins.
@@ -444,45 +440,19 @@ class SQLCompiler(object):
         columns on same input, as the prefixes of get_ordering and get_distinct
         must match. Executing SQL where this is not true is an error.
         """
-        if not alias:
-            alias = self.query.get_initial_alias()
-        field, target, opts, joins, _ = self.query.setup_joins(
+        alias = self.query.get_initial_alias()
+        existing_tables = self.query.tables[:]
+        field, target, opts, joins, path = self.query.setup_joins(
             pieces, opts, alias)
         # We will later on need to promote those joins that were added to the
         # query afresh above.
-        joins_to_promote = [j for j in joins if self.query.alias_refcount[j] < 2]
-        alias = joins[-1]
-        col = target.column
-        if not field.rel:
-            # To avoid inadvertent trimming of a necessary alias, use the
-            # refcount to show that we are referencing a non-relation field on
-            # the model.
-            self.query.ref_alias(alias)
-
+        joins_to_promote = [j for j in joins if j not in existing_tables]
         # Must use left outer joins for nullable fields and their relations.
         # Ordering or distinct must not affect the returned set, and INNER
         # JOINS for nullable fields could do this.
         self.query.promote_joins(joins_to_promote)
-        return field, col, alias, joins, opts
-
-    def _final_join_removal(self, col, alias):
-        """
-        A helper method for get_distinct and get_ordering. This method will
-        trim extra not-needed joins from the tail of the join chain.
-
-        This is very similar to what is done in trim_joins, but we will
-        trim LEFT JOINS here. It would be a good idea to consolidate this
-        method and query.trim_joins().
-        """
-        if alias:
-            while 1:
-                join = self.query.alias_map[alias]
-                if col != join.rhs_join_col:
-                    break
-                self.query.unref_alias(alias)
-                alias = join.lhs_alias
-                col = join.lhs_join_col
-        return col, alias
+        target, _, joins = self.query.trim_joins(target, joins, path)
+        return target.column, joins[-1]
 
     def get_from_clause(self):
         """

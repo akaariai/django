@@ -1034,13 +1034,13 @@ class Query(object):
             field, source, opts, join_list, path = self.setup_joins(
                 field_list, opts, self.get_initial_alias())
 
-            # Process the join chain to see if it can be trimmed
-            target, _, join_list = self.trim_joins(source, join_list, path)
-
             # If the aggregate references a model or field that requires a join,
             # those joins must be LEFT OUTER - empty join rows must be returned
             # in order for zeros to be returned for those aggregates.
             self.promote_joins(join_list, True)
+
+            # Process the join chain to see if it can be trimmed
+            target, _, join_list = self.trim_joins(source, join_list, path)
 
             col = (join_list[-1], target.column)
         else:
@@ -1551,20 +1551,12 @@ class Query(object):
 
         try:
             for name in field_names:
-                field, target, u2, joins, u3 = self.setup_joins(
+                field, target, u2, joins, path = self.setup_joins(
                         name.split(LOOKUP_SEP), opts, alias, None, allow_m2m,
                         True)
-                final_alias = joins[-1]
-                col = target.column
-                if len(joins) > 1:
-                    join = self.alias_map[final_alias]
-                    if col == join.rhs_join_col:
-                        self.unref_alias(final_alias)
-                        final_alias = join.lhs_alias
-                        col = join.lhs_join_col
-                        joins = joins[:-1]
-                self.promote_joins(joins[1:])
-                self.select.append(SelectInfo((final_alias, col), field))
+                self.promote_joins(joins)
+                target, _, joins = self.trim_joins(target, joins, path)
+                self.select.append(SelectInfo((joins[-1], target.column), field))
         except MultiJoin:
             raise FieldError("Invalid field name: '%s'" % name)
         except FieldError:
