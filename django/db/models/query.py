@@ -41,6 +41,7 @@ class QuerySet(object):
         self._db = using
         self.query = query or sql.Query(self.model)
         self._result_cache = None
+        self._iter = None
         self._sticky_filter = False
         self._for_write = False
         self._prefetch_related_lookups = []
@@ -103,16 +104,33 @@ class QuerySet(object):
         return iter(self._result_cache)
 
     def __bool__(self):
-        self._fetch_all()
+        if self._result_cache is None:
+            self._iter = self.iterator()
+            self._result_cache = []
+            try:
+                self._result_cache.append(next(self._iter))
+            except StopIteration:
+                self._iter = None
+                return False
         return bool(self._result_cache)
 
     def __nonzero__(self):      # Python 2 compatibility
         return type(self).__bool__(self)
 
     def __contains__(self, val):
-        self._fetch_all()
-        return val in self._result_cache
-
+        if self._result_cache is None:
+            self._iter = self.iterator()
+            self._result_cache = []
+        if val in self._result_cache:
+            return True
+        if self._iter is None:
+            return False
+        for obj in self._iter:
+            self._result_cache.append(obj)
+            if val == obj:
+                return True
+        self._iter = None
+        return False
 
     def __getitem__(self, k):
         """
@@ -126,6 +144,7 @@ class QuerySet(object):
                 "Negative indexing is not supported."
 
         if self._result_cache is not None:
+            self._fetch_all()
             return self._result_cache[k]
 
         if isinstance(k, slice):
@@ -176,98 +195,105 @@ class QuerySet(object):
         An iterator over the results from applying this QuerySet to the
         database.
         """
-        fill_cache = False
-        if connections[self.db].features.supports_select_related:
-            fill_cache = self.query.select_related
-        if isinstance(fill_cache, dict):
-            requested = fill_cache
-        else:
-            requested = None
-        max_depth = self.query.max_depth
-
-        extra_select = list(self.query.extra_select)
-        aggregate_select = list(self.query.aggregate_select)
-
-        only_load = self.query.get_loaded_field_names()
-        if not fill_cache:
-            fields = self.model._meta.fields
-
-        load_fields = []
-        # If only/defer clauses have been specified,
-        # build the list of fields that are to be loaded.
-        if only_load:
-            for field, model in self.model._meta.get_fields_with_model():
-                if model is None:
-                    model = self.model
-                try:
-                    if field.name in only_load[model]:
-                        # Add a field that has been explicitly included
-                        load_fields.append(field.name)
-                except KeyError:
-                    # Model wasn't explicitly listed in the only_load table
-                    # Therefore, we need to load all fields from this model
-                    load_fields.append(field.name)
-
-        index_start = len(extra_select)
-        aggregate_start = index_start + len(load_fields or self.model._meta.fields)
-
-        skip = None
-        if load_fields and not fill_cache:
-            # Some fields have been deferred, so we have to initialise
-            # via keyword arguments.
-            skip = set()
-            init_list = []
-            for field in fields:
-                if field.name not in load_fields:
-                    skip.add(field.attname)
-                else:
-                    init_list.append(field.attname)
-            model_cls = deferred_class_factory(self.model, skip)
-
-        # Cache db and model outside the loop
-        db = self.db
-        model = self.model
-        compiler = self.query.get_compiler(using=db)
-        if fill_cache:
-            klass_info = get_klass_info(model, max_depth=max_depth,
-                                        requested=requested, only_load=only_load)
-        for row in compiler.results_iter():
-            if fill_cache:
-                obj, _ = get_cached_row(row, index_start, db, klass_info,
-                                        offset=len(aggregate_select))
+        try:
+            fill_cache = False
+            if connections[self.db].features.supports_select_related:
+                fill_cache = self.query.select_related
+            if isinstance(fill_cache, dict):
+                requested = fill_cache
             else:
-                # Omit aggregates in object creation.
-                row_data = row[index_start:aggregate_start]
-                if skip:
-                    obj = model_cls(**dict(zip(init_list, row_data)))
-                else:
-                    obj = model(*row_data)
+                requested = None
+            max_depth = self.query.max_depth
 
-                # Store the source database of the object
-                obj._state.db = db
-                # This object came from the database; it's not being added.
-                obj._state.adding = False
+            extra_select = list(self.query.extra_select)
+            aggregate_select = list(self.query.aggregate_select)
 
-            if extra_select:
-                for i, k in enumerate(extra_select):
-                    setattr(obj, k, row[i])
+            only_load = self.query.get_loaded_field_names()
+            if not fill_cache:
+                fields = self.model._meta.fields
 
-            # Add the aggregates to the model
-            if aggregate_select:
-                for i, aggregate in enumerate(aggregate_select):
-                    setattr(obj, aggregate, row[i + aggregate_start])
-
-            # Add the known related objects to the model, if there are any
-            if self._known_related_objects:
-                for field, rel_objs in self._known_related_objects.items():
-                    pk = getattr(obj, field.get_attname())
+            load_fields = []
+            # If only/defer clauses have been specified,
+            # build the list of fields that are to be loaded.
+            if only_load:
+                for field, model in self.model._meta.get_fields_with_model():
+                    if model is None:
+                        model = self.model
                     try:
-                        rel_obj = rel_objs[pk]
+                        if field.name in only_load[model]:
+                            # Add a field that has been explicitly included
+                            load_fields.append(field.name)
                     except KeyError:
-                        pass               # may happen in qs1 | qs2 scenarios
+                        # Model wasn't explicitly listed in the only_load table
+                        # Therefore, we need to load all fields from this model
+                        load_fields.append(field.name)
+
+            index_start = len(extra_select)
+            aggregate_start = index_start + len(load_fields or self.model._meta.fields)
+
+            skip = None
+            if load_fields and not fill_cache:
+                # Some fields have been deferred, so we have to initialise
+                # via keyword arguments.
+                skip = set()
+                init_list = []
+                for field in fields:
+                    if field.name not in load_fields:
+                        skip.add(field.attname)
                     else:
-                        setattr(obj, field.name, rel_obj)
-            yield obj
+                        init_list.append(field.attname)
+                model_cls = deferred_class_factory(self.model, skip)
+
+            # Cache db and model outside the loop
+            db = self.db
+            model = self.model
+            compiler = self.query.get_compiler(using=db)
+            if fill_cache:
+                klass_info = get_klass_info(model, max_depth=max_depth,
+                                            requested=requested, only_load=only_load)
+            for row in compiler.results_iter():
+                if fill_cache:
+                    obj, _ = get_cached_row(row, index_start, db, klass_info,
+                                            offset=len(aggregate_select))
+                else:
+                    # Omit aggregates in object creation.
+                    row_data = row[index_start:aggregate_start]
+                    if skip:
+                        obj = model_cls(**dict(zip(init_list, row_data)))
+                    else:
+                        obj = model(*row_data)
+
+                    # Store the source database of the object
+                    obj._state.db = db
+                    # This object came from the database; it's not being added.
+                    obj._state.adding = False
+
+                if extra_select:
+                    for i, k in enumerate(extra_select):
+                        setattr(obj, k, row[i])
+
+                # Add the aggregates to the model
+                if aggregate_select:
+                    for i, aggregate in enumerate(aggregate_select):
+                        setattr(obj, aggregate, row[i + aggregate_start])
+
+                # Add the known related objects to the model, if there are any
+                if self._known_related_objects:
+                    for field, rel_objs in self._known_related_objects.items():
+                        pk = getattr(obj, field.get_attname())
+                        try:
+                            rel_obj = rel_objs[pk]
+                        except KeyError:
+                            pass               # may happen in qs1 | qs2 scenarios
+                        else:
+                            setattr(obj, field.name, rel_obj)
+                yield obj
+        except Exception:
+            # If some exception happens during query generation, then keeping
+            # _result_cache will result in second access not generating that
+            # same exception.
+            self._result_cache = None
+            raise
 
     def aggregate(self, *args, **kwargs):
         """
@@ -845,7 +871,11 @@ class QuerySet(object):
 
     def _fetch_all(self):
         if self._result_cache is None:
-            self._result_cache = list(self.iterator())
+            self._iter = self.iterator()
+            self._result_cache = []
+        if self._iter:
+            self._result_cache.extend(list(self._iter))
+            self._iter = None
         if self._prefetch_related_lookups and not self._prefetch_done:
             self._prefetch_related_objects()
 
