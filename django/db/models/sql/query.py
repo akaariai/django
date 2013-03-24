@@ -1078,6 +1078,11 @@ class Query(object):
         elif isinstance(value, ExpressionNode):
             # If value is a query expression, evaluate it
             value = SQLEvaluator(value, self, reuse=can_reuse)
+        # For Oracle also '' is equivalent to null.
+        if (lookup_type == 'exact' and value == '' and
+                connections[DEFAULT_DB_ALIAS].features.interprets_empty_strings_as_nulls):
+            value = True
+            lookup_type = 'isnull'
 
         for alias, aggregate in self.aggregates.items():
             if alias in (parts[0], LOOKUP_SEP.join(parts)):
