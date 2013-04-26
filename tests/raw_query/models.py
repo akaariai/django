@@ -11,6 +11,7 @@ class Author(models.Model):
         # Protect against annotations being passed to __init__ --
         # this'll make the test suite get angry if annotations aren't
         # treated differently than fields.
+        kwargs.pop('__loaded_fields', None)
         for k in kwargs:
             assert k in [f.attname for f in self._meta.fields], \
                 "Author.__init__ got an unexpected parameter: %s" % k

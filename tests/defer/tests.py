@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 
-from django.db.models.query_utils import DeferredAttribute, InvalidQuery
+from django.db.models.query_utils import InvalidQuery
 from django.test import TestCase
 
 from .models import Secondary, Primary, Child, BigChild, ChildProxy
@@ -10,8 +10,7 @@ class DeferTests(TestCase):
     def assert_delayed(self, obj, num):
         count = 0
         for field in obj._meta.fields:
-            if isinstance(obj.__class__.__dict__.get(field.attname),
-                DeferredAttribute):
+            if field.attname not in obj.__dict__:
                 count += 1
         self.assertEqual(count, num)
 
@@ -40,7 +39,9 @@ class DeferTests(TestCase):
         self.assertEqual(obj.related_id, s1.pk)
 
         # You can use 'pk' with reverse foreign key lookups.
-        self.assert_delayed(s1.primary_set.all().only('pk')[0], 3)
+        # The related model value is set to s1 without loading from DB, hence
+        # it is not deferred.
+        self.assert_delayed(s1.primary_set.all().only('pk')[0], 2)
 
         self.assert_delayed(qs.defer("name").extra(select={"a": 1})[0], 1)
         self.assert_delayed(qs.extra(select={"a": 1}).defer("name")[0], 1)

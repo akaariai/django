@@ -2732,7 +2732,7 @@ class AdminCustomQuerysetTest(TestCase):
         # instance representation is set by six.text_type()
         self.assertContains(
             response,
-            '<li class="success">The short message &quot;ShortMessage_Deferred_timestamp object&quot; was changed successfully.</li>',
+            '<li class="success">The short message &quot;ShortMessage object&quot; was changed successfully.</li>',
             html=True
         )
 
@@ -2779,7 +2779,7 @@ class AdminCustomQuerysetTest(TestCase):
         # instance representation is set by six.text_type()
         self.assertContains(
             response,
-            '<li class="success">The paper &quot;Paper_Deferred_author object&quot; was changed successfully.</li>',
+            '<li class="success">The paper &quot;Paper object&quot; was changed successfully.</li>',
             html=True
         )
 

@@ -13,7 +13,7 @@ from django.db import connections, router, transaction, IntegrityError
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import AutoField
 from django.db.models.query_utils import (Q, select_related_descend,
-    deferred_class_factory, InvalidQuery)
+                                          InvalidQuery)
 from django.db.models.deletion import Collector
 from django.db.models import sql
 from django.utils.functional import partition
@@ -260,10 +260,8 @@ class QuerySet(object):
         aggregate_select = list(self.query.aggregate_select)
 
         only_load = self.query.get_loaded_field_names()
-        if not fill_cache:
-            fields = self.model._meta.concrete_fields
 
-        load_fields = []
+        load_fields = set()
         # If only/defer clauses have been specified,
         # build the list of fields that are to be loaded.
         if only_load:
@@ -273,27 +271,16 @@ class QuerySet(object):
                 try:
                     if field.name in only_load[model]:
                         # Add a field that has been explicitly included
-                        load_fields.append(field.name)
+                        load_fields.add(field.name)
                 except KeyError:
                     # Model wasn't explicitly listed in the only_load table
                     # Therefore, we need to load all fields from this model
-                    load_fields.append(field.name)
+                    load_fields.add(field.name)
+            init_list = [field.attname for field in self.model._meta.concrete_fields
+                         if field.name in load_fields]
 
         index_start = len(extra_select)
         aggregate_start = index_start + len(load_fields or self.model._meta.concrete_fields)
-
-        skip = None
-        if load_fields and not fill_cache:
-            # Some fields have been deferred, so we have to initialise
-            # via keyword arguments.
-            skip = set()
-            init_list = []
-            for field in fields:
-                if field.name not in load_fields:
-                    skip.add(field.attname)
-                else:
-                    init_list.append(field.attname)
-            model_cls = deferred_class_factory(self.model, skip)
 
         # Cache db and model outside the loop
         db = self.db
@@ -309,8 +296,10 @@ class QuerySet(object):
             else:
                 # Omit aggregates in object creation.
                 row_data = row[index_start:aggregate_start]
-                if skip:
-                    obj = model_cls(**dict(zip(init_list, row_data)))
+                if only_load:
+                    data = dict(zip(init_list, row_data))
+                    data['__loaded_fields'] = only_load
+                    obj = model(**data)
                 else:
                     obj = model(*row_data)
 
@@ -1262,14 +1251,11 @@ def get_klass_info(klass, max_depth=0, cur_depth=0, requested=None,
         load_fields = None
 
     if load_fields:
-        # Handle deferred fields.
-        skip = set()
-        init_list = []
         # Build the list of fields that *haven't* been requested
+        init_list = []
         for field, model in klass._meta.get_concrete_fields_with_model():
-            if field.name not in load_fields:
-                skip.add(field.attname)
-            elif from_parent and issubclass(from_parent, model.__class__):
+            if (field.name not in load_fields or
+                    (from_parent and issubclass(from_parent, model.__class__))):
                 # Avoid loading fields already loaded for parent model for
                 # child models.
                 continue
@@ -1277,11 +1263,7 @@ def get_klass_info(klass, max_depth=0, cur_depth=0, requested=None,
                 init_list.append(field.attname)
         # Retrieve all the requested fields
         field_count = len(init_list)
-        if skip:
-            klass = deferred_class_factory(klass, skip)
-            field_names = init_list
-        else:
-            field_names = ()
+        field_names = init_list
     else:
         # Load all fields on klass
 
@@ -1370,7 +1352,9 @@ def get_cached_row(row, index_start, using,  klass_info, offset=0,
         for rel_field, value in parent_data:
             field_names.append(rel_field.attname)
             fields.append(value)
-        obj = klass(**dict(zip(field_names, fields)))
+        data = dict(zip(field_names, fields))
+        data['__loaded_fields'] = field_names
+        obj = klass(**data)
     else:
         obj = klass(*fields)
     # If an object was retrieved, set the database state.
@@ -1474,17 +1458,11 @@ class RawQuerySet(object):
             else:
                 annotation_fields.append((column, pos))
 
-        # Find out which model's fields are not present in the query.
-        skip = set()
-        for field in self.model._meta.fields:
-            if field.attname not in model_init_field_names:
-                skip.add(field.attname)
+        skip = len(model_init_field_names) != len(self.model._meta.fields)
         if skip:
-            if self.model._meta.pk.attname in skip:
+            if self.model._meta.pk.attname not in model_init_field_names:
                 raise InvalidQuery('Raw query must include the primary key')
-            model_cls = deferred_class_factory(self.model, skip)
         else:
-            model_cls = self.model
             # All model's fields are present in the query. So, it is possible
             # to use *args based model instantation. For each field of the model,
             # record the query column position matching that field.
@@ -1500,12 +1478,13 @@ class RawQuerySet(object):
             # Associate fields to values
             if skip:
                 model_init_kwargs = {}
-                for attname, pos in six.iteritems(model_init_field_names):
+                for attname, pos in model_init_field_names.items():
                     model_init_kwargs[attname] = values[pos]
-                instance = model_cls(**model_init_kwargs)
+                model_init_kwargs['__loaded_fields'] = model_init_field_names
+                instance = self.model(**model_init_kwargs)
             else:
                 model_init_args = [values[pos] for pos in model_init_field_pos]
-                instance = model_cls(*model_init_args)
+                instance = self.model(*model_init_args)
             if annotation_fields:
                 for column, pos in annotation_fields:
                     setattr(instance, column, values[pos])

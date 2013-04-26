@@ -15,7 +15,6 @@ from django.db.models.fields.related import (ForeignObjectRel, ManyToOneRel,
 from django.db import (router, transaction, DatabaseError,
     DEFAULT_DB_ALIAS)
 from django.db.models.query import Q
-from django.db.models.query_utils import DeferredAttribute, deferred_class_factory
 from django.db.models.deletion import Collector
 from django.db.models.options import Options
 from django.db.models import signals
@@ -320,9 +319,9 @@ class ModelState(object):
 
 
 class Model(six.with_metaclass(ModelBase)):
-    _deferred = False
 
     def __init__(self, *args, **kwargs):
+        loaded_fields = kwargs.pop('__loaded_fields', None)
         signals.pre_init.send(sender=self.__class__, args=args, kwargs=kwargs)
 
         # Set up the storage for instance state
@@ -337,7 +336,12 @@ class Model(six.with_metaclass(ModelBase)):
             # Daft, but matches old exception sans the err msg.
             raise IndexError("Number of args exceeds number of fields")
 
-        if not kwargs:
+        if loaded_fields:
+            fields_iter = ()
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+            kwargs = []
+        elif not kwargs:
             fields_iter = iter(self._meta.concrete_fields)
             # The ordering of the zip calls matter - zip throws StopIteration
             # when an iter throws it. So if the first iter throws it, the second
@@ -360,13 +364,7 @@ class Model(six.with_metaclass(ModelBase)):
 
         for field in fields_iter:
             is_related_object = False
-            # This slightly odd construct is so that we can access any
-            # data-descriptor object (DeferredAttribute) without triggering its
-            # __get__ method.
-            if (field.attname not in kwargs and
-                    (isinstance(self.__class__.__dict__.get(field.attname), DeferredAttribute)
-                     or field.column is None)):
-                # This field will be populated on request.
+            if field.attname not in kwargs and not field.column:
                 continue
             if kwargs:
                 if isinstance(field.rel, ForeignObjectRel):
@@ -418,6 +416,38 @@ class Model(six.with_metaclass(ModelBase)):
         super(Model, self).__init__()
         signals.post_init.send(sender=self.__class__, instance=self)
 
+    def __getattr__(self, attname):
+        if (attname in [f.attname for f in self._meta.fields] and self._state.db and
+                self.pk is not None):
+            f = [f for f in self._meta.fields if f.name == attname or f.attname == attname][0]
+            name = f.name
+            val = self._check_parent_chain(name)
+            if val is None:
+                val = getattr(
+                    self.__class__._base_manager.only(name).using(
+                        self._state.db).get(pk=self.pk),
+                    attname
+                )
+            setattr(self, attname, val)
+            return getattr(self, attname)
+        maybe_descriptor = self.__class__.__dict__.get(attname)
+        if hasattr(maybe_descriptor, '__get__'):
+            return maybe_descriptor.__get__(self, self.__class__)
+        raise AttributeError("'%s' object has no attribute '%s'" % (self.__class__.__name__, attname))
+
+    def _check_parent_chain(self, name):
+        """
+        Check if the field value can be fetched from a parent field already
+        loaded in the instance. This can be done if the to-be fetched
+        field is a primary key field.
+        """
+        opts = self._meta
+        f = opts.get_field_by_name(name)[0]
+        link_field = opts.get_ancestor_link(f.model)
+        if f.primary_key and f != link_field:
+            return getattr(self, link_field.attname)
+        return None
+
     def __repr__(self):
         try:
             u = six.text_type(self)
@@ -443,24 +473,6 @@ class Model(six.with_metaclass(ModelBase)):
 
     def __hash__(self):
         return hash(self._get_pk_val())
-
-    def __reduce__(self):
-        """
-        Provides pickling support. Normally, this just dispatches to Python's
-        standard handling. However, for models with deferred field loading, we
-        need to do things manually, as they're dynamically created classes and
-        only module-level classes can be pickled by the default path.
-        """
-        if not self._deferred:
-            return super(Model, self).__reduce__()
-        data = self.__dict__
-        defers = []
-        for field in self._meta.fields:
-            if isinstance(self.__class__.__dict__.get(field.attname),
-                    DeferredAttribute):
-                defers.append(field.attname)
-        model = self._meta.proxy_for_model
-        return (model_unpickle, (model, defers), data)
 
     def _get_pk_val(self, meta=None):
         if not meta:
@@ -529,19 +541,17 @@ class Model(six.with_metaclass(ModelBase)):
 
         # If saving to the same database, and this model is deferred, then
         # automatically do a "update_fields" save on the loaded fields.
-        elif not force_insert and self._deferred and using == self._state.db:
+        elif not force_insert and using == self._state.db and self.pk is not None:
             field_names = set()
             for field in self._meta.concrete_fields:
                 if not field.primary_key and not hasattr(field, 'through'):
                     field_names.add(field.attname)
             deferred_fields = [
                 f.attname for f in self._meta.fields
-                if f.attname not in self.__dict__
-                   and isinstance(self.__class__.__dict__[f.attname],
-                                  DeferredAttribute)]
+                if f.attname not in self.__dict__]
 
             loaded_fields = field_names.difference(deferred_fields)
-            if loaded_fields:
+            if loaded_fields and len(field_names) != len(loaded_fields):
                 update_fields = frozenset(loaded_fields)
 
         self.save_base(using=using, force_insert=force_insert,
@@ -593,7 +603,7 @@ class Model(six.with_metaclass(ModelBase)):
         meta = cls._meta
         for parent, field in meta.parents.items():
             # Make sure the link fields are synced between parent and self.
-            if (field and getattr(self, parent._meta.pk.attname) is None
+            if (field and self.__dict__.get(parent._meta.pk.attname) is None
                     and getattr(self, field.attname) is not None):
                 setattr(self, parent._meta.pk.attname, getattr(self, field.attname))
             self._save_parents(cls=parent, using=using, update_fields=update_fields)
@@ -1007,16 +1017,6 @@ def get_absolute_url(opts, func, self, *args, **kwargs):
 
 class Empty(object):
     pass
-
-
-def model_unpickle(model, attrs):
-    """
-    Used to unpickle Model subclasses with deferred fields.
-    """
-    cls = deferred_class_factory(model, attrs)
-    return cls.__new__(cls)
-model_unpickle.__safe_for_unpickle__ = True
-
 
 def unpickle_inner_exception(klass, exception_name):
     # Get the exception class from the class it is attached to:

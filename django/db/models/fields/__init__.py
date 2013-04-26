@@ -181,10 +181,6 @@ class Field(object):
             # class self.__class__, then update its dict with self.__dict__
             # values - so, this is very close to normal pickle.
             return _empty, (self.__class__,), self.__dict__
-        if self.model._deferred:
-            # Deferred model will not be found from the app cache. This could
-            # be fixed by reconstructing the deferred model on unpickle.
-            raise RuntimeError("Fields of deferred models can't be reduced")
         return _load_field, (self.model._meta.app_label, self.model._meta.object_name,
                              self.name)
 

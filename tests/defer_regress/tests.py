@@ -134,25 +134,13 @@ class DeferRegressionTest(TestCase):
         self.assertEqual(
             klasses, [
                 "Child",
-                "Child_Deferred_value",
                 "Feature",
                 "Item",
                 "ItemAndSimpleItem",
-                "Item_Deferred_name",
-                "Item_Deferred_name_other_value_text",
-                "Item_Deferred_name_other_value_value",
-                "Item_Deferred_other_value_text_value",
-                "Item_Deferred_text_value",
                 "Leaf",
-                "Leaf_Deferred_child_id_second_child_id_value",
-                "Leaf_Deferred_name_value",
-                "Leaf_Deferred_second_child_id_value",
-                "Leaf_Deferred_value",
                 "OneToOneItem",
                 "Proxy",
                 "RelatedItem",
-                "RelatedItem_Deferred_",
-                "RelatedItem_Deferred_item_id",
                 "ResolveThis",
                 "SimpleItem",
                 "SpecialFeature",
@@ -239,10 +227,3 @@ class DeferRegressionTest(TestCase):
 
         qs = SpecialFeature.objects.only('feature__item__name').select_related('feature__item')
         self.assertEqual(len(qs), 1)
-
-    def test_deferred_class_factory(self):
-        from django.db.models.query_utils import deferred_class_factory
-        new_class = deferred_class_factory(Item,
-            ('this_is_some_very_long_attribute_name_so_modelname_truncation_is_triggered',))
-        self.assertEqual(new_class.__name__,
-            'Item_Deferred_this_is_some_very_long_attribute_nac34b1f495507dad6b02e2cb235c875e')
