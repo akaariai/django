@@ -82,7 +82,8 @@ def setup(verbosity, test_labels):
     }
 
     # Redirect some settings for the duration of these tests.
-    settings.INSTALLED_APPS = ALWAYS_INSTALLED_APPS
+    settings.INSTALLED_APPS = ALWAYS_INSTALLED_APPS[:]
+    settings._ALWAYS_INSTALLED_MASK = ALWAYS_INSTALLED_APPS
     settings.ROOT_URLCONF = 'urls'
     settings.STATIC_URL = '/static/'
     settings.STATIC_ROOT = os.path.join(TEMP_DIR, 'static')

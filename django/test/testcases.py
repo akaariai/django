@@ -28,6 +28,7 @@ from django.core.servers.basehttp import (WSGIRequestHandler, WSGIServer,
     WSGIServerException)
 from django.core.urlresolvers import clear_url_caches, set_urlconf
 from django.db import connection, connections, DEFAULT_DB_ALIAS, transaction
+from django.db.models.loading import set_app_mask
 from django.forms.fields import CharField
 from django.http import QueryDict
 from django.test import _doctest as doctest
@@ -731,7 +732,18 @@ class TransactionTestCase(SimpleTestCase):
              named fixtures.
         """
         super(TransactionTestCase, self)._pre_setup()
+        self._set_app_mask()
         self._fixture_setup()
+
+    def _set_app_mask(self):
+        my_app = None
+        parts = self.__class__.__module__.split('.')
+        for i in range(len(parts), 0, -1):
+            if '.'.join(parts[0:i]) in settings.INSTALLED_APPS:
+                my_app = '.'.join(parts[0:i])
+                break
+        if my_app and hasattr(settings, '_ALWAYS_INSTALLED_MASK'):
+            set_app_mask(settings._ALWAYS_INSTALLED_MASK[:] + [my_app])
 
     def _databases_names(self, include_mirrors=True):
         # If the test case has a multi_db=True flag, act on all databases,
@@ -760,7 +772,7 @@ class TransactionTestCase(SimpleTestCase):
             if self.reset_sequences:
                 self._reset_sequences(db_name)
 
-            if hasattr(self, 'fixtures'):
+            if getattr(self, 'fixtures', None):
                 # We have to use this slightly awkward syntax due to the fact
                 # that we're using *args and **kwargs together.
                 call_command('loaddata', *self.fixtures,
@@ -784,6 +796,7 @@ class TransactionTestCase(SimpleTestCase):
         # start of every test.
         for conn in connections.all():
             conn.close()
+        set_app_mask(None)
 
     def _fixture_teardown(self):
         for db_name in self._databases_names(include_mirrors=False):

@@ -43,10 +43,16 @@ class AppCache(object):
         postponed=[],
         nesting_level=0,
         _get_models_cache={},
+        app_mask=None,
     )
 
     def __init__(self):
         self.__dict__ = self.__shared_state
+
+    def set_app_mask(self, mask):
+        if mask is not None:
+            mask = set(mask)
+        self.app_mask = mask
 
     def _populate(self):
         """
@@ -138,7 +144,8 @@ class AppCache(object):
         # list page, for example.
         apps = [(v, k) for k, v in self.app_store.items()]
         apps.sort()
-        return [elt[1] for elt in apps]
+        return [elt[1] for elt in apps
+                if self.app_mask is None or elt[1].__name__.rsplit('.', 1)[0] in self.app_mask]
 
     def get_app(self, app_label, emptyOK=False):
         """
@@ -166,6 +173,16 @@ class AppCache(object):
         self._populate()
         return self.app_errors
 
+    def _filter_masked_models(self, models):
+        if self.app_mask is not None:
+            names_mask = set(app.rsplit('.', 1)[-1] for app in self.app_mask)
+            ret_models = []
+            for model in models:
+                if model._meta.app_label in names_mask:
+                    ret_models.append(model)
+            return ret_models
+        return models
+
     def get_models(self, app_mod=None,
                    include_auto_created=False, include_deferred=False,
                    only_installed=True, include_swapped=False):
@@ -190,8 +207,10 @@ class AppCache(object):
         include_swapped, they will be.
         """
         cache_key = (app_mod, include_auto_created, include_deferred, only_installed, include_swapped)
+        model_list = None
         try:
-            return self._get_models_cache[cache_key]
+            model_list = self._get_models_cache[cache_key]
+            return self._filter_masked_models(model_list)
         except KeyError:
             pass
         self._populate()
@@ -216,7 +235,7 @@ class AppCache(object):
                     (not model._meta.swapped or include_swapped))
             )
         self._get_models_cache[cache_key] = model_list
-        return model_list
+        return self._filter_masked_models(model_list)
 
     def get_model(self, app_label, model_name,
                   seed_cache=True, only_installed=True):
@@ -267,3 +286,4 @@ get_model = cache.get_model
 register_models = cache.register_models
 load_app = cache.load_app
 app_cache_ready = cache.app_cache_ready
+set_app_mask = cache.set_app_mask

@@ -617,6 +617,8 @@ class FileLikeObjectTestCase(LiveServerBase):
     """
     Test file-like objects (#15644).
     """
+    fixtures = None
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.storage = FileSystemStorage(location=self.temp_dir)
