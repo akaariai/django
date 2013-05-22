@@ -33,6 +33,8 @@ class TestTransactionClosing(IgnorePendingDeprecationWarningsMixin, TransactionT
     when they should be, and aren't left pending after operations
     have been performed in them. Refs #9964.
     """
+    app_mask = ['django.contrib.auth']
+
     def test_raw_committed_on_success(self):
         """
         Make sure a transaction consisting of raw SQL execution gets

@@ -1542,6 +1542,7 @@ class RouterTestCase(TestCase):
 
 
 class AuthTestCase(TestCase):
+    app_mask = ['django.contrib.auth', 'django.contrib.contenttypes']
     multi_db = True
 
     def setUp(self):
@@ -1632,6 +1633,7 @@ class AntiPetRouter(object):
 class FixtureTestCase(TestCase):
     multi_db = True
     fixtures = ['multidb-common', 'multidb']
+    app_mask = ['django.contrib.auth', 'django.contrib.contenttypes']
 
     def setUp(self):
         # Install the anti-pet router
@@ -1917,6 +1919,7 @@ class SyncOnlyDefaultDatabaseRouter(object):
 
 class SyncDBTestCase(TestCase):
     multi_db = True
+    app_mask = ['django.contrib.auth', 'django.contrib.contenttypes']
 
     def test_syncdb_to_other_database(self):
         """Regression test for #16039: syncdb with --database option."""

@@ -723,6 +723,7 @@ class TransactionTestCase(SimpleTestCase):
     # Subclasses can ask for resetting of auto increment sequence before each
     # test case
     reset_sequences = False
+    app_mask = []
 
     def _pre_setup(self):
         """Performs any pre-test setup. This includes:
@@ -743,7 +744,7 @@ class TransactionTestCase(SimpleTestCase):
                 my_app = '.'.join(parts[0:i])
                 break
         if my_app and hasattr(settings, '_ALWAYS_INSTALLED_MASK'):
-            set_app_mask(settings._ALWAYS_INSTALLED_MASK[:] + [my_app])
+            set_app_mask([my_app] + self.app_mask)
 
     def _databases_names(self, include_mirrors=True):
         # If the test case has a multi_db=True flag, act on all databases,
