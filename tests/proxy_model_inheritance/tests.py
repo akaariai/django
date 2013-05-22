@@ -14,13 +14,14 @@ from .models import (ConcreteModel, ConcreteModelSubclass,
     ConcreteModelSubclassProxy)
 
 
-@override_settings(INSTALLED_APPS=('app1', 'app2'))
+@override_settings(INSTALLED_APPS=('app1', 'app2', 'proxy_model_inheritance'))
 class ProxyModelInheritanceTests(TransactionTestCase):
     """
     Proxy model inheritance across apps can result in syncdb not creating the table
     for the proxied model (as described in #12286).  This test creates two dummy
     apps and calls syncdb, then verifies that the table has been created.
     """
+    app_mask = ['app1', 'app2']
 
     def setUp(self):
         self.old_sys_path = sys.path[:]

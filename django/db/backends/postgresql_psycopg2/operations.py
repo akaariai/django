@@ -106,10 +106,9 @@ class DatabaseOperations(BaseDatabaseOperations):
             # Perform a single SQL 'TRUNCATE x, y, z...;' statement.  It allows
             # us to truncate tables referenced by a foreign key in any other
             # table.
-            sql = ['%s %s;' % \
-                (style.SQL_KEYWORD('TRUNCATE'),
-                    style.SQL_FIELD(', '.join([self.quote_name(table) for table in tables]))
-            )]
+            sql = ['%s %s;' % (
+                style.SQL_KEYWORD('TRUNCATE'),
+                style.SQL_FIELD(', '.join([self.quote_name(table) for table in tables]),))]
             sql.extend(self.sequence_reset_by_name_sql(style, sequences))
             return sql
         else:

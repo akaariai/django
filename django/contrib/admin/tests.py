@@ -7,6 +7,9 @@ from django.utils.translation import ugettext as _
 
 class AdminSeleniumWebDriverTestCase(LiveServerTestCase):
     webdriver_class = 'selenium.webdriver.firefox.webdriver.WebDriver'
+    app_mask = ['django.contrib.auth', 'django.contrib.sessions',
+                'django.contrib.contenttypes', 'django.contrib.admin',
+                'django.contrib.sites']
 
     @classmethod
     def setUpClass(cls):

@@ -85,6 +85,7 @@ class ChangepasswordManagementCommandTestCase(TestCase):
 
 @skipIfCustomUser
 class CreatesuperuserManagementCommandTestCase(TestCase):
+    app_mask = ['django.contrib.contenttypes']
 
     def test_createsuperuser(self):
         "Check the operation of the createsuperuser management command"

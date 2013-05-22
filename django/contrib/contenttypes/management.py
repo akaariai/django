@@ -11,6 +11,8 @@ def update_contenttypes(app, created_models, verbosity=2, db=DEFAULT_DB_ALIAS, *
     Creates content types for models in the given app, removing any model
     entries that no longer have a matching model class.
     """
+    if ContentType not in get_models():
+        return
     if not router.allow_syncdb(db, ContentType):
         return
 

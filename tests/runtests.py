@@ -10,6 +10,8 @@ from django import contrib
 from django.utils._os import upath
 from django.utils import six
 
+os.environ.setdefault('DJANGO_ALWAYS_MASK_APPS_TX', 'true')
+
 CONTRIB_MODULE_PATH = 'django.contrib'
 
 TEST_TEMPLATE_DIR = 'templates'

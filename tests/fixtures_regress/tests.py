@@ -27,6 +27,7 @@ from .models import (Animal, Stuff, Absolute, Parent, Child, Article, Widget,
 
 
 class TestFixtures(TestCase):
+    app_mask = ['django.contrib.contenttypes', 'django.contrib.auth']
 
     def animal_pre_save_check(self, signal, sender, instance, **kwargs):
         self.pre_save_checks.append(
@@ -455,6 +456,7 @@ class TestFixtures(TestCase):
 
 
 class NaturalKeyFixtureTests(TestCase):
+    app_mask = ['django.contrib.auth', 'django.contrib.contenttypes']
 
     def test_nk_deserialize(self):
         """
@@ -684,6 +686,7 @@ class NaturalKeyFixtureTests(TestCase):
 
 
 class TestTicket11101(TransactionTestCase):
+    app_mask = ['django.contrib.auth', 'django.contrib.contenttypes']
 
     def ticket_11101(self):
         management.call_command(

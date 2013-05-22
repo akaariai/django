@@ -1177,13 +1177,16 @@ class BaseDatabaseIntrospection(object):
         """
         raise NotImplementedError
 
-    def django_table_names(self, only_existing=False):
+    def django_table_names(self, only_existing=False, expand_dependent=False):
         """
         Returns a list of all table names that have associated Django models and
         are in INSTALLED_APPS.
 
         If only_existing is True, the resulting list will only include the tables
         that actually exist in the database.
+
+        If expand_dependent is True, then masked but managed dependencies to the
+        found models will be included in the returned set.
         """
         from django.db import models, router
         tables = set()
@@ -1193,6 +1196,9 @@ class BaseDatabaseIntrospection(object):
                     continue
                 if not router.allow_syncdb(self.connection.alias, model):
                     continue
+                if expand_dependent and model._meta.db_table not in tables:
+                    self._expand_dependent_tables(model, tables)
+
                 tables.add(model._meta.db_table)
                 tables.update([f.m2m_db_table() for f in model._meta.local_many_to_many])
         tables = list(tables)
@@ -1204,6 +1210,24 @@ class BaseDatabaseIntrospection(object):
                 if self.table_name_converter(t) in existing_tables
             ]
         return tables
+
+    def _expand_dependent_tables(self, model, tables):
+        from django.db import router
+        dependent = model._meta.get_all_related_objects(
+            include_hidden=True, include_proxy_eq=True)
+        for related in dependent:
+            next_model = related.model
+            if not next_model._meta.managed:
+                continue
+            if next_model._meta.db_table in tables:
+                continue
+            if not router.allow_syncdb(
+                    self.connection.alias, next_model):
+                continue
+            tables.add(next_model._meta.db_table)
+            tables.update([f.m2m_db_table()
+                           for f in next_model._meta.local_many_to_many])
+            self._expand_dependent_tables(next_model, tables)
 
     def installed_models(self, tables):
         "Returns a set of all models represented by the provided list of table names."

@@ -2,6 +2,7 @@ import copy
 from django.db import router
 from django.db.models.query import QuerySet, insert_query, RawQuerySet
 from django.db.models import signals
+from django.db.models.loading import cache
 from django.db.models.fields import FieldDoesNotExist
 from django.utils import six
 from django.utils.deprecation import RenameMethodsBase
@@ -124,6 +125,8 @@ class Manager(six.with_metaclass(RenameManagerMethods)):
         """Returns a new QuerySet object.  Subclasses can override this method
         to easily customize the behavior of the Manager.
         """
+        # Check that the model is in app-cache. If not, fail loudly.
+        cache.assert_model_unmasked(self.model)
         return QuerySet(self.model, using=self._db)
 
     def none(self):
