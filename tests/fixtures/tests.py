@@ -12,7 +12,6 @@ from .models import Article, Book, Spy, Tag, Visa
 
 
 class TestCaseFixtureLoadingTests(TestCase):
-    app_mask = ['django.contrib.contenttypes', 'django.contrib.auth']
     fixtures = ['fixture1.json', 'fixture2.json']
 
     def testClassFixtures(self):
@@ -355,7 +354,7 @@ class FixtureLoadingTests(DumpDataAssertMixin, TestCase):
 
 
 class FixtureTransactionTests(DumpDataAssertMixin, TransactionTestCase):
-    app_mask = ['django.contrib.contenttypes', 'django.contrib.auth']
+    app_mask = ['django.contrib.contenttypes', 'django.contrib.auth', 'django.contrib.sites']
 
     @skipUnlessDBFeature('supports_forward_references')
     def test_format_discovery(self):

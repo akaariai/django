@@ -15,6 +15,8 @@ import os
 __all__ = ('get_apps', 'get_app', 'get_models', 'get_model', 'register_models',
         'load_app', 'app_cache_ready')
 
+class AppMaskedError(ValueError):
+    pass
 
 class AppCache(object):
     """
@@ -173,9 +175,13 @@ class AppCache(object):
         self._populate()
         return self.app_errors
 
+    @property
+    def names_mask(self):
+        return set(app.rsplit('.', 1)[-1] for app in self.app_mask)
+
     def _filter_masked_models(self, models):
         if self.app_mask is not None:
-            names_mask = set(app.rsplit('.', 1)[-1] for app in self.app_mask)
+            names_mask = self.names_mask
             ret_models = []
             for model in models:
                 if model._meta.app_label in names_mask:
@@ -238,7 +244,7 @@ class AppCache(object):
         return self._filter_masked_models(model_list)
 
     def get_model(self, app_label, model_name,
-                  seed_cache=True, only_installed=True):
+                  seed_cache=True, only_installed=True, masked=False):
         """
         Returns the model matching the given app_label and case-insensitive
         model_name.
@@ -249,7 +255,15 @@ class AppCache(object):
             self._populate()
         if only_installed and app_label not in self.app_labels:
             return None
+        if not masked and (self.app_mask is not None
+                           and app_label not in self.names_mask):
+            raise AppMaskedError('Requesting model from currently masked application "%s"' % app_label)
         return self.app_models.get(app_label, SortedDict()).get(model_name.lower())
+
+    def model_is_installed(self, model):
+        if self.app_mask is None:
+            return True
+        return self.get_model(model._meta.app_label, model._meta.model_name) is not None
 
     def register_models(self, app_label, *models):
         """

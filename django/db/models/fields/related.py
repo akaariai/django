@@ -71,7 +71,8 @@ def add_lazy_relation(cls, field, relation, operation):
     # model isn't loaded yet, so we need to pend the relation until the class
     # is prepared.
     model = get_model(app_label, model_name,
-                      seed_cache=False, only_installed=False)
+                      seed_cache=False, only_installed=False,
+                      masked=True)
     if model:
         operation(field, model, cls)
     else:
