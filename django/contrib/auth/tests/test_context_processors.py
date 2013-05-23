@@ -75,7 +75,7 @@ class AuthContextProcessorTests(TestCase):
     Tests for the ``django.contrib.auth.context_processors.auth`` processor
     """
     urls = 'django.contrib.auth.tests.urls'
-    fixtures = ['context-processors-users.xml']
+    fixtures = [(__file__, 'context-processors-users.xml')]
 
     @override_settings(
         MIDDLEWARE_CLASSES=global_settings.MIDDLEWARE_CLASSES,

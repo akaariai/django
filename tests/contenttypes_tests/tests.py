@@ -6,7 +6,7 @@ from django.test import TestCase
 from .models import Author, Article
 
 class ContentTypesViewsTests(TestCase):
-    fixtures = ['testdata.json']
+    fixtures = [(__file__, 'testdata.json')]
     urls = 'contenttypes_tests.urls'
 
     def test_shortcut_with_absolute_url(self):

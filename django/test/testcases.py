@@ -775,6 +775,18 @@ class TransactionTestCase(SimpleTestCase):
                     for sql in sql_list:
                         cursor.execute(sql)
 
+    def _convert_fixtures(self):
+        converted = []
+        for fixture in self.fixtures:
+            if isinstance(fixture, tuple):
+                # It is a __file__, fixture name pair.
+                file_name, fixture_name = fixture
+                fixture = os.path.join(
+                    os.path.dirname(os.path.abspath(file_name)), 'fixtures',
+                    fixture_name)
+            converted.append(fixture)
+        return converted
+
     def _fixture_setup(self):
         for db_name in self._databases_names(include_mirrors=False):
             # Reset sequences
@@ -782,9 +794,10 @@ class TransactionTestCase(SimpleTestCase):
                 self._reset_sequences(db_name)
 
             if getattr(self, 'fixtures', None):
+                converted = self._convert_fixtures()
                 # We have to use this slightly awkward syntax due to the fact
                 # that we're using *args and **kwargs together.
-                call_command('loaddata', *self.fixtures,
+                call_command('loaddata', *converted,
                              **{'verbosity': 0, 'database': db_name, 'skip_validation': True})
 
     def _post_teardown(self):
@@ -870,9 +883,10 @@ class TestCase(TransactionTestCase):
         disable_transaction_methods()
 
         for db_name in self._databases_names(include_mirrors=False):
-            if hasattr(self, 'fixtures'):
+            if getattr(self, 'fixtures', None):
+                converted = self._convert_fixtures()
                 try:
-                    call_command('loaddata', *self.fixtures,
+                    call_command('loaddata', *converted,
                                  **{
                                     'verbosity': 0,
                                     'commit': False,

@@ -23,7 +23,7 @@ from django.utils.translation import ugettext as _
 @override_settings(USE_TZ=False, PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class UserCreationFormTest(TestCase):
 
-    fixtures = ['authtestdata.json']
+    fixtures = [(__file__, 'authtestdata.json')]
 
     def test_user_already_exists(self):
         data = {
@@ -91,7 +91,7 @@ class UserCreationFormTest(TestCase):
 @override_settings(USE_TZ=False, PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AuthenticationFormTest(TestCase):
 
-    fixtures = ['authtestdata.json']
+    fixtures = [(__file__, 'authtestdata.json')]
 
     def test_invalid_username(self):
         # The user submits an invalid username.
@@ -172,7 +172,7 @@ class AuthenticationFormTest(TestCase):
 @override_settings(USE_TZ=False, PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class SetPasswordFormTest(TestCase):
 
-    fixtures = ['authtestdata.json']
+    fixtures = [(__file__, 'authtestdata.json')]
 
     def test_password_verification(self):
         # The two new passwords do not match.
@@ -200,7 +200,7 @@ class SetPasswordFormTest(TestCase):
 @override_settings(USE_TZ=False, PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class PasswordChangeFormTest(TestCase):
 
-    fixtures = ['authtestdata.json']
+    fixtures = [(__file__, 'authtestdata.json')]
 
     def test_incorrect_password(self):
         user = User.objects.get(username='testclient')
@@ -249,7 +249,7 @@ class PasswordChangeFormTest(TestCase):
 @override_settings(USE_TZ=False, PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class UserChangeFormTest(TestCase):
 
-    fixtures = ['authtestdata.json']
+    fixtures = [(__file__, 'authtestdata.json')]
 
     def test_username_validity(self):
         user = User.objects.get(username='testclient')
@@ -328,7 +328,7 @@ class UserChangeFormTest(TestCase):
 @override_settings(USE_TZ=False, PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class PasswordResetFormTest(TestCase):
 
-    fixtures = ['authtestdata.json']
+    fixtures = [(__file__, 'authtestdata.json')]
 
     def create_dummy_user(self):
         """creates a user and returns a tuple

@@ -9,7 +9,7 @@ from django.utils import translation
 
 @override_settings(SITE_ID=1)
 class FlatpageAdminFormTests(TestCase):
-    fixtures = ['example_site']
+    fixtures = [(__file__, 'example_site.json')]
 
     def setUp(self):
         self.form_data = {

@@ -1048,7 +1048,7 @@ class NewFormsTests(TestCase):
 class AdminTests(TestCase):
 
     urls = 'timezones.urls'
-    fixtures = ['tz_users.xml']
+    fixtures = [(__file__, 'tz_users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')

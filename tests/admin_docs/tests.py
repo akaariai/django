@@ -5,7 +5,7 @@ from django.test.utils import override_settings
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class XViewMiddlewareTest(TestCase):
-    fixtures = ['data.xml']
+    fixtures = [(__file__, 'data.xml')]
     urls = 'admin_docs.urls'
 
     def test_xview_func(self):

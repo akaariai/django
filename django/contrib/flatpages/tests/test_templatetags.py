@@ -22,7 +22,7 @@ from django.test.utils import override_settings
     SITE_ID=1,
 )
 class FlatpageTemplateTagTests(TestCase):
-    fixtures = ['sample_flatpages']
+    fixtures = [(__file__, 'sample_flatpages.json')]
     urls = 'django.contrib.flatpages.tests.urls'
 
     def test_get_flatpages_tag(self):

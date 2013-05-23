@@ -9,7 +9,7 @@ from .models import Author, Book, Coffee, Reviewer, FriendlyAuthor
 
 
 class RawQueryTests(TestCase):
-    fixtures = ['raw_query_books.json']
+    fixtures = [(__file__, 'raw_query_books.json')]
 
     def assertSuccessfulRawQuery(self, model, query, expected_results,
             expected_annotations=(), params=[], translations=None):

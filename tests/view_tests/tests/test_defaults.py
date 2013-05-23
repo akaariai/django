@@ -9,7 +9,7 @@ from ..models import Author, Article, UrlArticle
 
 class DefaultsTests(TestCase):
     """Test django views in django/views/defaults.py"""
-    fixtures = ['testdata.json']
+    fixtures = [(__file__, 'testdata.json')]
     non_existing_urls = ['/views/non_existing_url/', # this is in urls.py
                          '/views/other_non_existing_url/'] # this NOT in urls.py
 

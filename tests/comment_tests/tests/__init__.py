@@ -16,7 +16,7 @@ CT = ContentType.objects.get_for_model
 # Helper base class for comment tests that need data.
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.UnsaltedMD5PasswordHasher',))
 class CommentTestCase(TestCase):
-    fixtures = ["comment_tests"]
+    fixtures = [(__file__, "comment_tests")]
     urls = 'comment_tests.urls_default'
 
     def createSomeComments(self):

@@ -12,7 +12,7 @@ from .models import Entry
 
 
 class FeedTestCase(TestCase):
-    fixtures = ['feeddata.json']
+    fixtures = [(__file__, 'feeddata.json')]
 
     def assertChildNodes(self, elem, expected):
         actual = set([n.nodeName for n in elem.childNodes])

@@ -364,7 +364,7 @@ class ProxyModelTests(TestCase):
 
 
 class ProxyModelAdminTests(TestCase):
-    fixtures = ['myhorses']
+    fixtures = [(__file__, 'myhorses.json')]
 
     def test_cascade_delete_proxy_model_admin_warning(self):
         """

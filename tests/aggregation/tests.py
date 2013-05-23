@@ -10,7 +10,7 @@ from .models import Author, Publisher, Book, Store
 
 
 class BaseAggregateTestCase(TestCase):
-    fixtures = ["aggregation.json"]
+    fixtures = [(__file__, "aggregation.json")]
 
     def test_empty_aggregate(self):
         self.assertEqual(Author.objects.all().aggregate(), {})

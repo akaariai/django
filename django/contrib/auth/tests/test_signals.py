@@ -10,7 +10,7 @@ from django.test.utils import override_settings
 @override_settings(USE_TZ=False, PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class SignalTestCase(TestCase):
     urls = 'django.contrib.auth.tests.urls'
-    fixtures = ['authtestdata.json']
+    fixtures = [(__file__, 'authtestdata.json')]
 
     def listener_login(self, user, **kwargs):
         self.logged_in.append(user)

@@ -32,7 +32,7 @@ def _make_books(n, base_date):
             pubdate=base_date - datetime.timedelta(days=i))
 
 class ArchiveIndexViewTests(TestCase):
-    fixtures = ['generic-views-test-data.json']
+    fixtures = [(__file__, 'generic-views-test-data.json')]
     urls = 'generic_views.urls'
 
 
@@ -135,7 +135,7 @@ class ArchiveIndexViewTests(TestCase):
 
 
 class YearArchiveViewTests(TestCase):
-    fixtures = ['generic-views-test-data.json']
+    fixtures = [(__file__, 'generic-views-test-data.json')]
     urls = 'generic_views.urls'
 
     def test_year_view(self):
@@ -220,7 +220,7 @@ class YearArchiveViewTests(TestCase):
 
 
 class MonthArchiveViewTests(TestCase):
-    fixtures = ['generic-views-test-data.json']
+    fixtures = [(__file__, 'generic-views-test-data.json')]
     urls = 'generic_views.urls'
 
     def test_month_view(self):
@@ -347,7 +347,7 @@ class MonthArchiveViewTests(TestCase):
 
 
 class WeekArchiveViewTests(TestCase):
-    fixtures = ['generic-views-test-data.json']
+    fixtures = [(__file__, 'generic-views-test-data.json')]
     urls = 'generic_views.urls'
 
     def test_week_view(self):
@@ -444,7 +444,7 @@ class WeekArchiveViewTests(TestCase):
 
 
 class DayArchiveViewTests(TestCase):
-    fixtures = ['generic-views-test-data.json']
+    fixtures = [(__file__, 'generic-views-test-data.json')]
     urls = 'generic_views.urls'
 
     def test_day_view(self):
@@ -562,7 +562,7 @@ class DayArchiveViewTests(TestCase):
 
 
 class DateDetailViewTests(TestCase):
-    fixtures = ['generic-views-test-data.json']
+    fixtures = [(__file__, 'generic-views-test-data.json')]
     urls = 'generic_views.urls'
 
     def test_date_detail_by_pk(self):

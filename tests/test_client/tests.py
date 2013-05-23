@@ -31,7 +31,7 @@ from .views import get_view
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class ClientTest(TestCase):
-    fixtures = ['testdata.json']
+    fixtures = [(__file__, 'testdata.json')]
 
     def test_get_view(self):
         "GET a view"

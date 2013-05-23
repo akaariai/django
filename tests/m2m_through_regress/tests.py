@@ -229,7 +229,7 @@ class ToFieldThroughTests(TestCase):
 
 class ThroughLoadDataTestCase(TestCase):
     app_mask = ['django.contrib.auth', 'django.contrib.contenttypes']
-    fixtures = ["m2m_through"]
+    fixtures = [(__file__, "m2m_through.json")]
 
     def test_sequence_creation(self):
         "Check that sequences on an m2m_through are created for the through model, not a phantom auto-generated m2m table. Refs #11107"

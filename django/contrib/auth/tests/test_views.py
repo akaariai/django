@@ -42,7 +42,7 @@ class AuthViewsTestCase(TestCase):
     """
     Helper base class for all the follow test cases.
     """
-    fixtures = ['authtestdata.json']
+    fixtures = [(__file__, 'authtestdata.json')]
     urls = 'django.contrib.auth.tests.urls'
 
     def login(self, password='password'):
@@ -282,7 +282,7 @@ class PasswordResetTest(AuthViewsTestCase):
 
 @override_settings(AUTH_USER_MODEL='auth.CustomUser')
 class CustomUserPasswordResetTest(AuthViewsTestCase):
-    fixtures = ['custom_user.json']
+    fixtures = [(__file__, 'custom_user.json')]
 
     def _test_confirm_start(self):
         # Start by creating the email

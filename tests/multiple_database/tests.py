@@ -1632,7 +1632,7 @@ class AntiPetRouter(object):
 
 class FixtureTestCase(TestCase):
     multi_db = True
-    fixtures = ['multidb-common', 'multidb']
+    fixtures = [(__file__, 'multidb-common.json'), (__file__, 'multidb.json')]
     app_mask = ['django.contrib.auth', 'django.contrib.contenttypes']
 
     def setUp(self):

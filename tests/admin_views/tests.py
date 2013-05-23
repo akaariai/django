@@ -49,17 +49,16 @@ from .models import (Article, BarAccount, CustomArticle, EmptyModel, FooAccount,
     OtherStory, ComplexSortedPerson, PluggableSearchPerson, Parent, Child, AdminOrderedField,
     AdminOrderedModelMethod, AdminOrderedAdminMethod, AdminOrderedCallable,
     Report, MainPrepopulated, RelatedPrepopulated, UnorderedObject,
-    Simple, UndeletableObject, Choice, ShortMessage, Telegram)
+    Simple, UndeletableObject, Choice, ShortMessage, Telegram, PrePopulatedPost)
 
 
 ERROR_MESSAGE = "Please enter the correct username and password \
 for a staff account. Note that both fields may be case-sensitive."
 
-
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminViewBasicTest(TestCase):
-    fixtures = ['admin-views-users.xml', 'admin-views-colors.xml',
-                'admin-views-fabrics.xml', 'admin-views-books.xml']
+    fixtures = [(__file__, 'admin-views-users.xml'), (__file__, 'admin-views-colors.xml'),
+                (__file__, 'admin-views-fabrics.xml'), (__file__, 'admin-views-books.xml')]
 
     # Store the bit of the URL where the admin is registered as a class
     # variable. That way we can test a second AdminSite just by subclassing
@@ -622,7 +621,7 @@ class AdminViewBasicTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminViewFormUrlTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ["admin-views-users.xml"]
+    fixtures = [(__file__, "admin-views-users.xml")]
     urlbit = "admin3"
 
     def setUp(self):
@@ -653,7 +652,7 @@ class AdminViewFormUrlTest(TestCase):
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminJavaScriptTest(TestCase):
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     urls = "admin_views.urls"
 
@@ -721,7 +720,7 @@ class AdminJavaScriptTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class SaveAsTests(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml', 'admin-views-person.xml']
+    fixtures = [(__file__, 'admin-views-users.xml'), (__file__, 'admin-views-person.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -828,7 +827,7 @@ class AdminViewPermissionsTest(TestCase):
     """Tests for Admin Views Permissions."""
 
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         """Test setup."""
@@ -1295,7 +1294,7 @@ class AdminViewsNoUrlTest(TestCase):
     """Regression test for #17333"""
 
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         opts = Report._meta
@@ -1325,7 +1324,7 @@ class AdminViewsNoUrlTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminViewDeletedObjectsTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml', 'deleted-objects.xml']
+    fixtures = [(__file__, 'admin-views-users.xml'), (__file__, 'deleted-objects.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -1443,7 +1442,7 @@ class AdminViewDeletedObjectsTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminViewStringPrimaryKeyTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml', 'string-primary-key.xml']
+    fixtures = [(__file__, 'admin-views-users.xml'), (__file__, 'string-primary-key.xml')]
 
     def __init__(self, *args):
         super(AdminViewStringPrimaryKeyTest, self).__init__(*args)
@@ -1566,7 +1565,7 @@ class AdminViewStringPrimaryKeyTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class SecureViewTests(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         # login POST dicts
@@ -1726,7 +1725,7 @@ class SecureViewTests(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminViewUnicodeTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-unicode.xml']
+    fixtures = [(__file__, 'admin-views-unicode.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -1781,7 +1780,7 @@ class AdminViewUnicodeTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminViewListEditable(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml', 'admin-views-person.xml']
+    fixtures = [(__file__, 'admin-views-users.xml'), (__file__, 'admin-views-person.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -2158,8 +2157,8 @@ class AdminViewListEditable(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminSearchTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users', 'multiple-child-classes',
-                'admin-views-person']
+    fixtures = [(__file__, 'admin-views-users.xml'), (__file__, 'multiple-child-classes.json'),
+                (__file__, 'admin-views-person.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -2220,7 +2219,7 @@ class AdminSearchTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminInheritedInlinesTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -2308,7 +2307,8 @@ class AdminInheritedInlinesTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminActionsTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml', 'admin-views-actions.xml']
+    fixtures = [(__file__, 'admin-views-users.xml'),
+                (__file__, 'admin-views-actions.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -2527,7 +2527,7 @@ class AdminActionsTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class TestCustomChangeList(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
     urlbit = 'admin'
 
     def setUp(self):
@@ -2556,7 +2556,7 @@ class TestCustomChangeList(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class TestInlineNotEditable(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         result = self.client.login(username='super', password='secret')
@@ -2576,7 +2576,7 @@ class TestInlineNotEditable(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminCustomQuerysetTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -2802,7 +2802,7 @@ class AdminCustomQuerysetTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminInlineFileUploadTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml', 'admin-views-actions.xml']
+    fixtures = [(__file__, 'admin-views-users.xml'), (__file__, 'admin-views-actions.xml')]
     urlbit = 'admin'
 
     def setUp(self):
@@ -2849,7 +2849,7 @@ class AdminInlineFileUploadTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminInlineTests(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.post_data = {
@@ -3168,7 +3168,9 @@ class AdminInlineTests(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class NeverCacheTests(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml', 'admin-views-colors.xml', 'admin-views-fabrics.xml']
+    fixtures = [(__file__, 'admin-views-users.xml'),
+                (__file__, 'admin-views-colors.xml'),
+                (__file__, 'admin-views-fabrics.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -3242,7 +3244,7 @@ class NeverCacheTests(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class PrePopulatedTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -3279,7 +3281,7 @@ class PrePopulatedTest(TestCase):
 class SeleniumAdminViewsFirefoxTests(AdminSeleniumWebDriverTestCase):
     webdriver_class = 'selenium.webdriver.firefox.webdriver.WebDriver'
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def test_prepopulated_fields(self):
         """
@@ -3410,7 +3412,7 @@ class SeleniumAdminViewsIETests(SeleniumAdminViewsFirefoxTests):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class ReadonlyTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -3498,7 +3500,7 @@ class ReadonlyTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class RawIdFieldsTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -3536,7 +3538,7 @@ class UserAdminTest(TestCase):
     Tests user CRUD functionality.
     """
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -3643,7 +3645,7 @@ class GroupAdminTest(TestCase):
     Tests group CRUD functionality.
     """
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -3677,7 +3679,7 @@ class GroupAdminTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class CSSTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -3733,7 +3735,7 @@ except ImportError:
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminDocsTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -3776,7 +3778,7 @@ class AdminDocsTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class ValidXHTMLTests(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
     urlbit = 'admin'
 
     def setUp(self):
@@ -3800,7 +3802,7 @@ class ValidXHTMLTests(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class DateHierarchyTests(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -3932,7 +3934,7 @@ class AdminCustomSaveRelatedTests(TestCase):
     Refs #16115.
     """
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -3997,7 +3999,7 @@ class AdminCustomSaveRelatedTests(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminViewLogoutTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -4026,7 +4028,7 @@ class AdminViewLogoutTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminUserMessageTest(TestCase):
     urls = "admin_views.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')

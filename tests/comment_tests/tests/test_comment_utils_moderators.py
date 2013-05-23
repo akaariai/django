@@ -33,7 +33,7 @@ class EntryModerator6(CommentModerator):
     close_after = 0
 
 class CommentUtilsModeratorTests(CommentTestCase):
-    fixtures = ["comment_utils.xml"]
+    fixtures = [(__file__, "comment_utils.xml")]
 
     def createSomeComments(self):
         # Tests for the moderation signals must actually post data

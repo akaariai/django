@@ -185,7 +185,7 @@ class AssertContainsTests(TestCase):
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AssertTemplateUsedTests(TestCase):
-    fixtures = ['testdata.json']
+    fixtures = [(__file__, 'testdata.json')]
 
     def test_no_context(self):
         "Template usage assertions work then templates aren't in use"
@@ -545,7 +545,7 @@ class AssertFormErrorTests(TestCase):
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class LoginTests(TestCase):
-    fixtures = ['testdata']
+    fixtures = [(__file__, 'testdata.json')]
 
     def test_login_different_client(self):
         "Check that using a different test client doesn't violate authentication"
@@ -569,7 +569,7 @@ class LoginTests(TestCase):
     SESSION_ENGINE='test_client_regress.session'
 )
 class SessionEngineTests(TestCase):
-    fixtures = ['testdata']
+    fixtures = [(__file__, 'testdata.json')]
 
     def test_login(self):
         "A session engine that modifies the session key can be used to log in"
@@ -609,7 +609,7 @@ class URLEscapingTests(TestCase):
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class ExceptionTests(TestCase):
-    fixtures = ['testdata.json']
+    fixtures = [(__file__, 'testdata.json')]
 
     def test_exception_cleared(self):
         "#5836 - A stale user exception isn't re-raised by the test client."
@@ -673,7 +673,7 @@ class zzUrlconfSubstitutionTests(TestCase):
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class ContextTests(TestCase):
-    fixtures = ['testdata']
+    fixtures = [(__file__, 'testdata.json')]
 
     def test_single_context(self):
         "Context variables can be retrieved from a single context"
@@ -720,7 +720,7 @@ class ContextTests(TestCase):
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class SessionTests(TestCase):
-    fixtures = ['testdata.json']
+    fixtures = [(__file__, 'testdata.json')]
 
     def test_session(self):
         "The session isn't lost if a user logs in"

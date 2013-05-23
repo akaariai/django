@@ -18,7 +18,7 @@ class AdminCustomUrlsTest(TestCase):
     * The ModelAdmin for Action customizes the add_view URL, it's
       '<app name>/<model name>/!add/'
     """
-    fixtures = ['users.json', 'actions.json']
+    fixtures = [(__file__, 'users.json'), (__file__, 'actions.json')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -86,7 +86,7 @@ class AdminCustomUrlsTest(TestCase):
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class CustomRedirects(TestCase):
-    fixtures = ['users.json', 'actions.json']
+    fixtures = [(__file__, 'users.json'), (__file__, 'actions.json')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')

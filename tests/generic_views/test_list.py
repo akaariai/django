@@ -10,7 +10,7 @@ from .models import Author, Artist
 
 
 class ListViewTests(TestCase):
-    fixtures = ['generic-views-test-data.json']
+    fixtures = [(__file__, 'generic-views-test-data.json')]
     urls = 'generic_views.urls'
 
     def test_items(self):

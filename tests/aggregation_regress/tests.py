@@ -17,7 +17,7 @@ from .models import (Author, Book, Publisher, Clues, Entries, HardbackBook,
 
 
 class AggregationTests(TestCase):
-    fixtures = ["aggregation_regress.json"]
+    fixtures = [(__file__, "aggregation_regress.json")]
 
     def assertObjectAttrs(self, obj, **kwargs):
         for attr, value in six.iteritems(kwargs):

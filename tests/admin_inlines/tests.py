@@ -18,7 +18,7 @@ from .models import (Holder, Inner, Holder2, Inner2, Holder3, Inner3, Person,
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class TestInline(TestCase):
     urls = "admin_inlines.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         holder = Holder(dummy=13)
@@ -197,7 +197,7 @@ class TestInline(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class TestInlineMedia(TestCase):
     urls = "admin_inlines.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
 
@@ -254,7 +254,7 @@ class TestInlineAdminForm(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class TestInlineProtectedOnDelete(TestCase):
     urls = "admin_inlines.urls"
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
 
     def setUp(self):
         result = self.client.login(username='super', password='secret')
@@ -488,7 +488,7 @@ class TestInlinePermissions(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class SeleniumFirefoxTests(AdminSeleniumWebDriverTestCase):
     webdriver_class = 'selenium.webdriver.firefox.webdriver.WebDriver'
-    fixtures = ['admin-views-users.xml']
+    fixtures = [(__file__, 'admin-views-users.xml')]
     urls = "admin_inlines.urls"
 
     def test_add_stackeds(self):

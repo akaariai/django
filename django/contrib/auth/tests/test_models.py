@@ -45,7 +45,7 @@ class ProfileTestCase(TestCase):
 @skipIfCustomUser
 @override_settings(USE_TZ=False)
 class NaturalKeysTestCase(TestCase):
-    fixtures = ['authtestdata.json']
+    fixtures = [(__file__, 'authtestdata.json')]
 
     def test_user_natural_key(self):
         staff_user = User.objects.get(username='staff')
@@ -60,7 +60,7 @@ class NaturalKeysTestCase(TestCase):
 @skipIfCustomUser
 @override_settings(USE_TZ=False)
 class LoadDataWithoutNaturalKeysTestCase(TestCase):
-    fixtures = ['regular.json']
+    fixtures = [(__file__, 'regular.json')]
 
     def test_user_is_created_and_added_to_group(self):
         user = User.objects.get(username='my_username')
@@ -71,7 +71,7 @@ class LoadDataWithoutNaturalKeysTestCase(TestCase):
 @skipIfCustomUser
 @override_settings(USE_TZ=False)
 class LoadDataWithNaturalKeysTestCase(TestCase):
-    fixtures = ['natural.json']
+    fixtures = [(__file__, 'natural.json')]
 
     def test_user_is_created_and_added_to_group(self):
         user = User.objects.get(username='my_username')

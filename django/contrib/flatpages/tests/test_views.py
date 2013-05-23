@@ -23,7 +23,10 @@ from django.test.utils import override_settings
     SITE_ID=1,
 )
 class FlatpageViewTests(TestCase):
-    fixtures = ['sample_flatpages', 'example_site']
+    fixtures = [
+        (__file__, 'sample_flatpages.json'),
+        (__file__, 'example_site.json')
+    ]
     urls = 'django.contrib.flatpages.tests.urls'
 
     def test_view_flatpage(self):
@@ -91,7 +94,10 @@ class FlatpageViewTests(TestCase):
     SITE_ID=1,
 )
 class FlatpageViewAppendSlashTests(TestCase):
-    fixtures = ['sample_flatpages', 'example_site']
+    fixtures = [
+        (__file__, 'sample_flatpages.json'),
+        (__file__, 'example_site.json')
+    ]
     urls = 'django.contrib.flatpages.tests.urls'
 
     def test_redirect_view_flatpage(self):

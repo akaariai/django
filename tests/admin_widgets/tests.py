@@ -142,7 +142,7 @@ class AdminFormfieldForDBFieldTests(TestCase):
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminFormfieldForDBFieldWithRequestTests(DjangoTestCase):
-    fixtures = ["admin-widgets-users.xml"]
+    fixtures = [(__file__, "admin-widgets-users.xml")]
 
     def testFilterChoicesByRequestUser(self):
         """
@@ -156,7 +156,7 @@ class AdminFormfieldForDBFieldWithRequestTests(DjangoTestCase):
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminForeignKeyWidgetChangeList(DjangoTestCase):
-    fixtures = ["admin-widgets-users.xml"]
+    fixtures = [(__file__, "admin-widgets-users.xml")]
     admin_root = '/widget_admin'
 
     def setUp(self):
@@ -172,7 +172,7 @@ class AdminForeignKeyWidgetChangeList(DjangoTestCase):
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class AdminForeignKeyRawIdWidget(DjangoTestCase):
-    fixtures = ["admin-widgets-users.xml"]
+    fixtures = [(__file__, "admin-widgets-users.xml")]
     admin_root = '/widget_admin'
 
     def setUp(self):
@@ -459,7 +459,7 @@ class RelatedFieldWidgetWrapperTests(DjangoTestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class DateTimePickerSeleniumFirefoxTests(AdminSeleniumWebDriverTestCase):
     webdriver_class = 'selenium.webdriver.firefox.webdriver.WebDriver'
-    fixtures = ['admin-widgets-users.xml']
+    fixtures = [(__file__, 'admin-widgets-users.xml')]
     urls = "admin_widgets.urls"
 
     def test_show_hide_date_time_picker_widgets(self):
@@ -515,7 +515,7 @@ class DateTimePickerSeleniumIETests(DateTimePickerSeleniumFirefoxTests):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class HorizontalVerticalFilterSeleniumFirefoxTests(AdminSeleniumWebDriverTestCase):
     webdriver_class = 'selenium.webdriver.firefox.webdriver.WebDriver'
-    fixtures = ['admin-widgets-users.xml']
+    fixtures = [(__file__, 'admin-widgets-users.xml')]
     urls = "admin_widgets.urls"
 
     def setUp(self):

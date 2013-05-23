@@ -20,7 +20,7 @@ from .models import (Episode, EpisodeExtra, EpisodeMaxNum, Media,
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class GenericAdminViewTest(TestCase):
     urls = "generic_inline_admin.urls"
-    fixtures = ['users.xml']
+    fixtures = [(__file__, 'users.xml')]
 
     def setUp(self):
         # set TEMPLATE_DEBUG to True to ensure {% include %} will raise
@@ -133,7 +133,7 @@ class GenericAdminViewTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class GenericInlineAdminParametersTest(TestCase):
     urls = "generic_inline_admin.urls"
-    fixtures = ['users.xml']
+    fixtures = [(__file__, 'users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')
@@ -187,7 +187,7 @@ class GenericInlineAdminParametersTest(TestCase):
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
 class GenericInlineAdminWithUniqueTogetherTest(TestCase):
     urls = "generic_inline_admin.urls"
-    fixtures = ['users.xml']
+    fixtures = [(__file__, 'users.xml')]
 
     def setUp(self):
         self.client.login(username='super', password='secret')

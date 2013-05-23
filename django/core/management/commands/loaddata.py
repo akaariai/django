@@ -95,7 +95,11 @@ class Command(BaseCommand):
                 # It's a models.py module
                 app_module_paths.append(upath(app.__file__))
 
-        app_fixtures = [os.path.join(os.path.dirname(path), 'fixtures') for path in app_module_paths]
+        if all(os.path.isabs(label) for label in fixture_labels):
+            app_fixtures = None
+        else:
+            app_fixtures = [os.path.join(os.path.dirname(path), 'fixtures')
+                            for path in app_module_paths]
 
         with connection.constraint_checks_disabled():
             for fixture_label in fixture_labels:
