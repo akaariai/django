@@ -13,6 +13,13 @@ from django.utils.datastructures import MultiValueDict, MergeDict
 from django.utils.safestring import mark_safe
 from django.utils import six
 
+from .non_unicode_forms import TestForm
+
+class TestNonUnicodeLabel(TestCase):
+    def test_non_unicode_label(self):
+        tf = TestForm()
+        self.assertTrue(isinstance(tf.fields['a_field'].label, six.text_type))
+
 
 class Person(Form):
     first_name = CharField()
