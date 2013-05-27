@@ -1188,19 +1188,11 @@ class BaseDatabaseIntrospection(object):
         If expand_dependent is True, then masked but managed dependencies to the
         found models will be included in the returned set.
         """
-        from django.db import models, router
+        from django.db import models
         tables = set()
         for app in models.get_apps():
             for model in models.get_models(app):
-                if not model._meta.managed:
-                    continue
-                if not router.allow_syncdb(self.connection.alias, model):
-                    continue
-                if expand_dependent and model._meta.db_table not in tables:
-                    self._expand_dependent_tables(model, tables)
-
-                tables.add(model._meta.db_table)
-                tables.update([f.m2m_db_table() for f in model._meta.local_many_to_many])
+                self._include_in_tables(model, tables, expand_dependent)
         tables = list(tables)
         if only_existing:
             existing_tables = self.table_names()
@@ -1211,23 +1203,22 @@ class BaseDatabaseIntrospection(object):
             ]
         return tables
 
-    def _expand_dependent_tables(self, model, tables):
+    def _include_in_tables(self, model, tables, expand_dependent):
         from django.db import router
+        if (not model._meta.managed or
+                not router.allow_syncdb(self.connection.alias, model) or
+                model._meta.db_table in tables):
+            return
+        tables.add(model._meta.db_table)
+        tables.update([f.m2m_db_table() for f in model._meta.local_many_to_many])
+        if expand_dependent:
+            self._expand_dependent_tables(model, tables)
+
+    def _expand_dependent_tables(self, model, tables):
         dependent = model._meta.get_all_related_objects(
             include_hidden=True, include_proxy_eq=True)
         for related in dependent:
-            next_model = related.model
-            if not next_model._meta.managed:
-                continue
-            if next_model._meta.db_table in tables:
-                continue
-            if not router.allow_syncdb(
-                    self.connection.alias, next_model):
-                continue
-            tables.add(next_model._meta.db_table)
-            tables.update([f.m2m_db_table()
-                           for f in next_model._meta.local_many_to_many])
-            self._expand_dependent_tables(next_model, tables)
+            self._include_in_tables(related.model, tables, True)
 
     def installed_models(self, tables):
         "Returns a set of all models represented by the provided list of table names."

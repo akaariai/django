@@ -65,7 +65,7 @@ def create_permissions(app, created_models, verbosity, db=DEFAULT_DB_ALIAS, **kw
 
     from django.contrib.contenttypes.models import ContentType
     all_models = get_models()
-    if ContentType not in all_models or auth_app.Permission not in all_models:
+    if auth_app.Permission not in all_models:
         return
 
     app_models = get_models(app)

@@ -12,6 +12,11 @@ class ModWsgiHandlerTestCase(TransactionTestCase):
     """
     Tests for the mod_wsgi authentication handler
     """
+    # Permissions are going to be installed as part of django.contrib.auth,
+    # and permission creation in post_syncdb signal requires ContentTypes.
+    app_mask = ['django.contrib.contenttypes']
+
+
     @skipIfCustomUser
     def test_check_password(self):
         """

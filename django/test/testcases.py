@@ -723,6 +723,12 @@ class TransactionTestCase(SimpleTestCase):
     # Subclasses can ask for resetting of auto increment sequence before each
     # test case
     reset_sequences = False
+    # If the app_mask is None, then all INSTALLED_APPS are usable by the test
+    # case. If it is a list, that list must contain strings that match those
+    # in INSTALLED_APPS. Only models from apps in app_mask are usable. There
+    # is also a special string for app_mask, 'self', which sets the app_mask
+    # to the test's application (as seen by __class__.__module__). Note that
+    # Django's test suite will set app_mask = 'self' for TransactionTestCase.
     app_mask = None
 
     def _pre_setup(self):
@@ -751,16 +757,14 @@ class TransactionTestCase(SimpleTestCase):
             if '.'.join(parts[0:i]) in settings.INSTALLED_APPS:
                 return '.'.join(parts[0:i])
 
-    @property
-    def always_mask(self):
-        return os.environ.get('DJANGO_ALWAYS_MASK_APPS_TX', False)
-
     def _set_app_mask(self):
-        if (self.always_mask or
-                self.app_mask is not None and self.app_mask != '__all__'):
-            app_mask = self.app_mask or []
+        if self.app_mask is not None:
+            app_mask = self.app_mask
             my_app = self._find_app_module()
-            cache.set_app_mask(([my_app] if my_app else []) + app_mask)
+            if app_mask == 'self':
+                cache.set_app_mask([my_app])
+            else:
+                cache.set_app_mask(([my_app] if my_app else []) + app_mask)
         else:
             cache.set_app_mask(None)
 
@@ -864,10 +868,6 @@ class TestCase(TransactionTestCase):
     You have to use TransactionTestCase, if you need transaction management
     inside a test.
     """
-
-    @property
-    def always_mask(self):
-        return os.environ.get('DJANGO_ALWAYS_MASK_APPS', False)
 
     def _fixture_setup(self):
         if not connections_support_transactions():

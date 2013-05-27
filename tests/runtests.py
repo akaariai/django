@@ -10,8 +10,6 @@ from django import contrib
 from django.utils._os import upath
 from django.utils import six
 
-os.environ.setdefault('DJANGO_ALWAYS_MASK_APPS_TX', 'true')
-
 CONTRIB_MODULE_PATH = 'django.contrib'
 
 TEST_TEMPLATE_DIR = 'templates'
@@ -74,6 +72,11 @@ def get_installed():
 def setup(verbosity, test_labels):
     from django.conf import settings
     from django.db.models.loading import get_apps, load_app
+    # To speed up testing, make TransactionTestCases use only their own app
+    # in app_mask by default.
+    from django.test.testcases import TransactionTestCase, TestCase
+    TransactionTestCase.app_mask = 'self'
+    TestCase.app_mask = None
     state = {
         'INSTALLED_APPS': settings.INSTALLED_APPS,
         'ROOT_URLCONF': getattr(settings, "ROOT_URLCONF", ""),
