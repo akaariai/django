@@ -66,11 +66,22 @@ class BlockNode(Node):
         return result
 
     def super(self):
-        render_context = self.context.render_context
-        if (BLOCK_CONTEXT_KEY in render_context and
-            render_context[BLOCK_CONTEXT_KEY].get_block(self.name) is not None):
-            return mark_safe(self.render(self.context))
-        return ''
+        try:
+            render_context = self.context.render_context
+            if (BLOCK_CONTEXT_KEY in render_context and
+                render_context[BLOCK_CONTEXT_KEY].get_block(self.name) is not None):
+                return mark_safe(self.render(self.context))
+            return ''
+        except Exception as e:
+            # Assume a silent_variable_failure is raised from {{ block.super }}.
+            # This means that in the super block the failure wasn't silenced (that
+            # is, it wasn't risen in variable resolution context). End result is
+            # that the block.super failure is visible in the block's containing
+            # template, but not in the child template doing {{ block.super }}.
+            # So, turn off the silent_variable_failure to correct this disparency.
+            if hasattr(e, 'silent_variable_failure'):
+                e.silent_variable_failure = False
+            raise
 
 class ExtendsNode(Node):
     must_be_first = True
