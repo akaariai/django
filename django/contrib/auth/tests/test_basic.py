@@ -71,6 +71,11 @@ def mock_inputs(inputs):
 
 @skipIfCustomUser
 class BasicTestCase(TestCase):
+    available_apps = [
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+    ]
+
     def test_user(self):
         "Check that users can be created and can set their password"
         u = User.objects.create_user('testuser', 'test@example.com', 'testpw')

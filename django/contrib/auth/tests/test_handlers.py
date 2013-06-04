@@ -12,6 +12,11 @@ class ModWsgiHandlerTestCase(TransactionTestCase):
     """
     Tests for the mod_wsgi authentication handler
     """
+    available_apps = [
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+    ]
+
     @skipIfCustomUser
     def test_check_password(self):
         """

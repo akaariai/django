@@ -6,6 +6,13 @@ from django.utils.unittest import SkipTest
 from django.utils.translation import ugettext as _
 
 class AdminSeleniumWebDriverTestCase(LiveServerTestCase):
+    available_apps = [
+        'django.contrib.admin',
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'django.contrib.sessions',
+        'django.contrib.sites',
+    ]
     webdriver_class = 'selenium.webdriver.firefox.webdriver.WebDriver'
 
     @classmethod

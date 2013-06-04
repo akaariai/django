@@ -32,6 +32,11 @@ TEST_SETTINGS = {
 class LiveServerBase(LiveServerTestCase):
     urls = 'servers.urls'
     fixtures = ['testdata.json']
+    available_apps = [
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'django.contrib.sessions',
+    ]
 
     @classmethod
     def setUpClass(cls):
