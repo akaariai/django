@@ -15,6 +15,8 @@ import os
 __all__ = ('get_apps', 'get_app', 'get_models', 'get_model', 'register_models',
         'load_app', 'app_cache_ready')
 
+class UnavailableApp(ValueError):
+    pass
 
 class AppCache(object):
     """
@@ -43,10 +45,16 @@ class AppCache(object):
         postponed=[],
         nesting_level=0,
         _get_models_cache={},
+        available_apps=None,
     )
 
     def __init__(self):
         self.__dict__ = self.__shared_state
+
+    def set_app_mask(self, mask):
+        if mask is not None:
+            mask = set(mask)
+        self.available_apps = mask
 
     def _populate(self):
         """
@@ -140,7 +148,8 @@ class AppCache(object):
         # list page, for example.
         apps = [(v, k) for k, v in self.app_store.items()]
         apps.sort()
-        return [elt[1] for elt in apps]
+        return [elt[1] for elt in apps
+                if self.available_apps is None or elt[1].__name__.rsplit('.', 1)[0] in self.available_apps]
 
     def get_app_paths(self):
         """
@@ -185,6 +194,20 @@ class AppCache(object):
         self._populate()
         return self.app_errors
 
+    @property
+    def names_mask(self):
+        return set(app.rsplit('.', 1)[-1] for app in self.available_apps)
+
+    def _filter_masked_models(self, models):
+        if self.available_apps is not None:
+            names_mask = self.names_mask
+            ret_models = []
+            for model in models:
+                if model._meta.app_label in names_mask:
+                    ret_models.append(model)
+            return ret_models
+        return models
+
     def get_models(self, app_mod=None,
                    include_auto_created=False, include_deferred=False,
                    only_installed=True, include_swapped=False):
@@ -209,8 +232,10 @@ class AppCache(object):
         include_swapped, they will be.
         """
         cache_key = (app_mod, include_auto_created, include_deferred, only_installed, include_swapped)
+        model_list = None
         try:
-            return self._get_models_cache[cache_key]
+            model_list = self._get_models_cache[cache_key]
+            return self._filter_masked_models(model_list)
         except KeyError:
             pass
         self._populate()
@@ -235,21 +260,30 @@ class AppCache(object):
                     (not model._meta.swapped or include_swapped))
             )
         self._get_models_cache[cache_key] = model_list
-        return model_list
+        return self._filter_masked_models(model_list)
 
     def get_model(self, app_label, model_name,
-                  seed_cache=True, only_installed=True):
+                  seed_cache=True, only_installed=True, masked=False):
         """
         Returns the model matching the given app_label and case-insensitive
         model_name.
 
-        Returns None if no model is found.
+        Returns None if no model is found. Raises UnavailableApp when
+        requesting a masked model and the param `masked` is False.
         """
         if seed_cache:
             self._populate()
         if only_installed and app_label not in self.app_labels:
             return None
-        return self.app_models.get(app_label, SortedDict()).get(model_name.lower())
+        if not masked and (self.available_apps is not None
+                           and app_label not in self.names_mask):
+            raise UnavailableApp(
+                'Requesting model from currently masked application "%s"' %
+                app_label)
+        try:
+            return self.app_models[app_label][model_name.lower()]
+        except KeyError:
+            return None
 
     def register_models(self, app_label, *models):
         """
@@ -287,3 +321,4 @@ get_model = cache.get_model
 register_models = cache.register_models
 load_app = cache.load_app
 app_cache_ready = cache.app_cache_ready
+set_app_mask = cache.set_app_mask

@@ -110,7 +110,8 @@ def sql_flush(style, connection, only_django=False, reset_sequences=True):
     models and are in INSTALLED_APPS will be included.
     """
     if only_django:
-        tables = connection.introspection.django_table_names(only_existing=True)
+        tables = connection.introspection.django_table_names(
+            only_existing=True, follow_forwards_relations=True)
     else:
         tables = connection.introspection.table_names()
     seqs = connection.introspection.sequence_list() if reset_sequences else ()

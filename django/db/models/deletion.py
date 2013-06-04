@@ -1,7 +1,7 @@
 from operator import attrgetter
 
 from django.db import connections, transaction, IntegrityError
-from django.db.models import signals, sql
+from django.db.models import signals, sql, UnavailableApp
 from django.utils.datastructures import SortedDict
 from django.utils import six
 
@@ -209,9 +209,14 @@ class Collector(object):
         Gets a QuerySet of objects related to ``objs`` via the relation ``related``.
 
         """
-        return related.model._base_manager.using(self.using).filter(
-            **{"%s__in" % related.field.name: objs}
-        )
+        try:
+            return related.model._base_manager.using(self.using).filter(
+                **{"%s__in" % related.field.name: objs}
+            )
+        except UnavailableApp:
+            # Do not cascade into masked apps - those should not have
+            # data dependent on current model.
+            return []
 
     def instances_with_model(self):
         for model, instances in six.iteritems(self.data):

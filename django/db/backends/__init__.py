@@ -390,7 +390,7 @@ class BaseDatabaseWrapper(object):
     def disable_constraint_checking(self):
         """
         Backends can implement as needed to temporarily disable foreign key
-        constraint checking. Should return True if the constraints were 
+        constraint checking. Should return True if the constraints were
         disabled and will need to be reenabled.
         """
         return False
@@ -1177,24 +1177,22 @@ class BaseDatabaseIntrospection(object):
         """
         raise NotImplementedError
 
-    def django_table_names(self, only_existing=False):
+    def django_table_names(self, only_existing=False, follow_forwards_relations=False):
         """
         Returns a list of all table names that have associated Django models and
         are in INSTALLED_APPS.
 
         If only_existing is True, the resulting list will only include the tables
         that actually exist in the database.
+
+        If follow_forwards_relations is True, then masked but managed dependencies to the
+        found models will be included in the returned set.
         """
-        from django.db import models, router
+        from django.db import models
         tables = set()
         for app in models.get_apps():
             for model in models.get_models(app):
-                if not model._meta.managed:
-                    continue
-                if not router.allow_syncdb(self.connection.alias, model):
-                    continue
-                tables.add(model._meta.db_table)
-                tables.update([f.m2m_db_table() for f in model._meta.local_many_to_many])
+                self._include_in_tables(model, tables, follow_forwards_relations)
         tables = list(tables)
         if only_existing:
             existing_tables = self.table_names()
@@ -1204,6 +1202,23 @@ class BaseDatabaseIntrospection(object):
                 if self.table_name_converter(t) in existing_tables
             ]
         return tables
+
+    def _include_in_tables(self, model, tables, follow_forwards_relations):
+        from django.db import router
+        if (not model._meta.managed or
+                not router.allow_syncdb(self.connection.alias, model) or
+                model._meta.db_table in tables):
+            return
+        tables.add(model._meta.db_table)
+        tables.update([f.m2m_db_table() for f in model._meta.local_many_to_many])
+        if follow_forwards_relations:
+            self._expand_dependent_tables(model, tables)
+
+    def _expand_dependent_tables(self, model, tables):
+        dependent = model._meta.get_all_related_objects(
+            include_hidden=True, include_proxy_eq=True)
+        for related in dependent:
+            self._include_in_tables(related.model, tables, True)
 
     def installed_models(self, tables):
         "Returns a set of all models represented by the provided list of table names."

@@ -1,7 +1,8 @@
 import copy
 from django.db import router
 from django.db.models.query import QuerySet, insert_query, RawQuerySet
-from django.db.models import signals
+from django.db.models import get_model, signals
+from django.db.models.loading import cache
 from django.db.models.fields import FieldDoesNotExist
 from django.utils import six
 from django.utils.deprecation import RenameMethodsBase
@@ -124,6 +125,9 @@ class Manager(six.with_metaclass(RenameManagerMethods)):
         """Returns a new QuerySet object.  Subclasses can override this method
         to easily customize the behavior of the Manager.
         """
+        # Check that the model is available in the app cache. This is required
+        # when TransactionTestCase.available_apps is set.
+        get_model(self.model._meta.app_label, self.model._meta.model_name)
         return QuerySet(self.model, using=self._db)
 
     def none(self):

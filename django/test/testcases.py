@@ -28,6 +28,7 @@ from django.core.servers.basehttp import (WSGIRequestHandler, WSGIServer,
     WSGIServerException)
 from django.core.urlresolvers import clear_url_caches, set_urlconf
 from django.db import connection, connections, DEFAULT_DB_ALIAS, transaction
+from django.db.models.loading import cache
 from django.forms.fields import CharField
 from django.http import QueryDict
 from django.test.client import Client
@@ -724,6 +725,13 @@ class TransactionTestCase(SimpleTestCase):
     # Subclasses can ask for resetting of auto increment sequence before each
     # test case
     reset_sequences = False
+    # If the available_apps is None, then all INSTALLED_APPS are usable by the test
+    # case. If it is a list, that list must contain strings that match those
+    # in INSTALLED_APPS. Only models from apps in available_apps are usable. There
+    # is also a special string for available_apps, 'self', which sets the available_apps
+    # to the test's application (as seen by __class__.__module__). Note that
+    # Django's test suite will set available_apps = 'self' for TransactionTestCase.
+    available_apps = None
 
     def _pre_setup(self):
         """Performs any pre-test setup. This includes:
@@ -733,7 +741,34 @@ class TransactionTestCase(SimpleTestCase):
              named fixtures.
         """
         super(TransactionTestCase, self)._pre_setup()
-        self._fixture_setup()
+        self._set_app_mask()
+        try:
+            self._fixture_setup()
+        except:
+            # Make sure we don't leak app masks.
+            cache.set_app_mask(None)
+            raise
+
+    def _find_app_module(self):
+        """
+        Try to find the application module this test is in, or None if this
+        test's module can't be found from any installed app.
+        """
+        parts = self.__class__.__module__.split('.')
+        for i in range(len(parts), 0, -1):
+            if '.'.join(parts[0:i]) in settings.INSTALLED_APPS:
+                return '.'.join(parts[0:i])
+
+    def _set_app_mask(self):
+        if self.available_apps is not None:
+            available_apps = self.available_apps
+            my_app = self._find_app_module()
+            if available_apps == 'self':
+                cache.set_app_mask([my_app])
+            else:
+                cache.set_app_mask(([my_app] if my_app else []) + available_apps)
+        else:
+            cache.set_app_mask(None)
 
     def _databases_names(self, include_mirrors=True):
         # If the test case has a multi_db=True flag, act on all databases,
@@ -775,17 +810,20 @@ class TransactionTestCase(SimpleTestCase):
            * Force closing the connection, so that the next test gets
              a clean cursor.
         """
-        self._fixture_teardown()
-        super(TransactionTestCase, self)._post_teardown()
-        # Some DB cursors include SQL statements as part of cursor
-        # creation. If you have a test that does rollback, the effect
-        # of these statements is lost, which can effect the operation
-        # of tests (e.g., losing a timezone setting causing objects to
-        # be created with the wrong time).
-        # To make sure this doesn't happen, get a clean connection at the
-        # start of every test.
-        for conn in connections.all():
-            conn.close()
+        try:
+            self._fixture_teardown()
+            super(TransactionTestCase, self)._post_teardown()
+            # Some DB cursors include SQL statements as part of cursor
+            # creation. If you have a test that does rollback, the effect
+            # of these statements is lost, which can effect the operation
+            # of tests (e.g., losing a timezone setting causing objects to
+            # be created with the wrong time).
+            # To make sure this doesn't happen, get a clean connection at the
+            # start of every test.
+            for conn in connections.all():
+                conn.close()
+        finally:
+            cache.set_app_mask(None)
 
     def _fixture_teardown(self):
         for db_name in self._databases_names(include_mirrors=False):
