@@ -343,6 +343,9 @@ class BaseDatabaseWrapper(object):
         Roll back any ongoing transaction and clean the transaction state
         stack.
         """
+        if self.in_atomic_block:
+            # Lets trust the atomic() code to do proper cleanup
+            return
         if self._dirty:
             self.rollback()
         while self.transaction_state:
