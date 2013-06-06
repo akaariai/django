@@ -158,7 +158,7 @@ class ContentType(models.Model):
         # We allow for masked applications as sometimes all the contenttypes
         # are printed, and __str__ would blow up for any masked contenttype.
         return models.get_model(self.app_label, self.model,
-                                only_installed=False, masked=True)
+                                only_installed=False)
 
     def get_object_for_this_type(self, **kwargs):
         """

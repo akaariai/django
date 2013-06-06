@@ -741,13 +741,7 @@ class TransactionTestCase(SimpleTestCase):
              named fixtures.
         """
         super(TransactionTestCase, self)._pre_setup()
-        self._set_app_mask()
-        try:
-            self._fixture_setup()
-        except:
-            # Make sure we don't leak app masks.
-            cache.set_app_mask(None)
-            raise
+        self._fixture_setup()
 
     def _find_app_module(self):
         """
@@ -759,16 +753,18 @@ class TransactionTestCase(SimpleTestCase):
             if '.'.join(parts[0:i]) in settings.INSTALLED_APPS:
                 return '.'.join(parts[0:i])
 
-    def _set_app_mask(self):
+    def __call__(self, result=None):
         if self.available_apps is not None:
             available_apps = self.available_apps
             my_app = self._find_app_module()
             if available_apps == 'self':
-                cache.set_app_mask([my_app])
+                available_apps = [my_app]
             else:
-                cache.set_app_mask(([my_app] if my_app else []) + available_apps)
+                available_apps = ([my_app] if my_app else []) + available_apps
+            with override_settings(INSTALLED_APPS=available_apps):
+                return super(TransactionTestCase, self).__call__(result=result)
         else:
-            cache.set_app_mask(None)
+            return super(TransactionTestCase, self).__call__(result=result)
 
     def _databases_names(self, include_mirrors=True):
         # If the test case has a multi_db=True flag, act on all databases,
@@ -810,20 +806,17 @@ class TransactionTestCase(SimpleTestCase):
            * Force closing the connection, so that the next test gets
              a clean cursor.
         """
-        try:
-            self._fixture_teardown()
-            super(TransactionTestCase, self)._post_teardown()
-            # Some DB cursors include SQL statements as part of cursor
-            # creation. If you have a test that does rollback, the effect
-            # of these statements is lost, which can effect the operation
-            # of tests (e.g., losing a timezone setting causing objects to
-            # be created with the wrong time).
-            # To make sure this doesn't happen, get a clean connection at the
-            # start of every test.
-            for conn in connections.all():
-                conn.close()
-        finally:
-            cache.set_app_mask(None)
+        self._fixture_teardown()
+        super(TransactionTestCase, self)._post_teardown()
+        # Some DB cursors include SQL statements as part of cursor
+        # creation. If you have a test that does rollback, the effect
+        # of these statements is lost, which can effect the operation
+        # of tests (e.g., losing a timezone setting causing objects to
+        # be created with the wrong time).
+        # To make sure this doesn't happen, get a clean connection at the
+        # start of every test.
+        for conn in connections.all():
+            conn.close()
 
     def _fixture_teardown(self):
         for db_name in self._databases_names(include_mirrors=False):

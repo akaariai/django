@@ -45,16 +45,14 @@ class AppCache(object):
         postponed=[],
         nesting_level=0,
         _get_models_cache={},
-        available_apps=None,
+        available_apps=set(),
     )
 
     def __init__(self):
         self.__dict__ = self.__shared_state
 
     def set_app_mask(self, mask):
-        if mask is not None:
-            mask = set(mask)
-        self.available_apps = mask
+        self.available_apps = set(mask)
 
     def _populate(self):
         """
@@ -123,6 +121,8 @@ class AppCache(object):
                     raise
 
         self.nesting_level -= 1
+        if app_name not in self.available_apps:
+            self.available_apps.add(app_name)
         if models not in self.app_store:
             self.app_store[models] = len(self.app_store)
             self.app_labels[self._label_for(models)] = models
@@ -198,8 +198,8 @@ class AppCache(object):
     def names_mask(self):
         return set(app.rsplit('.', 1)[-1] for app in self.available_apps)
 
-    def _filter_masked_models(self, models):
-        if self.available_apps is not None:
+    def _filter_masked_models(self, models, only_installed):
+        if self.available_apps is not None and only_installed:
             names_mask = self.names_mask
             ret_models = []
             for model in models:
@@ -235,7 +235,7 @@ class AppCache(object):
         model_list = None
         try:
             model_list = self._get_models_cache[cache_key]
-            return self._filter_masked_models(model_list)
+            return self._filter_masked_models(model_list, only_installed)
         except KeyError:
             pass
         self._populate()
@@ -260,10 +260,10 @@ class AppCache(object):
                     (not model._meta.swapped or include_swapped))
             )
         self._get_models_cache[cache_key] = model_list
-        return self._filter_masked_models(model_list)
+        return self._filter_masked_models(model_list, only_installed)
 
     def get_model(self, app_label, model_name,
-                  seed_cache=True, only_installed=True, masked=False):
+                  seed_cache=True, only_installed=True):
         """
         Returns the model matching the given app_label and case-insensitive
         model_name.
@@ -275,8 +275,9 @@ class AppCache(object):
             self._populate()
         if only_installed and app_label not in self.app_labels:
             return None
-        if not masked and (self.available_apps is not None
-                           and app_label not in self.names_mask):
+        if only_installed and (
+                self.available_apps is not None
+                and app_label not in self.names_mask):
             raise UnavailableApp(
                 'Requesting model from currently masked application "%s"' %
                 app_label)
@@ -309,6 +310,12 @@ class AppCache(object):
         self._get_models_cache.clear()
 
 cache = AppCache()
+from django.test.signals import setting_changed
+def installed_apps_changed(setting=None, value=None, **kwargs):
+    if setting != 'INSTALLED_APPS':
+        return
+    cache.set_app_mask(value)
+setting_changed.connect(installed_apps_changed)
 
 # These methods were always module level, so are kept that way for backwards
 # compatibility.
@@ -321,4 +328,3 @@ get_model = cache.get_model
 register_models = cache.register_models
 load_app = cache.load_app
 app_cache_ready = cache.app_cache_ready
-set_app_mask = cache.set_app_mask
