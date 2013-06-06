@@ -127,7 +127,7 @@ class Manager(six.with_metaclass(RenameManagerMethods)):
         """
         # Check that the model is available in the app cache. This is required
         # when TransactionTestCase.available_apps is set.
-        get_model(self.model._meta.app_label, self.model._meta.model_name)
+        #get_model(self.model._meta.app_label, self.model._meta.model_name)
         return QuerySet(self.model, using=self._db)
 
     def none(self):
