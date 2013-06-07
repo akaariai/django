@@ -330,6 +330,17 @@ class AtomicErrorsTests(TransactionTestCase):
                     transaction.savepoint_commit(sid)
         self.assertEqual(Reporter.objects.count(), 0)
 
+    def test_manual_savepoint_in_failed_block(self):
+        with transaction.atomic():
+            Reporter.objects.create(first_name='A', last_name='B')
+            try:
+                Reporter.objects.create(first_name='A', last_name=None)
+            except Exception:
+                with self.assertRaises(transaction.TransactionManagementError):
+                    transaction.savepoint()
+            self.assertTrue(connection.needs_rollback)
+        self.assertEqual(Reporter.objects.count(), 0)
+
 
 class AtomicMiscTests(TransactionTestCase):
 

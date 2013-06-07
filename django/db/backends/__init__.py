@@ -218,6 +218,9 @@ class BaseDatabaseWrapper(object):
         identifier for the savepoint that will be used for the subsequent
         rollback or commit. Does nothing if savepoints are not supported.
         """
+        if self.needs_rollback:
+            raise TransactionManagementError(
+                "Can't create a savepoint - the transaction is marked as needing rollback")
         if not self._savepoint_allowed():
             return
 
