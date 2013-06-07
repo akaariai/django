@@ -308,6 +308,28 @@ class AtomicErrorsTests(TransactionTestCase):
             with self.assertRaises(transaction.TransactionManagementError):
                 transaction.leave_transaction_management()
 
+    def test_atomic_mixed_with_manual_savepoint_rollback(self):
+        with transaction.atomic():
+            r = Reporter.objects.create(first_name='A', last_name='B')
+            sid = transaction.savepoint()
+            with self.assertRaises(IntegrityError):
+                try:
+                    Reporter.objects.create(pk=r.pk)
+                finally:
+                    transaction.savepoint_rollback(sid)
+        self.assertEqual(Reporter.objects.count(), 1)
+
+    def test_atomic_mixed_with_manual_savepoint_commit(self):
+        with transaction.atomic():
+            r = Reporter.objects.create(first_name='A', last_name='B')
+            sid = transaction.savepoint()
+            with self.assertRaises(transaction.TransactionManagementError):
+                try:
+                    Reporter.objects.create(pk=r.pk)
+                finally:
+                    transaction.savepoint_commit(sid)
+        self.assertEqual(Reporter.objects.count(), 0)
+
 
 class AtomicMiscTests(TransactionTestCase):
 

@@ -198,8 +198,12 @@ class BaseDatabaseWrapper(object):
 
     def _savepoint_rollback(self, sid):
         self.cursor().execute(self.ops.savepoint_rollback_sql(sid))
+        self.needs_rollback = False
 
     def _savepoint_commit(self, sid):
+        if self.needs_rollback:
+            raise TransactionManagementError(
+                "Can't commit - the transaction is marked as needing rollback")
         self.cursor().execute(self.ops.savepoint_commit_sql(sid))
 
     def _savepoint_allowed(self):
