@@ -3,25 +3,8 @@ from django.contrib.admin.models import LogEntry
 
 register = template.Library()
 
-class AdminLogNode(template.Node):
-    def __init__(self, limit, varname, user):
-        self.limit, self.varname, self.user = limit, varname, user
-
-    def __repr__(self):
-        return "<GetAdminLog Node>"
-
-    def render(self, context):
-        if self.user is None:
-            context[self.varname] = LogEntry.objects.all().select_related('content_type', 'user')[:self.limit]
-        else:
-            user_id = self.user
-            if not user_id.isdigit():
-                user_id = context[self.user].pk
-            context[self.varname] = LogEntry.objects.filter(user__pk__exact=user_id).select_related('content_type', 'user')[:int(self.limit)]
-        return ''
-
 @register.tag
-def get_admin_log(parser, token):
+class AdminLogNode(template.TemplateTag):
     """
     Populates a template variable with the admin log for the given criteria.
 
@@ -39,18 +22,36 @@ def get_admin_log(parser, token):
     (user ID) or the name of a template context variable containing the user
     object whose ID you want.
     """
-    tokens = token.contents.split()
-    if len(tokens) < 4:
-        raise template.TemplateSyntaxError(
-            "'get_admin_log' statements require two arguments")
-    if not tokens[1].isdigit():
-        raise template.TemplateSyntaxError(
-            "First argument to 'get_admin_log' must be an integer")
-    if tokens[2] != 'as':
-        raise template.TemplateSyntaxError(
-            "Second argument to 'get_admin_log' must be 'as'")
-    if len(tokens) > 4:
-        if tokens[4] != 'for_user':
+    grammar = template.Grammar('get_admin_log')
+
+    def __init__(self, parser, parse_result):
+        bits = parse_result.arguments
+
+        if len(bits) < 3:
             raise template.TemplateSyntaxError(
-                "Fourth argument to 'get_admin_log' must be 'for_user'")
-    return AdminLogNode(limit=tokens[1], varname=tokens[3], user=(tokens[5] if len(tokens) > 5 else None))
+                "'get_admin_log' statements require two arguments")
+        if not bits[0].isdigit():
+            raise template.TemplateSyntaxError(
+                "First argument to 'get_admin_log' must be an integer")
+        if bits[1] != 'as':
+            raise template.TemplateSyntaxError(
+                "Second argument to 'get_admin_log' must be 'as'")
+        if len(bits) > 3:
+            if bits[3] != 'for_user':
+                raise template.TemplateSyntaxError(
+                    "Fourth argument to 'get_admin_log' must be 'for_user'")
+
+        self.limit, self.varname, self.user = bits[0], bits[2], (bits[4] if len(bits) > 4 else None)
+
+    def __repr__(self):
+        return "<GetAdminLog Node>"
+
+    def render(self, context):
+        if self.user is None:
+            context[self.varname] = LogEntry.objects.all().select_related('content_type', 'user')[:self.limit]
+        else:
+            user_id = self.user
+            if not user_id.isdigit():
+                user_id = context[self.user].pk
+            context[self.varname] = LogEntry.objects.filter(user__pk__exact=user_id).select_related('content_type', 'user')[:int(self.limit)]
+        return ''

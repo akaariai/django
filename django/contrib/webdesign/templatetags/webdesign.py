@@ -2,28 +2,12 @@ from __future__ import unicode_literals
 
 from django.contrib.webdesign.lorem_ipsum import words, paragraphs
 from django import template
+from django.template.generic import TemplateTag, Grammar
 
 register = template.Library()
 
-class LoremNode(template.Node):
-    def __init__(self, count, method, common):
-        self.count, self.method, self.common = count, method, common
-
-    def render(self, context):
-        try:
-            count = int(self.count.resolve(context))
-        except (ValueError, TypeError):
-            count = 1
-        if self.method == 'w':
-            return words(count, common=self.common)
-        else:
-            paras = paragraphs(count, common=self.common)
-        if self.method == 'p':
-            paras = ['<p>%s</p>' % p for p in paras]
-        return '\n\n'.join(paras)
-
 @register.tag
-def lorem(parser, token):
+class LoremNode(TemplateTag):
     """
     Creates random Latin text useful for providing test data in templates.
 
@@ -46,23 +30,43 @@ def lorem(parser, token):
           and two random paragraphs each wrapped in HTML ``<p>`` tags
         * ``{% lorem 2 w random %}`` will output two random latin words
     """
-    bits = list(token.split_contents())
-    tagname = bits[0]
-    # Random bit
-    common = bits[-1] != 'random'
-    if not common:
-        bits.pop()
-    # Method bit
-    if bits[-1] in ('w', 'p', 'b'):
-        method = bits.pop()
-    else:
-        method = 'b'
-    # Count bit
-    if len(bits) > 1:
-        count = bits.pop()
-    else:
-        count = '1'
-    count = parser.compile_filter(count)
-    if len(bits) != 1:
-        raise template.TemplateSyntaxError("Incorrect format for %r tag" % tagname)
-    return LoremNode(count, method, common)
+    grammar = Grammar('lorem')
+
+    def __init__(self, parser, parse_result):
+        bits = parse_result.arguments[:]
+        tagname = parse_result.tagname
+
+        # Random bit
+        common = bits[-1] != 'random'
+        if not common:
+            bits.pop()
+        # Method bit
+        if bits[-1] in ('w', 'p', 'b'):
+            method = bits.pop()
+        else:
+            method = 'b'
+        # Count bit
+        if len(bits) > 0:
+            count = bits.pop()
+        else:
+            count = '1'
+        count = parser.compile_filter(count)
+        if len(bits) != 0:
+            raise template.TemplateSyntaxError("Incorrect format for %r tag" % tagname)
+
+        self.common = common
+        self.method = method
+        self.count = count
+
+    def render(self, context):
+        try:
+            count = int(self.count.resolve(context))
+        except (ValueError, TypeError):
+            count = 1
+        if self.method == 'w':
+            return words(count, common=self.common)
+        else:
+            paras = paragraphs(count, common=self.common)
+        if self.method == 'p':
+            paras = ['<p>%s</p>' % p for p in paras]
+        return '\n\n'.join(paras)

@@ -1,4 +1,4 @@
-from django.template import Node
+from django.template import TemplateTag, Grammar
 from django.template import TemplateSyntaxError, Library
 from django.utils import formats
 from django.utils.encoding import force_text
@@ -21,23 +21,8 @@ def unlocalize(value):
     """
     return force_text(value)
 
-class LocalizeNode(Node):
-    def __init__(self, nodelist, use_l10n):
-        self.nodelist = nodelist
-        self.use_l10n = use_l10n
-
-    def __repr__(self):
-        return "<LocalizeNode>"
-
-    def render(self, context):
-        old_setting = context.use_l10n
-        context.use_l10n = self.use_l10n
-        output = self.nodelist.render(context)
-        context.use_l10n = old_setting
-        return output
-
-@register.tag('localize')
-def localize_tag(parser, token):
+@register.tag
+class LocalizeNode(TemplateTag):
     """
     Forces or prevents localization of values, regardless of the value of
     `settings.USE_L10N`.
@@ -49,14 +34,25 @@ def localize_tag(parser, token):
         {% endlocalize %}
 
     """
-    use_l10n = None
-    bits = list(token.split_contents())
-    if len(bits) == 1:
-        use_l10n = True
-    elif len(bits) > 2 or bits[1] not in ('on', 'off'):
-        raise TemplateSyntaxError("%r argument should be 'on' or 'off'" % bits[0])
-    else:
-        use_l10n = bits[1] == 'on'
-    nodelist = parser.parse(('endlocalize',))
-    parser.delete_first_token()
-    return LocalizeNode(nodelist, use_l10n)
+    grammar = Grammar('localize endlocalize')
+
+    def __init__(self, parser, parse_result):
+        self.use_l10n = None
+        bits = parse_result.arguments
+        if len(bits) == 0:
+            self.use_l10n = True
+        elif len(bits) > 1 or bits[0] not in ('on', 'off'):
+            raise TemplateSyntaxError("%r argument should be 'on' or 'off'" % self.parse_result.tagname)
+        else:
+            self.use_l10n = bits[0] == 'on'
+
+    def __repr__(self):
+        return "<LocalizeNode>"
+
+    def render(self, context):
+        old_setting = context.use_l10n
+        context.use_l10n = self.use_l10n
+        output = self.nodelist.render(context)
+        context.use_l10n = old_setting
+        return output
+

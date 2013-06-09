@@ -5,15 +5,8 @@ from django.contrib.staticfiles.storage import staticfiles_storage
 register = template.Library()
 
 
+@register.tag
 class StaticFilesNode(StaticNode):
-
-    def url(self, context):
-        path = self.path.resolve(context)
-        return staticfiles_storage.url(path)
-
-
-@register.tag('static')
-def do_static(parser, token):
     """
     A template tag that returns the URL to a file
     using staticfiles' storage backend
@@ -30,7 +23,11 @@ def do_static(parser, token):
         {% static variable_with_path as varname %}
 
     """
-    return StaticFilesNode.handle_token(parser, token)
+    grammar = template.Grammar('static')
+
+    def url(self, context):
+        path = self.path.resolve(context)
+        return staticfiles_storage.url(path)
 
 
 def static(path):

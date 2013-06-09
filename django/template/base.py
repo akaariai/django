@@ -1,5 +1,6 @@
 from __future__ import absolute_import, unicode_literals
 
+import inspect
 import re
 from functools import partial
 from inspect import getargspec
@@ -1012,35 +1013,18 @@ def parse_bits(parser, bits, params, varargs, varkw, defaults,
             (name, ", ".join(["'%s'" % p for p in unhandled_params])))
     return args, kwargs
 
-def generic_tag_compiler(parser, token, params, varargs, varkw, defaults,
-                         name, takes_context, node_class):
+def _get_resolved_arguments(args, kwargs, takes_context, context):
     """
-    Returns a template.Node subclass.
+    A helper for tags such as SimpleTag, InclusionTag and AssignmentTag.
+    Manages the positional and keyword arguments to be passed to the decorated
+    function.
     """
-    bits = token.split_contents()[1:]
-    args, kwargs = parse_bits(parser, bits, params, varargs, varkw,
-                              defaults, takes_context, name)
-    return node_class(takes_context, args, kwargs)
-
-class TagHelperNode(Node):
-    """
-    Base class for tag helper nodes such as SimpleNode, InclusionNode and
-    AssignmentNode. Manages the positional and keyword arguments to be passed
-    to the decorated function.
-    """
-
-    def __init__(self, takes_context, args, kwargs):
-        self.takes_context = takes_context
-        self.args = args
-        self.kwargs = kwargs
-
-    def get_resolved_arguments(self, context):
-        resolved_args = [var.resolve(context) for var in self.args]
-        if self.takes_context:
-            resolved_args = [context] + resolved_args
-        resolved_kwargs = dict((k, v.resolve(context))
-                                for k, v in self.kwargs.items())
-        return resolved_args, resolved_kwargs
+    resolved_args = [var.resolve(context) for var in args]
+    if takes_context:
+        resolved_args = [context] + resolved_args
+    resolved_kwargs = dict((k, v.resolve(context))
+                            for k, v in kwargs.items())
+    return resolved_args, resolved_kwargs
 
 class Library(object):
     def __init__(self):
@@ -1048,20 +1032,35 @@ class Library(object):
         self.tags = {}
 
     def tag(self, name=None, compile_function=None):
+        from django.template.generic import TemplateTag, UnknownGrammar
         if name is None and compile_function is None:
             # @register.tag()
             return self.tag_function
         elif name is not None and compile_function is None:
             if callable(name):
                 # @register.tag
-                return self.tag_function(name)
+                if inspect.isclass(name) and issubclass(name, TemplateTag):
+                    # When a TemplateTag instance is registered, create a
+                    # compile_funcion from the class. It's nicer to handle this
+                    # separately than handling this class as any other
+                    # callable, and ending with the (parser, token) in the
+                    # constructor of TemplateTag.
+                    fname, func = name.as_compile_funcion()
+                    self.tag(name=fname, compile_function=func)
+                    return name
+                else:
+                    return self.tag_function(name)
             else:
                 # @register.tag('somename') or @register.tag(name='somename')
                 def dec(func):
                     return self.tag(name, func)
                 return dec
         elif name is not None and compile_function is not None:
-            # register.tag('somename', somefunc)
+            # Make sure that every compile_function has a grammar instance
+            # attached.
+            if not hasattr(compile_function, 'grammar'):
+                compile_function.grammar = UnknownGrammar(name)
+
             self.tags[name] = compile_function
             return compile_function
         else:
@@ -1069,7 +1068,8 @@ class Library(object):
                 "Library.tag: (%r, %r)", (name, compile_function))
 
     def tag_function(self, func):
-        self.tags[getattr(func, "_decorated_function", func).__name__] = func
+        name = getattr(func, "_decorated_function", func).__name__
+        self.tag(name=name, compile_function=func)
         return func
 
     def filter(self, name=None, filter_func=None, **flags):
@@ -1111,23 +1111,27 @@ class Library(object):
         return self.filter(name, func, **flags)
 
     def simple_tag(self, func=None, takes_context=None, name=None):
+        from django.template.generic import TemplateTag, Grammar
         def dec(func):
             params, varargs, varkw, defaults = getargspec(func)
 
-            class SimpleNode(TagHelperNode):
-
-                def render(self, context):
-                    resolved_args, resolved_kwargs = self.get_resolved_arguments(context)
-                    return func(*resolved_args, **resolved_kwargs)
-
             function_name = (name or
                 getattr(func, '_decorated_function', func).__name__)
-            compile_func = partial(generic_tag_compiler,
-                params=params, varargs=varargs, varkw=varkw,
-                defaults=defaults, name=function_name,
-                takes_context=takes_context, node_class=SimpleNode)
-            compile_func.__doc__ = func.__doc__
-            self.tag(function_name, compile_func)
+
+            class _SimpleTag(TemplateTag):
+                __doc__ = func.__doc__
+                grammar = Grammar(function_name)
+
+                def __init__(self, parser, parse_result):
+                    self.args, self.kwargs = parse_bits(parser, parse_result.arguments,
+                              params, varargs, varkw, defaults, takes_context, function_name)
+
+                def render(self, context):
+                    resolved_args, resolved_kwargs = _get_resolved_arguments(self.args,
+                              self.kwargs, takes_context, context)
+                    return func(*resolved_args, **resolved_kwargs)
+
+            self.tag(_SimpleTag)
             return func
 
         if func is None:
@@ -1140,36 +1144,34 @@ class Library(object):
             raise TemplateSyntaxError("Invalid arguments provided to simple_tag")
 
     def assignment_tag(self, func=None, takes_context=None, name=None):
+        from django.template.generic import TemplateTag, Grammar
         def dec(func):
             params, varargs, varkw, defaults = getargspec(func)
-
-            class AssignmentNode(TagHelperNode):
-                def __init__(self, takes_context, args, kwargs, target_var):
-                    super(AssignmentNode, self).__init__(takes_context, args, kwargs)
-                    self.target_var = target_var
-
-                def render(self, context):
-                    resolved_args, resolved_kwargs = self.get_resolved_arguments(context)
-                    context[self.target_var] = func(*resolved_args, **resolved_kwargs)
-                    return ''
 
             function_name = (name or
                 getattr(func, '_decorated_function', func).__name__)
 
-            def compile_func(parser, token):
-                bits = token.split_contents()[1:]
-                if len(bits) < 2 or bits[-2] != 'as':
-                    raise TemplateSyntaxError(
-                        "'%s' tag takes at least 2 arguments and the "
-                        "second last argument must be 'as'" % function_name)
-                target_var = bits[-1]
-                bits = bits[:-2]
-                args, kwargs = parse_bits(parser, bits, params,
-                    varargs, varkw, defaults, takes_context, function_name)
-                return AssignmentNode(takes_context, args, kwargs, target_var)
+            class _AssignmentTag(TemplateTag):
+                grammar = Grammar(function_name)
+                __doc__ = func.__doc__
 
-            compile_func.__doc__ = func.__doc__
-            self.tag(function_name, compile_func)
+                def __init__(self, parser, parse_result):
+                    bits = parse_result.arguments
+                    if len(bits) < 2 or bits[-2] != 'as':
+                        raise TemplateSyntaxError(
+                            "'%s' tag takes at least 2 arguments and the "
+                            "second last argument must be 'as'" % function_name)
+                    self.target_var = bits[-1]
+                    self.args, self.kwargs = parse_bits(parser, bits[:-2],
+                              params, varargs, varkw, defaults, takes_context, function_name)
+
+                def render(self, context):
+                    resolved_args, resolved_kwargs = _get_resolved_arguments(self.args,
+                                self.kwargs, takes_context, context)
+                    context[self.target_var] = func(*resolved_args, **resolved_kwargs)
+                    return ''
+
+            self.tag(_AssignmentTag)
             return func
 
         if func is None:
@@ -1182,16 +1184,28 @@ class Library(object):
             raise TemplateSyntaxError("Invalid arguments provided to assignment_tag")
 
     def inclusion_tag(self, file_name, context_class=Context, takes_context=False, name=None):
+        from django.template.generic import TemplateTag, Grammar
         def dec(func):
             params, varargs, varkw, defaults = getargspec(func)
 
-            class InclusionNode(TagHelperNode):
+            function_name = (name or
+                getattr(func, '_decorated_function', func).__name__)
+
+            class _InclusionTag(TemplateTag):
+                grammar = Grammar(function_name)
+                __doc__ = func.__doc__
+
+                def __init__(self, parser, parse_result):
+                    self.args, self.kwargs = parse_bits(parser, parse_result.arguments,
+                              params, varargs, varkw, defaults, takes_context, function_name)
 
                 def render(self, context):
-                    resolved_args, resolved_kwargs = self.get_resolved_arguments(context)
+                    resolved_args, resolved_kwargs = _get_resolved_arguments(self.args,
+                                self.kwargs, takes_context, context)
+
                     _dict = func(*resolved_args, **resolved_kwargs)
 
-                    if not getattr(self, 'nodelist', False):
+                    if not getattr(self, '_nodelist', False):
                         from django.template.loader import get_template, select_template
                         if isinstance(file_name, Template):
                             t = file_name
@@ -1199,7 +1213,7 @@ class Library(object):
                             t = select_template(file_name)
                         else:
                             t = get_template(file_name)
-                        self.nodelist = t.nodelist
+                        self._nodelist = t.nodelist
                     new_context = context_class(_dict, **{
                         'autoescape': context.autoescape,
                         'current_app': context.current_app,
@@ -1213,18 +1227,46 @@ class Library(object):
                     csrf_token = context.get('csrf_token', None)
                     if csrf_token is not None:
                         new_context['csrf_token'] = csrf_token
-                    return self.nodelist.render(new_context)
+                    return self._nodelist.render(new_context)
 
-            function_name = (name or
-                getattr(func, '_decorated_function', func).__name__)
-            compile_func = partial(generic_tag_compiler,
-                params=params, varargs=varargs, varkw=varkw,
-                defaults=defaults, name=function_name,
-                takes_context=takes_context, node_class=InclusionNode)
-            compile_func.__doc__ = func.__doc__
-            self.tag(function_name, compile_func)
+            self.tag(_InclusionTag)
             return func
         return dec
+
+    def get_grammar(self):
+        return LibraryGrammar(self)
+
+
+class LibraryGrammar(object):
+    def __init__(self, library=None):
+        self._tags = []
+
+        if library:
+            self.add_library(library)
+
+    def add_library(self, library):
+        for name, compile_func in library.tags.items():
+            grammar = compile_func.grammar
+            self._tags.append((grammar.first_tagname, grammar.as_string()))
+
+        self._tags = sorted(self._tags, key=lambda i:i[0])
+
+    def as_string(self, style=None):
+        """
+        Return a BNF like notation.
+        """
+        max_length = max(len(i[0]) for i in self._tags)
+        format = '%%-%ss ::= %%s' % max_length
+
+        return '\n'.join(format % (g[0], g[1]) for g in self._tags)
+
+    @classmethod
+    def from_builtins(cls):
+        library_grammar = cls()
+        for b in builtins:
+            library_grammar.add_library(b)
+        return library_grammar
+
 
 def is_library_missing(name):
     """Check if library that failed to load cannot be found under any

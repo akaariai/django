@@ -16,7 +16,7 @@ class RenameBaseCommentNodeMethods(RenameMethodsBase):
     )
 
 
-class BaseCommentNode(six.with_metaclass(RenameBaseCommentNodeMethods, template.Node)):
+class BaseCommentNode(six.with_metaclass(RenameBaseCommentNodeMethods, template.TemplateTag)):
     """
     Base helper class (abstract) for handling the get_comment_* template tags.
     Looks a bit strange, but the subclasses below should make this a bit more
@@ -24,33 +24,35 @@ class BaseCommentNode(six.with_metaclass(RenameBaseCommentNodeMethods, template.
     """
 
     @classmethod
-    def handle_token(cls, parser, token):
+    def handle_parse_result(cls, parser, parse_result):
         """Class method to parse get_comment_list/count/form and return a Node."""
-        tokens = token.split_contents()
-        if tokens[1] != 'for':
-            raise template.TemplateSyntaxError("Second argument in %r tag must be 'for'" % tokens[0])
+        tokens = parse_result.arguments
+        tagname = parse_result.tagname
+
+        if tokens[0] != 'for':
+            raise template.TemplateSyntaxError("Second argument in %r tag must be 'for'" % tagname)
 
         # {% get_whatever for obj as varname %}
-        if len(tokens) == 5:
-            if tokens[3] != 'as':
-                raise template.TemplateSyntaxError("Third argument in %r must be 'as'" % tokens[0])
+        if len(tokens) == 4:
+            if tokens[2] != 'as':
+                raise template.TemplateSyntaxError("Third argument in %r must be 'as'" % tagname)
             return cls(
-                object_expr = parser.compile_filter(tokens[2]),
-                as_varname = tokens[4],
+                object_expr = parser.compile_filter(tokens[1]),
+                as_varname = tokens[3],
             )
 
         # {% get_whatever for app.model pk as varname %}
-        elif len(tokens) == 6:
-            if tokens[4] != 'as':
-                raise template.TemplateSyntaxError("Fourth argument in %r must be 'as'" % tokens[0])
+        elif len(tokens) == 5:
+            if tokens[3] != 'as':
+                raise template.TemplateSyntaxError("Fourth argument in %r must be 'as'" % tagname)
             return cls(
-                ctype = BaseCommentNode.lookup_content_type(tokens[2], tokens[0]),
-                object_pk_expr = parser.compile_filter(tokens[3]),
-                as_varname = tokens[5]
+                ctype = BaseCommentNode.lookup_content_type(tokens[1], tagname),
+                object_pk_expr = parser.compile_filter(tokens[2]),
+                as_varname = tokens[4]
             )
 
         else:
-            raise template.TemplateSyntaxError("%r tag requires 4 or 5 arguments" % tokens[0])
+            raise template.TemplateSyntaxError("%r tag requires 4 or 5 arguments" % tagname)
 
     @staticmethod
     def lookup_content_type(token, tagname):
@@ -114,18 +116,66 @@ class BaseCommentNode(six.with_metaclass(RenameBaseCommentNodeMethods, template.
         """Subclasses should override this."""
         raise NotImplementedError
 
+@register.tag
 class CommentListNode(BaseCommentNode):
-    """Insert a list of comments into the context."""
+    """
+    Gets the list of comments for the given params and populates the template
+    context with a variable containing that value, whose name is defined by the
+    'as' clause.
+
+    Syntax::
+
+        {% get_comment_list for [object] as [varname]  %}
+        {% get_comment_list for [app].[model] [object_id] as [varname]  %}
+
+    Example usage::
+
+        {% get_comment_list for event as comment_list %}
+        {% for comment in comment_list %}
+            ...
+        {% endfor %}
+
+    """
+    grammar = template.Grammar('get_comment_list')
+
     def get_context_value_from_queryset(self, context, qs):
         return list(qs)
 
+@register.tag
 class CommentCountNode(BaseCommentNode):
-    """Insert a count of comments into the context."""
+    """
+    Gets the comment count for the given params and populates the template
+    context with a variable containing that value, whose name is defined by the
+    'as' clause.
+
+    Syntax::
+
+        {% get_comment_count for [object] as [varname]  %}
+        {% get_comment_count for [app].[model] [object_id] as [varname]  %}
+
+    Example usage::
+
+        {% get_comment_count for event as comment_count %}
+        {% get_comment_count for calendar.event event.id as comment_count %}
+        {% get_comment_count for calendar.event 17 as comment_count %}
+
+    """
+    grammar = template.Grammar('get_comment_count')
+
     def get_context_value_from_queryset(self, context, qs):
         return qs.count()
 
+@register.tag
 class CommentFormNode(BaseCommentNode):
-    """Insert a form for the comment model into the context."""
+    """
+    Get a (new) form object to post a new comment.
+
+    Syntax::
+
+        {% get_comment_form for [object] as [varname] %}
+        {% get_comment_form for [app].[model] [object_id] as [varname] %}
+    """
+    grammar = template.Grammar('get_comment_form')
 
     def get_form(self, context):
         obj = self.get_object(context)
@@ -149,25 +199,37 @@ class CommentFormNode(BaseCommentNode):
         context[self.as_varname] = self.get_form(context)
         return ''
 
+@register.tag
 class RenderCommentFormNode(CommentFormNode):
-    """Render the comment form directly"""
+    """
+    Render the comment form (as returned by ``{% render_comment_form %}``) through
+    the ``comments/form.html`` template.
+
+    Syntax::
+
+        {% render_comment_form for [object] %}
+        {% render_comment_form for [app].[model] [object_id] %}
+    """
+    grammar = template.Grammar('render_comment_form')
 
     @classmethod
-    def handle_token(cls, parser, token):
+    def handle_parse_result(cls, parser, parse_result):
         """Class method to parse render_comment_form and return a Node."""
-        tokens = token.split_contents()
-        if tokens[1] != 'for':
-            raise template.TemplateSyntaxError("Second argument in %r tag must be 'for'" % tokens[0])
+        tokens = parse_result.arguments
+        tagname = parse_result.tagname
+
+        if tokens[0] != 'for':
+            raise template.TemplateSyntaxError("Second argument in %r tag must be 'for'" % tagname)
 
         # {% render_comment_form for obj %}
-        if len(tokens) == 3:
-            return cls(object_expr=parser.compile_filter(tokens[2]))
+        if len(tokens) == 2:
+            return cls(object_expr=parser.compile_filter(tokens[1]))
 
         # {% render_comment_form for app.models pk %}
-        elif len(tokens) == 4:
+        elif len(tokens) == 3:
             return cls(
-                ctype = BaseCommentNode.lookup_content_type(tokens[2], tokens[0]),
-                object_pk_expr = parser.compile_filter(tokens[3])
+                ctype = BaseCommentNode.lookup_content_type(tokens[1], tagname),
+                object_pk_expr = parser.compile_filter(tokens[2])
             )
 
     def render(self, context):
@@ -185,25 +247,42 @@ class RenderCommentFormNode(CommentFormNode):
         else:
             return ''
 
+@register.tag
 class RenderCommentListNode(CommentListNode):
-    """Render the comment list directly"""
+    """
+    Render the comment list (as returned by ``{% get_comment_list %}``)
+    through the ``comments/list.html`` template
+
+    Syntax::
+
+        {% render_comment_list for [object] %}
+        {% render_comment_list for [app].[model] [object_id] %}
+
+    Example usage::
+
+        {% render_comment_list for event %}
+
+    """
+    grammar = template.Grammar('render_comment_list')
 
     @classmethod
-    def handle_token(cls, parser, token):
+    def handle_parse_result(cls, parser, parse_result):
         """Class method to parse render_comment_list and return a Node."""
-        tokens = token.split_contents()
-        if tokens[1] != 'for':
-            raise template.TemplateSyntaxError("Second argument in %r tag must be 'for'" % tokens[0])
+        tokens = parse_result.arguments
+        tagname = parse_result.tagname
+
+        if tokens[0] != 'for':
+            raise template.TemplateSyntaxError("Second argument in %r tag must be 'for'" % tagname)
 
         # {% render_comment_list for obj %}
-        if len(tokens) == 3:
-            return cls(object_expr=parser.compile_filter(tokens[2]))
+        if len(tokens) == 2:
+            return cls(object_expr=parser.compile_filter(tokens[1]))
 
         # {% render_comment_list for app.models pk %}
-        elif len(tokens) == 4:
+        elif len(tokens) == 3:
             return cls(
-                ctype = BaseCommentNode.lookup_content_type(tokens[2], tokens[0]),
-                object_pk_expr = parser.compile_filter(tokens[3])
+                ctype = BaseCommentNode.lookup_content_type(tokens[1], tagname),
+                object_pk_expr = parser.compile_filter(tokens[2])
             )
 
     def render(self, context):
@@ -228,91 +307,6 @@ class RenderCommentListNode(CommentListNode):
 # the automagic docstrings-into-admin-docs tricks. So each node gets a cute
 # wrapper function that just exists to hold the docstring.
 
-@register.tag
-def get_comment_count(parser, token):
-    """
-    Gets the comment count for the given params and populates the template
-    context with a variable containing that value, whose name is defined by the
-    'as' clause.
-
-    Syntax::
-
-        {% get_comment_count for [object] as [varname]  %}
-        {% get_comment_count for [app].[model] [object_id] as [varname]  %}
-
-    Example usage::
-
-        {% get_comment_count for event as comment_count %}
-        {% get_comment_count for calendar.event event.id as comment_count %}
-        {% get_comment_count for calendar.event 17 as comment_count %}
-
-    """
-    return CommentCountNode.handle_token(parser, token)
-
-@register.tag
-def get_comment_list(parser, token):
-    """
-    Gets the list of comments for the given params and populates the template
-    context with a variable containing that value, whose name is defined by the
-    'as' clause.
-
-    Syntax::
-
-        {% get_comment_list for [object] as [varname]  %}
-        {% get_comment_list for [app].[model] [object_id] as [varname]  %}
-
-    Example usage::
-
-        {% get_comment_list for event as comment_list %}
-        {% for comment in comment_list %}
-            ...
-        {% endfor %}
-
-    """
-    return CommentListNode.handle_token(parser, token)
-
-@register.tag
-def render_comment_list(parser, token):
-    """
-    Render the comment list (as returned by ``{% get_comment_list %}``)
-    through the ``comments/list.html`` template
-
-    Syntax::
-
-        {% render_comment_list for [object] %}
-        {% render_comment_list for [app].[model] [object_id] %}
-
-    Example usage::
-
-        {% render_comment_list for event %}
-
-    """
-    return RenderCommentListNode.handle_token(parser, token)
-
-@register.tag
-def get_comment_form(parser, token):
-    """
-    Get a (new) form object to post a new comment.
-
-    Syntax::
-
-        {% get_comment_form for [object] as [varname] %}
-        {% get_comment_form for [app].[model] [object_id] as [varname] %}
-    """
-    return CommentFormNode.handle_token(parser, token)
-
-@register.tag
-def render_comment_form(parser, token):
-    """
-    Render the comment form (as returned by ``{% render_comment_form %}``) through
-    the ``comments/form.html`` template.
-
-    Syntax::
-
-        {% render_comment_form for [object] %}
-        {% render_comment_form for [app].[model] [object_id] %}
-    """
-    return RenderCommentFormNode.handle_token(parser, token)
 
 @register.simple_tag
 def comment_form_target():

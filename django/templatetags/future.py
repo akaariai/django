@@ -1,23 +1,23 @@
 from django.template import Library
-from django.template import defaulttags
+from django.template import defaulttags, TemplateTag, Grammar
 
 register = Library()
 
 
 @register.tag
-def ssi(parser, token):
+class SsiNode(defaulttags.SsiNode):
     # Used for deprecation path during 1.3/1.4, will be removed in 2.0
-    return defaulttags.ssi(parser, token)
+    pass
 
 
 @register.tag
-def url(parser, token):
+class URLNode(defaulttags.URLNode):
     # Used for deprecation path during 1.3/1.4, will be removed in 2.0
-    return defaulttags.url(parser, token)
+    pass
 
 
 @register.tag
-def cycle(parser, token):
+class CycleNode(defaulttags.CycleNode):
     """
     This is the future version of `cycle` with auto-escaping.
 
@@ -33,11 +33,11 @@ def cycle(parser, token):
 
         {% cycle var1 var2|safe var3|safe  as somecycle %}
     """
-    return defaulttags.cycle(parser, token, escape=True)
+    escape = True
 
 
 @register.tag
-def firstof(parser, token):
+class FirstOfNode(defaulttags.FirstOfNode):
     """
     This is the future version of `firstof` with auto-escaping.
 
@@ -62,4 +62,4 @@ def firstof(parser, token):
         {% firstof var1 var2|safe var3 "<strong>fallback value</strong>"|safe %}
 
     """
-    return defaulttags.firstof(parser, token, escape=True)
+    escape = True

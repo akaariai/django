@@ -355,6 +355,150 @@ class CustomTagTests(TestCase):
             "'assignment_unlimited_args_kwargs' received multiple values for keyword argument 'eggs'",
             template.Template, '{% load custom %}{% assignment_unlimited_args_kwargs 37 eggs="scrambled" eggs="scrambled" as var %}The result is: {{ var }}')
 
+    def test_class_based_tags(self):
+        c = template.Context({'value': 42})
+
+        t = template.Template('{% load class_based %}a{% cb_one_tag %}b')
+        self.assertEqual(t.render(c), 'ab')
+
+        t = template.Template('{% load class_based %}a{% cb_two_tags %}b{% end_cb_two_tags %}c')
+        self.assertEqual(t.render(c), 'abc')
+
+        t = template.Template('{% load class_based %}a{% cb_to_upper %}b{% end_cb_to_upper %}c')
+        self.assertEqual(t.render(c), 'aBc')
+
+        t = template.Template('{% load class_based %}a{% cb_with_middle %}b{% middle %}c{% end_cb_with_middle %}d')
+        self.assertEqual(t.render(c), 'abcd')
+
+        t = template.Template('{% load class_based %}a{% cb_render_second %}b{% middle %}c{% end_cb_render_second %}d')
+        self.assertEqual(t.render(c), 'acd')
+
+        t = template.Template('{% load class_based %}a{% cb_render_second2 %}b{% middle %}c{% end_cb_render_second2 %}d')
+        self.assertEqual(t.render(c), 'acd')
+
+        t = template.Template('{% load class_based %}a{% cb_optional_middle %}b{% middle %}c{% end_cb_optional_middle %}d')
+        self.assertEqual(t.render(c), 'abcd')
+
+        t = template.Template('{% load class_based %}a{% cb_optional_middle %}b{% end_cb_optional_middle %}c')
+        self.assertEqual(t.render(c), 'abc')
+
+        t = template.Template('{% load class_based %}a{% cb_repeating_middle %}b{% end_cb_repeating_middle %}c')
+        self.assertEqual(t.render(c), 'abc')
+
+        t = template.Template('{% load class_based %}a{% cb_repeating_middle %}b{% middle %}c{% end_cb_repeating_middle %}d')
+        self.assertEqual(t.render(c), 'abcd')
+
+        t = template.Template('{% load class_based %}a{% cb_repeating_middle %}b{% middle %}c{% middle %}d{% end_cb_repeating_middle %}e')
+        self.assertEqual(t.render(c), 'abcde')
+
+        t = template.Template('{% load class_based %}a{% cb_repeating_middle %}b{% middle %}c{% middle %}d{% middle %}e{% end_cb_repeating_middle %}f')
+        self.assertEqual(t.render(c), 'abcdef')
+
+        t = template.Template('{% load class_based %}a{% cb_one_or_more_middle %}b{% middle %}c{% end_cb_one_or_more_middle %}d')
+        self.assertEqual(t.render(c), 'abcd')
+
+        t = template.Template('{% load class_based %}a{% cb_one_or_more_middle %}b{% middle %}c{% middle %}d{% end_cb_one_or_more_middle %}e')
+        self.assertEqual(t.render(c), 'abcde')
+
+        t = template.Template('{% load class_based %}a{% cb_one_or_more_middle %}b{% middle %}c{% middle %}d{% middle %}e{% end_cb_one_or_more_middle %}f')
+        self.assertEqual(t.render(c), 'abcdef')
+
+        t = template.Template('{% load class_based %}a{% cb_reverse_blocks %}b{% next %}c{% next %}d{% next %}e{% end_cb_reverse_blocks %}f')
+        self.assertEqual(t.render(c), 'aedcbf')
+
+        t = template.Template('{% load class_based %}_{% cb_complex1 %}_{% B %}_{% C %}_{% D %}_{% end_cb_complex1 %}_')
+        self.assertEqual(t.render(c), '______')
+
+        t = template.Template('{% load class_based %}_{% cb_complex1 %}_{% B %}_{% C %}_{% D %}_{% E %}_{% end_cb_complex1 %}_')
+        self.assertEqual(t.render(c), '_______')
+
+        t = template.Template('{% load class_based %}_{% cb_complex1 %}_{% A %}_{% A %}_{% B %}_{% C %}_{% D %}_{% E %}_{% end_cb_complex1 %}_')
+        self.assertEqual(t.render(c), '_________')
+
+        t = template.Template('{% load class_based %}_{% cb_complex1 %}_{% A %}_{% A %}_{% B %}_{% C %}_{% D %}_{% E %}_{% end_cb_complex1 %}_')
+        self.assertEqual(t.render(c), '_________')
+
+        t = template.Template('{% load class_based %}_{% cb_complex1 %}_{% A %}_{% A %}_{% B %}_{% C %}_{% D %}_{% D %}_{% E %}_{% end_cb_complex1 %}_')
+        self.assertEqual(t.render(c), '__________')
+
+        t = template.Template('{% load class_based %}{% cb_print_params %}')
+        self.assertEqual(t.render(c), '')
+
+        t = template.Template('{% load class_based %}{% cb_print_params 5 %}')
+        self.assertEqual(t.render(c), '5')
+
+        t = template.Template('{% load class_based %}{% cb_print_params value value %}')
+        self.assertEqual(t.render(c), 'value value')
+
+        t = template.Template('{% load class_based %}{% cb_print_params2 start start2 %}...{% end_cb_print_params2 end end2 %}')
+        self.assertEqual(t.render(c), 'start start2...end end2')
+
+        t = template.Template('{% load class_based %}{% cb_print_and_resolv value value 5 %}')
+        self.assertEqual(t.render(c), '42 42 5')
+
+        # Template tag exceptions
+        six.assertRaisesRegex(self, template.TemplateSyntaxError, 'Expected "middle" template tag, but found "end_cb_one_or_more_middle" instead.',
+                    template.Template, '{% load class_based %}a{% cb_one_or_more_middle %}b{% end_cb_one_or_more_middle %}c')
+
+        # Test grammar
+        g = template.Grammar('start middle* end')
+        self.assertEqual(g.is_simple, False)
+        self.assertEqual(g.first_tagname, 'start')
+        self.assertEqual(g.as_string(), 'start middle* end')
+
+        g = template.Grammar('simple_tag')
+        self.assertEqual(g.is_simple, True)
+        self.assertEqual(g.first_tagname, 'simple_tag')
+        self.assertEqual(g.as_string(), 'simple_tag')
+
+        # Grammar exceptions
+
+        six.assertRaisesRegex(self, template.GrammarException, 'invalid_tag# is not a valid template tag.',
+                    template.Grammar, 'invalid_tag#')
+
+        six.assertRaisesRegex(self, template.GrammarException, 'The first template tag should not repeat.',
+                    template.Grammar, 'repeat_first*')
+
+        six.assertRaisesRegex(self, template.GrammarException, 'The first template tag should not repeat.',
+                    template.Grammar, 'repeat_first2+ other_tag')
+
+        six.assertRaisesRegex(self, template.GrammarException, 'The last template tag should not repeat.',
+                    template.Grammar, 'repeat_last last+')
+
+        six.assertRaisesRegex(self, template.GrammarException, 'The template tag middle is defined more than once.',
+                    template.Grammar, 'first middle other_middle+ again_another* middle? middle last')
+
+        six.assertRaisesRegex(self, template.GrammarException, 'No template tags given.',
+                    template.Grammar, '')
+
+        # Registering of template tags in a library
+        l = template.Library()
+
+        @l.tag
+        class Tag(template.TemplateTag):
+            """ Tag documentation """
+            grammar = template.Grammar('start end')
+
+        self.assertEqual(l.tags['start'].grammar, Tag.grammar)
+        self.assertEqual(l.tags['start'].__doc__, Tag.__doc__)
+
+        class TagWithoutGrammar(template.TemplateTag):
+            pass
+
+        six.assertRaisesRegex(self, template.TemplateSyntaxError, 'TemplateTag has no valid grammar.',
+                        l.tag, TagWithoutGrammar)
+
+        # Registering a tag, which is defined by a function, but without
+        # grammar should get an UnknownGrammar instance attached
+        l = template.Library()
+        def tag_without_grammar(parser, token): pass
+        l.tag(tag_without_grammar)
+
+        self.assertEqual(l.tags.get('tag_without_grammar', None), tag_without_grammar)
+        self.assertEqual(isinstance(tag_without_grammar.grammar, template.UnknownGrammar), True)
+        self.assertEqual(tag_without_grammar.grammar.first_tagname, 'tag_without_grammar')
+
+
     def test_assignment_tag_registration(self):
         # Test that the decorators preserve the decorated function's docstring, name and attributes.
         self.verify_tag(custom.assignment_no_params, 'assignment_no_params')

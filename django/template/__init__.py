@@ -70,11 +70,14 @@ from django.template.base import (Context, FilterExpression, Lexer, Node,
 
 # Compiling templates
 from django.template.base import (compile_string, resolve_variable,
-    unescape_string_literal, generic_tag_compiler)
+    unescape_string_literal)
 
 # Library management
 from django.template.base import (Library, add_to_builtins, builtins,
     get_library, get_templatetags_modules, get_text_list, import_library,
-    libraries)
+    libraries, LibraryGrammar)
+
+# Class based templates
+from django.template.generic import Grammar, UnknownGrammar, GrammarException, TemplateTag
 
 __all__ = ('Template', 'Context', 'RequestContext', 'compile_string')

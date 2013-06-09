@@ -5,38 +5,35 @@ except ImportError:     # Python 2
 
 from django import template
 from django.template.base import Node
+from django.template.generic import TemplateTag, Grammar
 from django.utils.encoding import iri_to_uri
 
 register = template.Library()
 
 
-class PrefixNode(template.Node):
+class PrefixNode(TemplateTag):
+    name = None
+    grammar = None
 
     def __repr__(self):
         return "<PrefixNode for %r>" % self.name
 
-    def __init__(self, varname=None, name=None):
-        if name is None:
-            raise template.TemplateSyntaxError(
-                "Prefix nodes must be given a name to return.")
-        self.varname = varname
-        self.name = name
-
-    @classmethod
-    def handle_token(cls, parser, token, name):
+    def __init__(self, parser, parse_result):
         """
         Class method to parse prefix node and return a Node.
         """
-        # token.split_contents() isn't useful here because tags using this method don't accept variable as arguments
-        tokens = token.contents.split()
-        if len(tokens) > 1 and tokens[1] != 'as':
+        tokens = parse_result.arguments.split()
+        if len(tokens) > 0 and tokens[0] != 'as':
             raise template.TemplateSyntaxError(
-                "First argument in '%s' must be 'as'" % tokens[0])
-        if len(tokens) > 1:
-            varname = tokens[2]
+                "First argument in '%s' must be 'as'" % parse_result.tagname)
+        if len(tokens) > 0:
+            self.varname = tokens[1]
         else:
-            varname = None
-        return cls(varname, name)
+            self.varname = None
+
+        if self.name is None:
+            raise template.TemplateSyntaxError(
+                "Prefix nodes must be given a name to return.")
 
     @classmethod
     def handle_simple(cls, name):
@@ -57,7 +54,7 @@ class PrefixNode(template.Node):
 
 
 @register.tag
-def get_static_prefix(parser, token):
+class StaticPrefixNode(PrefixNode):
     """
     Populates a template variable with the static prefix,
     ``settings.STATIC_URL``.
@@ -72,11 +69,13 @@ def get_static_prefix(parser, token):
         {% get_static_prefix as static_prefix %}
 
     """
-    return PrefixNode.handle_token(parser, token, "STATIC_URL")
+    # token.split_contents() isn't useful here because tags using this method don't accept variable as arguments
+    grammar = Grammar('get_static_prefix', _split_contents=False)
+    name = 'STATIC_URL'
 
 
 @register.tag
-def get_media_prefix(parser, token):
+class MediaPrefixNode(PrefixNode):
     """
     Populates a template variable with the media prefix,
     ``settings.MEDIA_URL``.
@@ -91,55 +90,12 @@ def get_media_prefix(parser, token):
         {% get_media_prefix as media_prefix %}
 
     """
-    return PrefixNode.handle_token(parser, token, "MEDIA_URL")
+    grammar = Grammar('get_media_prefix', _split_contents=False)
+    name = 'MEDIA_URL'
 
 
-class StaticNode(Node):
-    def __init__(self, varname=None, path=None):
-        if path is None:
-            raise template.TemplateSyntaxError(
-                "Static template nodes must be given a path to return.")
-        self.path = path
-        self.varname = varname
-
-    def url(self, context):
-        path = self.path.resolve(context)
-        return self.handle_simple(path)
-
-    def render(self, context):
-        url = self.url(context)
-        if self.varname is None:
-            return url
-        context[self.varname] = url
-        return ''
-
-    @classmethod
-    def handle_simple(cls, path):
-        return urljoin(PrefixNode.handle_simple("STATIC_URL"), path)
-
-    @classmethod
-    def handle_token(cls, parser, token):
-        """
-        Class method to parse prefix node and return a Node.
-        """
-        bits = token.split_contents()
-
-        if len(bits) < 2:
-            raise template.TemplateSyntaxError(
-                "'%s' takes at least one argument (path to file)" % bits[0])
-
-        path = parser.compile_filter(bits[1])
-
-        if len(bits) >= 2 and bits[-2] == 'as':
-            varname = bits[3]
-        else:
-            varname = None
-
-        return cls(varname, path)
-
-
-@register.tag('static')
-def do_static(parser, token):
+@register.tag
+class StaticNode(TemplateTag):
     """
     Joins the given path with the STATIC_URL setting.
 
@@ -155,7 +111,38 @@ def do_static(parser, token):
         {% static variable_with_path as varname %}
 
     """
-    return StaticNode.handle_token(parser, token)
+    grammar = Grammar('static')
+
+    def __init__(self, parser, parse_result):
+        """
+        Class method to parse prefix node and return a Node.
+        """
+        bits = parse_result.arguments
+        if len(bits) < 1:
+            raise template.TemplateSyntaxError(
+                "'%s' takes at least one argument (path to file)" % parse_result.tagname)
+
+        self.path = parser.compile_filter(bits[0])
+
+        if len(bits) >= 2 and bits[1] == 'as':
+            self.varname = bits[2]
+        else:
+            self.varname = None
+
+    def render(self, context):
+        url = self.url(context)
+        if self.varname is None:
+            return url
+        context[self.varname] = url
+        return ''
+
+    def url(self, context):
+        path = self.path.resolve(context)
+        return self.handle_simple(path)
+
+    @classmethod
+    def handle_simple(cls, path):
+        return urljoin(PrefixNode.handle_simple("STATIC_URL"), path)
 
 
 def static(path):
