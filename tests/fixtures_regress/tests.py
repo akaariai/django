@@ -27,6 +27,11 @@ from .models import (Animal, Stuff, Absolute, Parent, Child, Article, Widget,
 
 
 class TestFixtures(TestCase):
+    available_apps = [
+        'fixtures_regress',
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+    ]
 
     def animal_pre_save_check(self, signal, sender, instance, **kwargs):
         self.pre_save_checks.append(
@@ -455,6 +460,11 @@ class TestFixtures(TestCase):
 
 
 class NaturalKeyFixtureTests(TestCase):
+    available_apps = [
+        'fixtures_regress',
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+    ]
 
     def test_nk_deserialize(self):
         """

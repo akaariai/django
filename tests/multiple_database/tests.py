@@ -1001,6 +1001,9 @@ class ConnectionRouterTestCase(TestCase):
 
 class RouterTestCase(TestCase):
     multi_db = True
+    available_apps = [
+        'multiple_database'
+    ]
 
     def setUp(self):
         # Make the 'other' database appear to be a slave of the 'default'
@@ -1944,6 +1947,8 @@ class SyncOnlyDefaultDatabaseRouter(object):
 
 class SyncDBTestCase(TestCase):
     multi_db = True
+    available_apps = ['multiple_database', 'django.contrib.contenttypes',
+                      'django.contrib.auth']
 
     def test_syncdb_to_other_database(self):
         """Regression test for #16039: syncdb with --database option."""

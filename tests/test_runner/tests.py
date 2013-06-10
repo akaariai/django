@@ -9,7 +9,7 @@ from optparse import make_option
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
 from django import db
-from django.test import runner, TransactionTestCase, skipUnlessDBFeature
+from django.test import runner, TransactionTestCase, skipUnlessDBFeature, TestCase as DjangoTestCase
 from django.test.simple import DjangoTestSuiteRunner, get_tests
 from django.test.testcases import connections_support_transactions
 from django.utils import unittest
@@ -238,7 +238,8 @@ class ModulesTestsPackages(unittest.TestCase):
         self.assertRaises(ImportError, get_tests, module)
 
 
-class Sqlite3InMemoryTestDbs(unittest.TestCase):
+class Sqlite3InMemoryTestDbs(DjangoTestCase):
+    available_apps = ['test_runner']
 
     @unittest.skipUnless(all(db.connections[conn].vendor == 'sqlite' for conn in db.connections),
                          "This is a sqlite-specific issue")

@@ -14,7 +14,7 @@ from .models import (ConcreteModel, ConcreteModelSubclass,
     ConcreteModelSubclassProxy)
 
 
-@override_settings(INSTALLED_APPS=('app1', 'app2'))
+@override_settings(INSTALLED_APPS=('app1', 'app2', 'proxy_model_inheritance'))
 class ProxyModelInheritanceTests(TransactionTestCase):
     """
     Proxy model inheritance across apps can result in syncdb not creating the table
@@ -22,7 +22,7 @@ class ProxyModelInheritanceTests(TransactionTestCase):
     apps and calls syncdb, then verifies that the table has been created.
     """
 
-    available_apps = []
+    available_apps = ['app1', 'app2', 'proxy_model_inheritance']
 
     def setUp(self):
         self.old_sys_path = sys.path[:]
@@ -40,11 +40,8 @@ class ProxyModelInheritanceTests(TransactionTestCase):
         del cache.app_models['app2']
 
     def test_table_exists(self):
-        try:
-            cache.set_available_apps(settings.INSTALLED_APPS)
-            call_command('syncdb', verbosity=0)
-        finally:
-            cache.unset_available_apps()
+        cache.set_available_apps(settings.INSTALLED_APPS)
+        call_command('syncdb', verbosity=0)
         from .app1.models import ProxyModel
         from .app2.models import NiceModel
         self.assertEqual(NiceModel.objects.all().count(), 0)
