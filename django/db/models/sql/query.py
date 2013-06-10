@@ -870,8 +870,6 @@ class Query(object):
                 # check that the existing join is created using the same
                 # join_field used for the under work join.
                 continue
-            if self.alias_refcount[alias] == 0 and outer_if_first:
-                self.promote_joins([alias])
             self.ref_alias(alias)
             return alias
 
@@ -1915,5 +1913,8 @@ def alias_diff(refcounts_before, refcounts_after):
     Given the before and after copies of refcounts works out which aliases
     have been added to the after copy.
     """
+    # The "t not in refcounts_before" condition is needed for cases where
+    # a join is created but then trimmed.
     return set(t for t in refcounts_after
-               if refcounts_after[t] > refcounts_before.get(t, 0))
+               if refcounts_after[t] > refcounts_before.get(t, 0)
+               or t not in refcounts_before)
