@@ -187,7 +187,7 @@ def get_default_username(check_db=True):
         else:
             return ''
     return default_username
-
+from django.contrib.contenttypes.management import *
 signals.post_syncdb.connect(create_permissions,
     dispatch_uid="django.contrib.auth.management.create_permissions")
 signals.post_syncdb.connect(create_superuser,
