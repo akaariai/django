@@ -192,7 +192,7 @@ class GenericRelation(ForeignObject):
     def get_reverse_path_info(self):
         opts = self.model._meta
         from_opts = self.rel.to._meta
-        return [PathInfo(from_opts, opts, (opts.pk,), self, not self.unique, True)]
+        return [PathInfo(from_opts, opts, (opts.pk,), self, not self.unique, False)]
 
     def get_choices_default(self):
         return super(GenericRelation, self).get_choices(include_blank=False)
