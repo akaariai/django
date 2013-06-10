@@ -25,6 +25,9 @@ try:
 except ImportError:
     has_bz2 = False
 
+from datetime import datetime, timedelta
+total = timedelta(0)
+
 
 class Command(BaseCommand):
     help = 'Installs the named fixture(s) in the database.'
@@ -40,6 +43,7 @@ class Command(BaseCommand):
     )
 
     def handle(self, *fixture_labels, **options):
+        start = datetime.now()
 
         self.ignore = options.get('ignore')
         self.using = options.get('database')
@@ -60,6 +64,9 @@ class Command(BaseCommand):
         # can return incorrect results. See Django #7572, MySQL #37735.
         if transaction.get_autocommit(self.using):
             connections[self.using].close()
+        global total
+        total += datetime.now() - start
+        print total
 
     def loaddata(self, fixture_labels):
         connection = connections[self.using]

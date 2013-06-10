@@ -16,6 +16,10 @@ from django.utils.encoding import DEFAULT_LOCALE_ENCODING
 from django.utils import six
 from django.utils.six.moves import input
 
+from datetime import datetime, timedelta
+
+total = timedelta(0)
+
 
 def _get_permission_codename(action, opts):
     return '%s_%s' % (action, opts.model_name)
@@ -60,49 +64,53 @@ def _check_permission_clashing(custom, builtin, ctype):
         pool.add(codename)
 
 def create_permissions(app, created_models, verbosity, db=DEFAULT_DB_ALIAS, **kwargs):
+    start = datetime.now()
+    global total
     try:
-        get_model('auth', 'Permission')
-    except UnavailableApp:
-        return
+        try:
+            get_model('auth', 'Permission')
+        except UnavailableApp:
+            return
 
-    if not router.allow_syncdb(db, auth_app.Permission):
-        return
+        if not router.allow_syncdb(db, auth_app.Permission):
+            return
 
-    from django.contrib.contenttypes.models import ContentType
+        app_models = get_models(app)
 
-    app_models = get_models(app)
+        # This will hold the permissions we're looking for as
+        # (content_type, (codename, name))
+        searched_perms = list()
+        # The codenames and ctypes that should exist.
+        ctypes = set()
+        for klass in app_models:
+            # Force looking up the content types in the current database
+            # before creating foreign keys to them.
+            ctype = ContentType.objects.db_manager(db).get_for_model(klass)
+            ctypes.add(ctype)
+            for perm in _get_all_permissions(klass._meta, ctype):
+                searched_perms.append((ctype, perm))
 
-    # This will hold the permissions we're looking for as
-    # (content_type, (codename, name))
-    searched_perms = list()
-    # The codenames and ctypes that should exist.
-    ctypes = set()
-    for klass in app_models:
-        # Force looking up the content types in the current database
-        # before creating foreign keys to them.
-        ctype = ContentType.objects.db_manager(db).get_for_model(klass)
-        ctypes.add(ctype)
-        for perm in _get_all_permissions(klass._meta, ctype):
-            searched_perms.append((ctype, perm))
+        # Find all the Permissions that have a content_type for a model we're
+        # looking for.  We don't need to check for codenames since we already have
+        # a list of the ones we're going to create.
+        all_perms = set(auth_app.Permission.objects.using(db).filter(
+            content_type__in=ctypes,
+        ).values_list(
+            "content_type", "codename"
+        ))
 
-    # Find all the Permissions that have a content_type for a model we're
-    # looking for.  We don't need to check for codenames since we already have
-    # a list of the ones we're going to create.
-    all_perms = set(auth_app.Permission.objects.using(db).filter(
-        content_type__in=ctypes,
-    ).values_list(
-        "content_type", "codename"
-    ))
-
-    perms = [
-        auth_app.Permission(codename=codename, name=name, content_type=ctype)
-        for ctype, (codename, name) in searched_perms
-        if (ctype.pk, codename) not in all_perms
-    ]
-    auth_app.Permission.objects.using(db).bulk_create(perms)
-    if verbosity >= 2:
-        for perm in perms:
-            print("Adding permission '%s'" % perm)
+        perms = [
+            auth_app.Permission(codename=codename, name=name, content_type=ctype)
+            for ctype, (codename, name) in searched_perms
+            if (ctype.pk, codename) not in all_perms
+        ]
+        auth_app.Permission.objects.using(db).bulk_create(perms)
+        if verbosity >= 2:
+            for perm in perms:
+                print("Adding permission '%s'" % perm)
+    finally:
+        total += datetime.now() - start
+        print 'perm: ' + str(total)
 
 
 def create_superuser(app, created_models, verbosity, db, **kwargs):
