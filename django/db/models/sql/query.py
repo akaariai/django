@@ -845,8 +845,8 @@ class Query(object):
         (matching the connection) are reusable, or it can be a set containing
         the aliases that can be reused.
 
-        If 'outer_if_first' is True and a new join is created, it will have the
-        LOUTER join type.
+        If 'outer_if_first' is True and a new join is created (or a join with
+        refcount 0 is reused), it will have the LOUTER join type.
 
         A join is always created as LOUTER if the lhs alias is LOUTER to make
         sure we do not generate chains like t1 LOUTER t2 INNER t3.
@@ -870,6 +870,8 @@ class Query(object):
                 # check that the existing join is created using the same
                 # join_field used for the under work join.
                 continue
+            if self.alias_refcount[alias] == 0 and outer_if_first:
+                self.promote_joins([alias])
             self.ref_alias(alias)
             return alias
 

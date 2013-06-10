@@ -95,6 +95,18 @@ class Item(models.Model):
     def __str__(self):
         return self.name
 
+class ChildA(models.Model):
+    parent = models.ForeignKey(Parent)
+
+@python_2_unicode_compatible
+class ChildB(models.Model):
+    name = models.CharField(max_length=10)
+    parent = models.ForeignKey(Parent, null=True)
+    child = models.ForeignKey(ChildA, null=True)
+
+    def __str__(self):
+        return self.name
+
 # Models for testing bug #19870.
 @python_2_unicode_compatible
 class Fowl(models.Model):

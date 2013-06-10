@@ -1,11 +1,12 @@
 from __future__ import absolute_import, unicode_literals
 
+from django.db import models
 from django.test import TestCase
 from django.utils import six
 
 from .models import (Building, Child, Device, Port, Item, Country, Connection,
     ClientStatus, State, Client, SpecialClient, TUser, Person, Student,
-    Organizer, Class, Enrollment, Hen, Chick)
+    Organizer, Class, Enrollment, Hen, Chick, Parent, ChildA, ChildB)
 
 
 class SelectRelatedRegressTests(TestCase):
@@ -173,3 +174,20 @@ class SelectRelatedRegressTests(TestCase):
 
         self.assertEqual(Chick.objects.all()[0].mother.name, 'Hen')
         self.assertEqual(Chick.objects.select_related()[0].mother.name, 'Hen')
+
+    def test_ticket_20528(self):
+        """
+        Regression for #20528
+
+        Using Qs and select_related with a certain config of ForeignKeys
+        resulted in incorrect joins.
+        """
+        parent = Parent.objects.create(name="foo")
+        childA = ChildA.objects.create(parent=parent)
+        childB = ChildB.objects.create(child=childA, name="Bobby")
+        queryset = ChildB.objects.filter(
+            models.Q(parent=parent) | models.Q(child__parent=parent)
+        )
+        self.assertQuerysetEqual(queryset, [childB], lambda x: x)
+        queryset = queryset.select_related('parent')
+        self.assertQuerysetEqual(queryset, [childB], lambda x: x)
