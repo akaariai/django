@@ -41,6 +41,10 @@ class GenericRelationsTests(TestCase):
         # You can easily access the content object like a foreign key.
         t = TaggedItem.objects.get(tag="salty")
         self.assertEqual(t.content_object, bacon)
+        qs = TaggedItem.objects.order_by('animal__common_name', 'tag')
+        self.assertQuerysetEqual(
+            qs, ["<TaggedItem: hairy>", "<TaggedItem: yellow>", "<TaggedItem: fatty>"]
+        )
 
         # Recall that the Mineral class doesn't have an explicit GenericRelation
         # defined. That's OK, because you can create TaggedItems explicitly.
