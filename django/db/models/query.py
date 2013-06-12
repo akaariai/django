@@ -34,7 +34,7 @@ class QuerySet(object):
     def __init__(self, model=None, query=None, using=None):
         self.model = model
         self._db = using
-        self.query = query or sql.Query(self.model)
+        self._query = query
         self._result_cache = None
         self._sticky_filter = False
         self._for_write = False
@@ -45,6 +45,16 @@ class QuerySet(object):
     ########################
     # PYTHON MAGIC METHODS #
     ########################
+
+    @property
+    def query(self):
+        if not self._query:
+            self._query = sql.Query(self.model)
+        return self._query
+
+    @query.setter
+    def query(self, value):
+        self._query = value
 
     def __deepcopy__(self, memo):
         """
@@ -838,9 +848,12 @@ class QuerySet(object):
     def _clone(self, klass=None, setup=False, **kwargs):
         if klass is None:
             klass = self.__class__
-        query = self.query.clone()
-        if self._sticky_filter:
-            query.filter_is_sticky = True
+        if self._query or self._sticky_filter:
+            query = self.query.clone()
+            if self._sticky_filter:
+                query.filter_is_sticky = True
+        else:
+            query = None
         c = klass(model=self.model, query=query, using=self._db)
         c._for_write = self._for_write
         c._prefetch_related_lookups = self._prefetch_related_lookups[:]
