@@ -41,6 +41,8 @@ class QuerySet(object):
         self._prefetch_related_lookups = []
         self._prefetch_done = False
         self._known_related_objects = {}        # {rel_field, {pk: rel_obj}}
+        self._callback = None
+        self._do_clone = True
 
     ########################
     # PYTHON MAGIC METHODS #
@@ -50,11 +52,24 @@ class QuerySet(object):
     def query(self):
         if not self._query:
             self._query = sql.Query(self.model)
+            self._resolve_callback()
         return self._query
 
     @query.setter
     def query(self, value):
         self._query = value
+
+    def chain_ops(self, callback):
+        self._callback = callback
+        return self
+
+    def _resolve_callback(self):
+        if self._callback:
+            callback = self._callback
+            self._callback = None
+            self._do_clone = False
+            callback(self)
+            self._do_clone = True
 
     def __deepcopy__(self, memo):
         """
@@ -172,6 +187,7 @@ class QuerySet(object):
         An iterator over the results from applying this QuerySet to the
         database.
         """
+        self._resolve_callback()
         fill_cache = False
         if connections[self.db].features.supports_select_related:
             fill_cache = self.query.select_related
@@ -846,18 +862,22 @@ class QuerySet(object):
                                              using=self.db)
 
     def _clone(self, klass=None, setup=False, **kwargs):
-        if klass is None:
-            klass = self.__class__
-        if self._query or self._sticky_filter:
-            query = self.query.clone()
-            if self._sticky_filter:
-                query.filter_is_sticky = True
+        self._resolve_callback()
+        if self._do_clone:
+            if klass is None:
+                klass = self.__class__
+            if self._query or self._sticky_filter:
+                query = self.query.clone()
+                if self._sticky_filter:
+                    query.filter_is_sticky = True
+            else:
+                query = None
+            c = klass(model=self.model, query=query, using=self._db)
+            c._for_write = self._for_write
+            c._prefetch_related_lookups = self._prefetch_related_lookups[:]
+            c._known_related_objects = self._known_related_objects
         else:
-            query = None
-        c = klass(model=self.model, query=query, using=self._db)
-        c._for_write = self._for_write
-        c._prefetch_related_lookups = self._prefetch_related_lookups[:]
-        c._known_related_objects = self._known_related_objects
+            c = self
         c.__dict__.update(kwargs)
         if setup and hasattr(c, '_setup_query'):
             c._setup_query()
