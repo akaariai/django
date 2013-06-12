@@ -531,7 +531,7 @@ def create_many_related_manager(superclass, rel):
                 return self.instance._prefetched_objects_cache[self.prefetch_cache_name]
             except (AttributeError, KeyError):
                 db = self._db or router.db_for_read(self.instance.__class__, instance=self.instance)
-                return super(ManyRelatedManager, self).get_queryset().using(db)._next_is_sticky().filter(**self.core_filters)
+                return super(ManyRelatedManager, self).get_queryset().chain_ops(lambda qs: qs.using(db)._next_is_sticky().filter(**self.core_filters))
 
         def get_prefetch_queryset(self, instances):
             instance = instances[0]
