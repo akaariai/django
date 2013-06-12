@@ -608,7 +608,7 @@ class QuerySet(object):
         Returns a new QuerySet that is a copy of the current one. This allows a
         QuerySet to proxy for a model manager in some cases.
         """
-        return self._clone()
+        return self
 
     def filter(self, *args, **kwargs):
         """
