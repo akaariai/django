@@ -297,10 +297,13 @@ class ReverseSingleRelatedObjectDescriptor(six.with_metaclass(RenameRelatedObjec
                 params = dict(
                     (rh_field.attname, getattr(instance, lh_field.attname))
                     for lh_field, rh_field in self.field.related_fields)
-                params.update(self.field.get_extra_descriptor_filter(instance))
+                extra_filter = self.field.get_extra_descriptor_filter(instance)
                 qs = self.get_queryset(instance=instance)
+                if extra_filter:
+                    rel_obj = qs.get(extra_filter, **params)
+                else:
+                    rel_obj = qs.get(**params)
                 # Assuming the database enforces foreign keys, this won't fail.
-                rel_obj = qs.get(**params)
                 if not self.field.rel.multiple:
                     setattr(rel_obj, self.field.related.get_cache_name(), instance)
             setattr(instance, self.cache_name, rel_obj)
@@ -1000,8 +1003,11 @@ class ForeignObject(RelatedField):
         user does 'instance.fieldname', that is the extra filter is used in
         the descriptor of the field.
 
-        The filter should be something usable in .filter(**kwargs) call, and
-        will be ANDed together with the joining columns condition.
+        The filter should be something usable in .filter() call, the resulting
+        condition will be ANDed together with the joining columns condition.
+
+        The filter can't target any other table than current table and related
+        table.
 
         A parallel method is get_extra_relation_restriction() which is used in
         JOIN and subquery conditions.
