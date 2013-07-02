@@ -20,12 +20,28 @@ class PersonManager(models.Manager):
     def get_fun_people(self):
         return self.filter(fun=True)
 
+    def filter(self, *args, **kwargs):
+        print("manager:filter")
+        return super(PersonManager, self).filter(*args, **kwargs)
+
+class CustomQuerySet(models.QuerySet):
+    def filter(self, *args, **kwargs):
+        print("custom:filter")
+        return super(CustomQuerySet, self).filter(*args, **kwargs)
+    filter.manager = True
+
+    def bar(self, *args, **kwargs):
+        print("custom:bar")
+        return self.all()
+    bar.manager = True
+
 @python_2_unicode_compatible
 class Person(models.Model):
     first_name = models.CharField(max_length=30)
     last_name = models.CharField(max_length=30)
     fun = models.BooleanField()
     objects = PersonManager()
+    other_objects = CustomQuerySet.as_manager(base_cls=PersonManager)
 
     def __str__(self):
         return "%s %s" % (self.first_name, self.last_name)

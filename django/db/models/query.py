@@ -41,6 +41,33 @@ class QuerySet(object):
         self._prefetch_done = False
         self._known_related_objects = {}        # {rel_field, {pk: rel_obj}}
 
+    @classmethod
+    def manager_cls(cls, base_cls=None):
+        """
+        Creates a manager class for this QuerySet class.
+        """
+        def create_method(name):
+            def manager_copy(self, *args, **kwargs):
+                return getattr(self.get_queryset(), name)(*args, **kwargs)
+            return manager_copy
+        new_methods = {}
+        for name, maybe_copy in cls.__dict__.items():
+            if callable(maybe_copy) and getattr(maybe_copy, 'manager', False):
+                new_methods[name] = create_method(name)
+        if base_cls is None:
+            from django.db.models.manager import Manager as base_cls
+        manager_cls = type(
+            cls.__name__ + 'Manager',
+            (base_cls,),
+            new_methods)
+        manager_cls.queryset_class = cls
+        return manager_cls
+
+    @classmethod
+    def as_manager(cls, base_cls=None):
+        manager_cls = cls.manager_cls(base_cls=base_cls)
+        return manager_cls()
+
     ########################
     # PYTHON MAGIC METHODS #
     ########################
@@ -254,6 +281,7 @@ class QuerySet(object):
                         setattr(obj, field.name, rel_obj)
 
             yield obj
+    iterator.manager = True
 
     def aggregate(self, *args, **kwargs):
         """
@@ -275,6 +303,7 @@ class QuerySet(object):
                 is_summary=True)
 
         return query.get_aggregation(using=self.db)
+    aggregate.manager = True
 
     def count(self):
         """
@@ -288,6 +317,7 @@ class QuerySet(object):
             return len(self._result_cache)
 
         return self.query.get_count(using=self.db)
+    count.manager = True
 
     def get(self, *args, **kwargs):
         """
@@ -307,6 +337,7 @@ class QuerySet(object):
         raise self.model.MultipleObjectsReturned(
             "get() returned more than one %s -- it returned %s!" %
             (self.model._meta.object_name, num))
+    get.manager = True
 
     def create(self, **kwargs):
         """
@@ -317,6 +348,7 @@ class QuerySet(object):
         self._for_write = True
         obj.save(force_insert=True, using=self.db)
         return obj
+    create.manager = True
 
     def bulk_create(self, objs, batch_size=None):
         """
@@ -355,6 +387,7 @@ class QuerySet(object):
                     self._batched_insert(objs_without_pk, fields, batch_size)
 
         return objs
+    bulk_create.manager = True
 
     def get_or_create(self, **kwargs):
         """
@@ -387,6 +420,7 @@ class QuerySet(object):
                 except self.model.DoesNotExist:
                     # Re-raise the DatabaseError with its original traceback.
                     six.reraise(*exc_info)
+    get_or_create.manager = True
 
     def _earliest_or_latest(self, field_name=None, direction="-"):
         """
@@ -406,9 +440,11 @@ class QuerySet(object):
 
     def earliest(self, field_name=None):
         return self._earliest_or_latest(field_name=field_name, direction="")
+    earliest.manager = True
 
     def latest(self, field_name=None):
         return self._earliest_or_latest(field_name=field_name, direction="-")
+    latest.manager = True
 
     def first(self):
         """
@@ -419,6 +455,7 @@ class QuerySet(object):
             return qs[0]
         except IndexError:
             return None
+    first.manager = True
 
     def last(self):
         """
@@ -429,6 +466,7 @@ class QuerySet(object):
             return qs[0]
         except IndexError:
             return None
+    last.manager = True
 
     def in_bulk(self, id_list):
         """
@@ -441,6 +479,7 @@ class QuerySet(object):
             return {}
         qs = self.filter(pk__in=id_list).order_by()
         return dict([(obj._get_pk_val(), obj) for obj in qs])
+    in_bulk.manager = True
 
     def delete(self):
         """
@@ -492,6 +531,7 @@ class QuerySet(object):
         self._result_cache = None
         return rows
     update.alters_data = True
+    update.manager = True
 
     def _update(self, values):
         """
@@ -512,6 +552,7 @@ class QuerySet(object):
         if self._result_cache is None:
             return self.query.has_results(using=self.db)
         return bool(self._result_cache)
+    exists.manager = True
 
     def _prefetch_related_objects(self):
         # This method can only be called once the result cache has been filled.
@@ -524,6 +565,7 @@ class QuerySet(object):
 
     def values(self, *fields):
         return self._clone(klass=ValuesQuerySet, setup=True, _fields=fields)
+    values.manager = True
 
     def values_list(self, *fields, **kwargs):
         flat = kwargs.pop('flat', False)
@@ -534,6 +576,7 @@ class QuerySet(object):
             raise TypeError("'flat' is not valid when values_list is called with more than one field.")
         return self._clone(klass=ValuesListQuerySet, setup=True, flat=flat,
                 _fields=fields)
+    values_list.manager = True
 
     def dates(self, field_name, kind, order='ASC'):
         """
@@ -546,6 +589,7 @@ class QuerySet(object):
                 "'order' must be either 'ASC' or 'DESC'."
         return self._clone(klass=DateQuerySet, setup=True,
                 _field_name=field_name, _kind=kind, _order=order)
+    dates.manager = True
 
     def datetimes(self, field_name, kind, order='ASC', tzinfo=None):
         """
@@ -563,6 +607,7 @@ class QuerySet(object):
             tzinfo = None
         return self._clone(klass=DateTimeQuerySet, setup=True,
                 _field_name=field_name, _kind=kind, _order=order, _tzinfo=tzinfo)
+    datetimes.manager = True
 
     def none(self):
         """
@@ -571,6 +616,7 @@ class QuerySet(object):
         clone = self._clone()
         clone.query.set_empty()
         return clone
+    none.manager = True
 
     ##################################################################
     # PUBLIC METHODS THAT ALTER ATTRIBUTES AND RETURN A NEW QUERYSET #
@@ -589,6 +635,7 @@ class QuerySet(object):
         set.
         """
         return self._filter_or_exclude(False, *args, **kwargs)
+    filter.manager = True
 
     def exclude(self, *args, **kwargs):
         """
@@ -596,6 +643,7 @@ class QuerySet(object):
         set.
         """
         return self._filter_or_exclude(True, *args, **kwargs)
+    exclude.manager = True
 
     def _filter_or_exclude(self, negate, *args, **kwargs):
         if args or kwargs:
@@ -625,6 +673,7 @@ class QuerySet(object):
             return clone
         else:
             return self._filter_or_exclude(None, **filter_obj)
+    complex_filter.manager = True
 
     def select_for_update(self, **kwargs):
         """
@@ -637,6 +686,7 @@ class QuerySet(object):
         obj.query.select_for_update = True
         obj.query.select_for_update_nowait = nowait
         return obj
+    select_for_update.manager=True
 
     def select_related(self, *fields, **kwargs):
         """
@@ -658,6 +708,7 @@ class QuerySet(object):
         else:
             obj.query.select_related = True
         return obj
+    select_related.manager = True
 
     def prefetch_related(self, *lookups):
         """
@@ -675,6 +726,7 @@ class QuerySet(object):
         else:
             clone._prefetch_related_lookups.extend(lookups)
         return clone
+    prefetch_related.manager = True
 
     def annotate(self, *args, **kwargs):
         """
@@ -706,6 +758,7 @@ class QuerySet(object):
                 is_summary=False)
 
         return obj
+    annotate.manager = True
 
     def order_by(self, *field_names):
         """
@@ -717,6 +770,7 @@ class QuerySet(object):
         obj.query.clear_ordering(force_empty=False)
         obj.query.add_ordering(*field_names)
         return obj
+    order_by.manager = True
 
     def distinct(self, *field_names):
         """
@@ -727,6 +781,7 @@ class QuerySet(object):
         obj = self._clone()
         obj.query.add_distinct_fields(*field_names)
         return obj
+    distinct.manager = True
 
     def extra(self, select=None, where=None, params=None, tables=None,
               order_by=None, select_params=None):
@@ -738,6 +793,7 @@ class QuerySet(object):
         clone = self._clone()
         clone.query.add_extra(select, select_params, where, params, tables, order_by)
         return clone
+    extra.manager = True
 
     def reverse(self):
         """
@@ -746,6 +802,7 @@ class QuerySet(object):
         clone = self._clone()
         clone.query.standard_ordering = not clone.query.standard_ordering
         return clone
+    reverse.manager = True
 
     def defer(self, *fields):
         """
@@ -761,6 +818,7 @@ class QuerySet(object):
         else:
             clone.query.add_deferred_loading(fields)
         return clone
+    defer.manager = True
 
     def only(self, *fields):
         """
@@ -775,6 +833,7 @@ class QuerySet(object):
         clone = self._clone()
         clone.query.add_immediate_loading(fields)
         return clone
+    only.manager = True
 
     def using(self, alias):
         """
@@ -783,6 +842,7 @@ class QuerySet(object):
         clone = self._clone()
         clone._db = alias
         return clone
+    using.manager = True
 
     ###################################
     # PUBLIC INTROSPECTION ATTRIBUTES #

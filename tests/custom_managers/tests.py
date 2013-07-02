@@ -17,6 +17,14 @@ class CustomManagerTests(TestCase):
             ],
             six.text_type
         )
+        self.assertQuerysetEqual(
+            Person.other_objects.get_fun_people(), [
+                "Bugs Bunny"
+            ],
+            six.text_type
+        )
+        print Person.other_objects.filter(fun=False)
+        print Person.other_objects.bar()
         # The RelatedManager used on the 'books' descriptor extends the default
         # manager
         self.assertIsInstance(p2.books, PublishedBookManager)
