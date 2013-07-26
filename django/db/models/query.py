@@ -58,13 +58,6 @@ class QuerySet(object):
         self._prefetch_done = False
         self._known_related_objects = {}        # {rel_field, {pk: rel_obj}}
 
-    def as_manager(cls):
-        # Address the circular dependency between `Queryset` and `Manager`.
-        from django.db.models.manager import Manager
-        return Manager.from_queryset(cls)()
-    as_manager.queryset_only = True
-    as_manager = classmethod(as_manager)
-
     ########################
     # PYTHON MAGIC METHODS #
     ########################

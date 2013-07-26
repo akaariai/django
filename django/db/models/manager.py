@@ -62,7 +62,15 @@ class BaseManager(six.with_metaclass(RenameManagerMethods)):
     # Tracks each time a Manager instance is created. Used to retain order.
     creation_counter = 0
 
-    def __init__(self):
+    def __new__(cls, *args, **kwargs):
+        if args and inspect.isclass(args[0]) and issubclass(args[0], QuerySet):
+            qs_class = args[0]
+            new_cls = cls.from_queryset(qs_class)
+            return super(new_cls, new_cls).__new__(new_cls)
+        else:
+            return super(BaseManager, cls).__new__(cls)
+
+    def __init__(self, queryset_class=None):
         super(BaseManager, self).__init__()
         self._set_creation_counter()
         self.model = None

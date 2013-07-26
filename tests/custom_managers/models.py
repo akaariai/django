@@ -70,7 +70,7 @@ class Person(models.Model):
     fun = models.BooleanField()
     objects = PersonManager()
 
-    custom_queryset_default_manager = CustomQuerySet.as_manager()
+    custom_queryset_default_manager = models.Manager(CustomQuerySet)
     custom_queryset_custom_manager = CustomManager('hello')
 
     def __str__(self):
