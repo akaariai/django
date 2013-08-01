@@ -1,11 +1,11 @@
 from __future__ import unicode_literals
 import warnings
 
-from django.contrib.admin.utils import quote
 from django.core.urlresolvers import reverse
 from django.template.response import TemplateResponse
 from django.test import TestCase
 from django.test.utils import override_settings
+from django.utils.encoding import quote
 
 from .models import Action, Person, Car
 

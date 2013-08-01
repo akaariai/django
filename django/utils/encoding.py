@@ -7,7 +7,7 @@ import locale
 
 from django.utils.functional import Promise
 from django.utils import six
-from django.utils.six.moves.urllib.parse import quote
+from django.utils.six.moves.urllib.parse import quote as urllib_quote
 
 class DjangoUnicodeDecodeError(UnicodeDecodeError):
     def __init__(self, obj, *args):
@@ -187,7 +187,7 @@ def iri_to_uri(iri):
     # converted.
     if iri is None:
         return iri
-    return quote(force_bytes(iri), safe=b"/#%[]=:;$&()+,!?*@'~")
+    return urllib_quote(force_bytes(iri), safe=b"/#%[]=:;$&()+,!?*@'~")
 
 def filepath_to_uri(path):
     """Convert a file system path to a URI portion that is suitable for
@@ -206,7 +206,7 @@ def filepath_to_uri(path):
         return path
     # I know about `os.sep` and `os.altsep` but I want to leave
     # some flexibility for hardcoding separators.
-    return quote(force_bytes(path).replace(b"\\", b"/"), safe=b"/~!*()'")
+    return urllib_quote(force_bytes(path).replace(b"\\", b"/"), safe=b"/~!*()'")
 
 def get_system_encoding():
     """
@@ -222,3 +222,42 @@ def get_system_encoding():
     return encoding
 
 DEFAULT_LOCALE_ENCODING = get_system_encoding()
+
+
+def quote(s, unsafe_chars=""":/_#?;@&=+$,"<>%\\""", escape="_"):
+    """
+    Used in the admin and in CompositeValues to get rid of unsafe
+    characters. The default arguments are those used by the admin.
+    Similar to urllib.quote, except that the quoting is slightly different
+    so that it doesn't get automatically unquoted by the Web browser.
+    """
+    if not isinstance(s, six.string_types):
+        return s
+    res = list(s)
+    unsafe_chars += escape
+    for i in range(len(res)):
+        c = res[i]
+        if c in unsafe_chars:
+            res[i] = '%s%02X' % (escape, ord(c))
+    return ''.join(res)
+
+
+def unquote(s, escape="_"):
+    """
+    Undo the effects of quote(). Based heavily on urllib.unquote().
+    """
+    mychr = chr
+    myatoi = int
+    list = s.split(escape)
+    res = [list[0]]
+    myappend = res.append
+    del list[0]
+    for item in list:
+        if item[1:2]:
+            try:
+                myappend(mychr(myatoi(item[:2], 16)) + item[2:])
+            except ValueError:
+                myappend(escape + item)
+        else:
+            myappend(escape + item)
+    return "".join(res)

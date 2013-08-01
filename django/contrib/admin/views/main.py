@@ -9,14 +9,14 @@ from django.db import models
 from django.db.models.fields import FieldDoesNotExist
 from django.utils import six
 from django.utils.deprecation import RenameMethodsBase
-from django.utils.encoding import force_str, force_text
+from django.utils.encoding import force_str, force_text, quote
 from django.utils.translation import ugettext, ugettext_lazy
 from django.utils.http import urlencode
 
 from django.contrib.admin import FieldListFilter
 from django.contrib.admin.exceptions import DisallowedModelAdminLookup
 from django.contrib.admin.options import IncorrectLookupParameters, IS_POPUP_VAR, TO_FIELD_VAR
-from django.contrib.admin.utils import (quote, get_fields_from_path,
+from django.contrib.admin.utils import (get_fields_from_path,
     lookup_needs_distinct, prepare_lookup_value)
 
 # Changelist settings

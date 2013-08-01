@@ -8,7 +8,7 @@ from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.admin import widgets, helpers
-from django.contrib.admin.utils import (unquote, flatten_fieldsets, get_deleted_objects,
+from django.contrib.admin.utils import (flatten_fieldsets, get_deleted_objects,
     model_format_dict, NestedObjects, lookup_needs_distinct)
 from django.contrib.admin import validation
 from django.contrib.admin.templatetags.admin_static import static
@@ -39,7 +39,7 @@ from django.utils.http import urlencode
 from django.utils.text import capfirst, get_text_list
 from django.utils.translation import ugettext as _
 from django.utils.translation import ungettext
-from django.utils.encoding import force_text
+from django.utils.encoding import force_text, unquote
 from django.views.decorators.csrf import csrf_protect
 
 

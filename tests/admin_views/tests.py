@@ -15,7 +15,6 @@ from django.contrib.auth import get_permission_codename
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.admin.models import LogEntry, DELETION
 from django.contrib.admin.sites import LOGIN_FORM_KEY
-from django.contrib.admin.utils import quote
 from django.contrib.admin.views.main import IS_POPUP_VAR
 from django.contrib.admin.tests import AdminSeleniumWebDriverTestCase
 from django.contrib.auth import REDIRECT_FIELD_NAME
@@ -30,7 +29,7 @@ from django.test.utils import override_settings
 from django.utils import formats
 from django.utils import translation
 from django.utils.cache import get_max_age
-from django.utils.encoding import iri_to_uri, force_bytes
+from django.utils.encoding import iri_to_uri, force_bytes, quote
 from django.utils.html import escape
 from django.utils.http import urlencode, urlquote
 from django.utils.six.moves.urllib.parse import urljoin
