@@ -448,7 +448,7 @@ class Model(six.with_metaclass(ModelBase)):
         return '%s object' % self.__class__.__name__
 
     def __eq__(self, other):
-        return isinstance(other, self.__class__) and self._get_pk_val() == other._get_pk_val()
+        return isinstance(self, other.__class__) and self._get_pk_val(meta=other._meta) == other._get_pk_val()
 
     def __ne__(self, other):
         return not self.__eq__(other)

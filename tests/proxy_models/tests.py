@@ -51,6 +51,12 @@ class ProxyModelTests(TestCase):
         self.assertEqual(MyPerson.objects.get(name="Foo McBar").id, person.id)
         self.assertFalse(MyPerson.objects.get(id=person.id).has_special_name())
 
+    def test_proxy_eq(self):
+        proxy = MyPerson(id=1)
+        obj = Person(id=1)
+        self.assertEqual(proxy, obj)
+        self.assertEqual(obj, proxy)
+
     def test_no_proxy(self):
         """
         Person is not proxied by StatusPerson subclass.

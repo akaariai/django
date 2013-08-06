@@ -318,3 +318,10 @@ class ModelInheritanceTests(TestCase):
             sql = query['sql']
             if 'UPDATE' in sql:
                 self.assertEqual(expected_sql, sql)
+
+    def test_eq(self):
+        p = Place(id=1)
+        r = Restaurant(id=1)
+        self.assertEqual(p, r)
+        pl = ParkingLot(id=1, parent_id=2)
+        self.assertEqual(p, pl)

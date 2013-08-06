@@ -1438,13 +1438,19 @@ class AdminViewDeletedObjectsTest(TestCase):
         """
         should_contain = [
             """<li>Villain: <a href="/test_admin/admin/admin_views/villain/3/">Bob</a>""",
-            """<li>Super villain: <a href="/test_admin/admin/admin_views/supervillain/3/">Bob</a>""",
+            #"""<li>Super villain: <a href="/test_admin/admin/admin_views/supervillain/3/">Bob</a>""",
             """<li>Secret hideout: floating castle""",
             """<li>Super secret hideout: super floating castle!"""
             ]
         response = self.client.get('/test_admin/admin/admin_views/villain/%s/delete/' % quote(3))
         for should in should_contain:
             self.assertContains(response, should, 1)
+        should_contain = [
+            #"""<li>Villain: <a href="/test_admin/admin/admin_views/villain/3/">Bob</a>""",
+            """<li>Super villain: <a href="/test_admin/admin/admin_views/supervillain/3/">Bob</a>""",
+            """<li>Secret hideout: floating castle""",
+            """<li>Super secret hideout: super floating castle!"""
+            ]
         response = self.client.get('/test_admin/admin/admin_views/supervillain/%s/delete/' % quote(3))
         for should in should_contain:
             self.assertContains(response, should, 1)
