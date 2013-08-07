@@ -108,6 +108,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     atomic_transactions = False
     supports_paramstyle_pyformat = False
     supports_sequence_reset = False
+    supports_tuple_literals = False
 
     @cached_property
     def uses_savepoints(self):

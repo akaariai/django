@@ -5,6 +5,7 @@ from django.db.backends import utils
 from django.db.models import signals
 from django.db.models.fields import (AutoField, Field, IntegerField,
     PositiveIntegerField, PositiveSmallIntegerField, FieldDoesNotExist)
+from django.db.models.fields.virtual import get_composite_in_constraint
 from django.db.models.related import RelatedObject, PathInfo
 from django.db.models.query import QuerySet
 from django.db.models.deletion import CASCADE
@@ -1161,13 +1162,9 @@ class ForeignObject(RelatedField):
                 (Constraint(alias, targets[0].column, sources[0]), lookup_type, value), AND)
         elif lookup_type == 'in':
             values = [get_normalized_value(value) for value in raw_value]
-            for value in values:
-                value_constraint = constraint_class()
-                for index, target in enumerate(targets):
-                    value_constraint.add(
-                        (Constraint(alias, target.column, sources[index]), 'exact', value[index]),
-                        AND)
-                root_constraint.add(value_constraint, OR)
+            root_constraint = get_composite_in_constraint(
+                constraint_class, alias, targets, sources, values
+            )
         else:
             raise TypeError('Related Field got invalid lookup: %s' % lookup_type)
         return root_constraint

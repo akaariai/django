@@ -676,6 +676,10 @@ class BaseDatabaseFeatures(object):
     # What kind of error does the backend throw when accessing closed cursor?
     closed_cursor_error_class = ProgrammingError
 
+    # Does the backend support tuple literals, e.g. for use in
+    # multi-column IN clauses?
+    supports_tuple_literals = True
+
     def __init__(self, connection):
         self.connection = connection
 
@@ -751,6 +755,48 @@ class BaseDatabaseOperations(object):
         culling.
         """
         return "SELECT cache_key FROM %s ORDER BY cache_key LIMIT 1 OFFSET %%s"
+
+    def composite_in_sql(self, qn, alias, columns, temp_alias, length):
+        """
+        Returns an expression equivalent to a multi-column IN clause.
+        """
+        if self.connection.features.supports_tuple_literals:
+            return self.composite_in_sql_tuples(qn, alias, columns,
+                                                temp_alias, length)
+        return self.composite_in_sql_subquery(qn, alias, columns,
+                                              temp_alias, length)
+
+    def composite_in_sql_tuples(self, qn, alias, columns, temp_alias, length):
+        """
+        Implements composite_in_sql directly as an IN clause with a tuple
+        literal.
+        """
+        return "(%(cols)s) IN (%(placeholders)s)" % {
+            'cols': ", ".join("%s.%s" % (qn(alias), qn(col)) for col in columns),
+            'placeholders': ", ".join(["(%s)" % ", ".join(["%s"] * len(columns))] * length),
+        }
+
+    def composite_in_sql_subquery(self, qn, alias, columns, temp_alias, length):
+        """
+        Implements composite_in_sql using an EXISTS subquery with a
+        temporary table. Used in backends without support for tuple
+        literals.
+        """
+        res = []
+        res.append("EXISTS (SELECT * FROM (")
+        res.append("SELECT %s" % ", ".join(
+            "%%s AS %s" % qn(col) for col in columns
+        ))
+        res.extend(["UNION ALL SELECT %s" % ", ".join(["%s"] * len(columns))] * (length - 1))
+        res.append(") AS %s" % temp_alias)
+        res.append("WHERE %s)" % " AND ".join(
+            "%(alias)s.%(col)s = %(temp_alias)s.%(col)s" % {
+                'alias': qn(alias),
+                'col': qn(col),
+                'temp_alias': temp_alias,
+            } for col in columns
+        ))
+        return " ".join(res)
 
     def date_extract_sql(self, lookup_type, field_name):
         """

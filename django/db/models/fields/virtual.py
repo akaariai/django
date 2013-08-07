@@ -4,6 +4,7 @@ from collections import namedtuple
 
 from django.db.models import signals
 from django.db.models.fields import Field
+from django.db.models.sql.where import InConstraint, AND
 from django.utils.encoding import (force_text, python_2_unicode_compatible,
         quote, unquote)
 from django.utils import six
@@ -116,3 +117,12 @@ def get_composite_value_class(name, fields):
                     for v in self)
 
     return CompositeValue
+
+
+def get_composite_in_constraint(constraint_class, alias, targets, sources,
+                                values):
+    root_constraint = constraint_class()
+    columns = [t.column for t in targets]
+    root_constraint.add(InConstraint(alias, columns, sources, values), AND)
+
+    return root_constraint
