@@ -57,6 +57,7 @@ class QuerySet(object):
         self._prefetch_related_lookups = []
         self._prefetch_done = False
         self._known_related_objects = {}        # {rel_field, {pk: rel_obj}}
+        self._inplace = False
 
     def as_manager(cls):
         # Address the circular dependency between `Queryset` and `Manager`.
@@ -158,7 +159,7 @@ class QuerySet(object):
             return self._result_cache[k]
 
         if isinstance(k, slice):
-            qs = self._clone()
+            qs = self._chain()
             if k.start is not None:
                 start = int(k.start)
             else:
@@ -170,7 +171,7 @@ class QuerySet(object):
             qs.query.set_limits(start, stop)
             return list(qs)[::k.step] if k.step else qs
 
-        qs = self._clone()
+        qs = self._chain()
         qs.query.set_limits(k, k + 1)
         return list(qs)[0]
 
@@ -180,7 +181,7 @@ class QuerySet(object):
             return other
         if isinstance(self, EmptyQuerySet):
             return self
-        combined = self._clone()
+        combined = self._chain()
         combined._merge_known_related_objects(other)
         combined.query.combine(other.query, sql.AND)
         return combined
@@ -191,7 +192,7 @@ class QuerySet(object):
             return other
         if isinstance(other, EmptyQuerySet):
             return self
-        combined = self._clone()
+        combined = self._chain()
         combined._merge_known_related_objects(other)
         combined.query.combine(other.query, sql.OR)
         return combined
@@ -671,17 +672,22 @@ class QuerySet(object):
         return self._chain(klass=DateTimeQuerySet, setup=True,
                 _field_name=field_name, _kind=kind, _order=order, _tzinfo=tzinfo)
 
+    ##################################################################
+    # PUBLIC METHODS THAT ALTER ATTRIBUTES AND RETURN A NEW QUERYSET #
+    ##################################################################
+
     def none(self):
         """
         Returns an empty QuerySet.
         """
-        clone = self._clone()
+        clone = self._chain()
         clone.query.set_empty()
         return clone
 
-    ##################################################################
-    # PUBLIC METHODS THAT ALTER ATTRIBUTES AND RETURN A NEW QUERYSET #
-    ##################################################################
+    def inplace(self):
+        clone = self._chain()
+        clone._inplace = True
+        return clone
 
     def all(self):
         """
@@ -947,7 +953,10 @@ class QuerySet(object):
                                              using=self.db)
 
     def _chain(self, klass=None, setup=False, **kwargs):
-        new = self._clone()
+        if self._inplace:
+            new = self
+        else:
+            new = self._clone()
         return new._pre_next_op(klass=klass, setup=setup, **kwargs)
 
     def _clone(self):
@@ -1173,7 +1182,7 @@ class ValuesQuerySet(QuerySet):
             raise TypeError('Cannot use a multi-field %s as a filter value.'
                     % self.__class__.__name__)
 
-        obj = self._clone()
+        obj = self._chain()
         if obj._db is None or connection == connections[obj._db]:
             return obj.query.get_compiler(connection=connection).as_nested_sql()
         raise ValueError("Can't do subqueries with queries on different DBs.")

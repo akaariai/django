@@ -657,7 +657,7 @@ class Model(six.with_metaclass(ModelBase)):
         updated = False
         # If possible, try an UPDATE. If that doesn't update anything, do an INSERT.
         if pk_set and not force_insert:
-            base_qs = cls._base_manager.using(using)
+            base_qs = cls._base_manager.get_inplace_queryset().using(using)
             values = [(f, None, (getattr(self, f.attname) if raw else f.pre_save(self, False)))
                       for f in non_pks]
             updated = self._do_update(base_qs, using, pk_val, values, update_fields)

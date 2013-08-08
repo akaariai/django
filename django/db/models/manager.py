@@ -160,6 +160,11 @@ class BaseManager(six.with_metaclass(RenameManagerMethods)):
         """
         return self._queryset_class(self.model, using=self._db)
 
+    def get_inplace_queryset(self):
+        qs = self._queryset_class(self.model, using=self._db)
+        qs._inplace = True
+        return qs
+
     def all(self):
         # We can't proxy this method through the `QuerySet` like we do for the
         # rest of the `QuerySet` methods. This is because `QuerySet.all()`
