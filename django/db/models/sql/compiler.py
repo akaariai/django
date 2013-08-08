@@ -163,7 +163,7 @@ class SQLCompiler(object):
 
         Used when nesting this query inside another.
         """
-        obj = self.query.clone()
+        obj = self.query.chain()
         if obj.low_mark == 0 and obj.high_mark is None:
             # If there is no slicing in use, then we can safely drop all ordering
             obj.clear_ordering(True)
@@ -987,7 +987,7 @@ class SQLUpdateCompiler(SQLCompiler):
 
         # We need to use a sub-select in the where clause to filter on things
         # from other tables.
-        query = self.query.clone(klass=Query)
+        query = self.query.chain(klass=Query)
         query.extra = {}
         query.select = []
         query.add_fields([query.get_meta().pk.name])

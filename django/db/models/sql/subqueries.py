@@ -108,9 +108,9 @@ class UpdateQuery(Query):
         if not hasattr(self, 'related_updates'):
             self.related_updates = {}
 
-    def clone(self, klass=None, **kwargs):
-        return super(UpdateQuery, self).clone(klass,
-                related_updates=self.related_updates.copy(), **kwargs)
+    def next_op(self, klass=None, **kwargs):
+        return super(UpdateQuery, self).next_op(
+            klass, related_updates=self.related_updates.copy(), **kwargs)
 
     def update_batch(self, pk_list, values, using):
         pk_field = self.get_meta().pk
@@ -184,14 +184,14 @@ class InsertQuery(Query):
         self.fields = []
         self.objs = []
 
-    def clone(self, klass=None, **kwargs):
+    def next_op(self, klass=None, **kwargs):
         extras = {
             'fields': self.fields[:],
             'objs': self.objs[:],
             'raw': self.raw,
         }
         extras.update(kwargs)
-        return super(InsertQuery, self).clone(klass, **extras)
+        return super(InsertQuery, self).next_op(klass, **extras)
 
     def insert_values(self, fields, objs, raw=False):
         """

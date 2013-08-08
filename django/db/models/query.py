@@ -312,7 +312,7 @@ class QuerySet(object):
         for arg in args:
             kwargs[arg.default_alias] = arg
 
-        query = self.query.clone()
+        query = self.query.chain()
         force_subq = query.low_mark != 0 or query.high_mark is not None
         aggregate_names = []
         for (alias, aggregate_expr) in kwargs.items():
@@ -584,7 +584,7 @@ class QuerySet(object):
         assert self.query.can_filter(), \
                 "Cannot update a query once a slice has been taken."
         self._for_write = True
-        query = self.query.clone(sql.UpdateQuery)
+        query = self.query.chain(sql.UpdateQuery)
         query.add_update_values(kwargs)
         with transaction.commit_on_success_unless_managed(using=self.db):
             rows = query.get_compiler(self.db).execute_sql(None)
@@ -601,7 +601,7 @@ class QuerySet(object):
         """
         assert self.query.can_filter(), \
                 "Cannot update a query once a slice has been taken."
-        query = self.query.clone(sql.UpdateQuery)
+        query = self.query.chain(sql.UpdateQuery)
         query.add_update_fields(values)
         self._result_cache = None
         return query.get_compiler(self.db).execute_sql(None)
@@ -951,7 +951,7 @@ class QuerySet(object):
         return new._pre_next_op(klass=klass, setup=setup, **kwargs)
 
     def _clone(self):
-        c = self.__class__(model=self.model, query=self.query.clone(), using=self._db)
+        c = self.__class__(model=self.model, query=self.query.chain(), using=self._db)
         c._sticky_filter = self._sticky_filter
         c._for_write = self._for_write
         c._prefetch_related_lookups = self._prefetch_related_lookups[:]
@@ -1241,7 +1241,7 @@ class DateQuerySet(QuerySet):
         instance.
         """
         self.query.clear_deferred_loading()
-        self.query = self.query.clone(klass=sql.DateQuery, setup=True)
+        self.query = self.query.chain(klass=sql.DateQuery)
         self.query.select = []
         self.query.add_select(self._field_name, self._kind, self._order)
 
@@ -1264,7 +1264,7 @@ class DateTimeQuerySet(QuerySet):
         instance.
         """
         self.query.clear_deferred_loading()
-        self.query = self.query.clone(klass=sql.DateTimeQuery, setup=True, tzinfo=self._tzinfo)
+        self.query = self.query.chain(klass=sql.DateTimeQuery, tzinfo=self._tzinfo)
         self.query.select = []
         self.query.add_select(self._field_name, self._kind, self._order)
 
@@ -1590,7 +1590,7 @@ class RawQuerySet(object):
         Selects which database this Raw QuerySet should excecute it's query against.
         """
         return RawQuerySet(self.raw_query, model=self.model,
-                query=self.query.clone(using=alias),
+                query=self.query.chain(using=alias),
                 params=self.params, translations=self.translations,
                 using=alias)
 
