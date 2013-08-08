@@ -41,17 +41,19 @@ class DeleteQuery(Query):
         """
         if not field:
             field = self.get_meta().pk
+        # We need an alias because get_lookup_constraint requires one.
+        alias = self.get_initial_alias()
         # Used in case of ForeignKeys.
         basic_fields = field.resolve_basic_fields()
         for offset in range(0, len(pk_list), GET_ITERATOR_CHUNK_SIZE):
             pk_batch = pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]
             if hasattr(field, 'get_lookup_constraint'):
                 where = field.get_lookup_constraint(
-                    self.where_class, None, basic_fields, basic_fields,
+                    self.where_class, alias, basic_fields, basic_fields,
                     'in', pk_batch)
             else:
                 where = self.where_class()
-                where.add((Constraint(None, field.column, field), 'in',
+                where.add((Constraint(alias, field.column, field), 'in',
                            pk_batch), AND)
             self.do_query(self.get_meta().db_table, where, using=using)
 

@@ -1391,7 +1391,7 @@ class Query(object):
             else:
                 # Local non-relational field.
                 final_field = field
-                targets = (field,)
+                targets = field.resolve_basic_fields()
                 break
 
         if pos != len(names) - 1:

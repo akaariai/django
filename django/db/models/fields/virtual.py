@@ -4,7 +4,7 @@ from collections import namedtuple
 
 from django.db.models import signals
 from django.db.models.fields import Field
-from django.db.models.sql.where import InConstraint, AND
+from django.db.models.sql.where import Constraint, InConstraint, AND
 from django.utils.encoding import (force_text, python_2_unicode_compatible,
         quote, unquote)
 from django.utils import six
@@ -97,8 +97,30 @@ class CompositeField(VirtualField):
             value = [unquote(v, escape=COMPOSITE_VALUE_QUOTING_CHAR)
                      for v in value.split(COMPOSITE_VALUE_SEPARATOR)]
 
+        if len(value) != len(self.fields):
+            raise ValueError("%s values must have length %d; "
+                             "the length of %r is %d." % (self.name,
+                             len(self.fields), value, len(value)))
         value = [f.to_python(v) for f, v in zip(self.fields, value)]
         return value
+
+    def get_lookup_constraint(self, constraint_class, alias, targets,
+                              sources, lookup_type, raw_value):
+        if lookup_type == 'exact':
+            value = self.to_python(raw_value)
+            root_constraint = constraint_class()
+            for target, source, val in zip(targets, sources, value):
+                root_constraint.add(
+                    (Constraint(alias, target.column, source), lookup_type, val),
+                    AND)
+        elif lookup_type == 'in':
+            values = [self.to_python(val) for val in raw_value]
+            root_constraint = get_composite_in_constraint(
+                constraint_class, alias, targets, sources, values)
+        else:
+            raise TypeError("Lookup type %r not supported with composite "
+                            "fields." % lookup_type)
+        return root_constraint
 
 
 def get_composite_value_class(name, fields):
