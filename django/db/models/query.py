@@ -340,7 +340,7 @@ class QuerySet(object):
         Performs the query and returns a single object matching the given
         keyword arguments.
         """
-        clone = self.filter(*args, **kwargs)
+        clone = self.inplace().filter(*args, **kwargs)
         if self.query.can_filter():
             clone = clone.order_by()
         clone = clone[:MAX_GET_RESULTS + 1]
@@ -538,7 +538,7 @@ class QuerySet(object):
                 "Cannot use 'limit' or 'offset' with in_bulk"
         if not id_list:
             return {}
-        qs = self.filter(pk__in=id_list).order_by()
+        qs = self.inplace().filter(pk__in=id_list).order_by()
         return dict([(obj._get_pk_val(), obj) for obj in qs])
 
     def delete(self):
@@ -548,7 +548,7 @@ class QuerySet(object):
         assert self.query.can_filter(), \
                 "Cannot use 'limit' or 'offset' with delete."
 
-        del_query = self._chain()
+        del_query = self.inplace()
 
         # The delete is actually 2 queries - one to find related objects,
         # and one to delete. Make sure that the discovery of related
@@ -574,7 +574,9 @@ class QuerySet(object):
         Deletes objects found from the given queryset in single direct SQL
         query. No signals are sent, and there is no protection for cascades.
         """
-        sql.DeleteQuery(self.model).delete_qs(self, using)
+        qs = sql.DeleteQuery(self.model)
+        qs.inplace = True
+        qs.delete_qs(self, using)
     _raw_delete.alters_data = True
 
     def update(self, **kwargs):
@@ -687,6 +689,7 @@ class QuerySet(object):
     def inplace(self):
         clone = self._chain()
         clone._inplace = True
+        clone.query.inplace = True
         return clone
 
     def all(self):
@@ -952,8 +955,8 @@ class QuerySet(object):
             self.model._base_manager._insert(batch, fields=fields,
                                              using=self.db)
 
-    def _chain(self, klass=None, setup=False, **kwargs):
-        if self._inplace:
+    def _chain(self, klass=None, setup=False, inplace=None, **kwargs):
+        if (self._inplace or inplace is True) and inplace is not False:
             new = self
         else:
             new = self._clone()

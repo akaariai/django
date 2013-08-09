@@ -987,7 +987,7 @@ class SQLUpdateCompiler(SQLCompiler):
 
         # We need to use a sub-select in the where clause to filter on things
         # from other tables.
-        query = self.query.chain(klass=Query)
+        query = self.query.chain(klass=Query, inplace=False)
         query.extra = {}
         query.select = []
         query.add_fields([query.get_meta().pk.name])

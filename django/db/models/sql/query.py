@@ -104,6 +104,8 @@ class Query(object):
     query_terms = QUERY_TERMS
     aggregates_module = base_aggregates_module
 
+    inplace = False
+
     compiler = 'SQLCompiler'
 
     def __init__(self, model, where=WhereNode):
@@ -280,8 +282,11 @@ class Query(object):
             self._setup_query()
         return self
 
-    def chain(self, klass=None, **kwargs):
-        new = self.clone()
+    def chain(self, klass=None, inplace=None, **kwargs):
+        if (self.inplace or inplace is True) and inplace is not False:
+            new = self
+        else:
+            new = self.clone()
         return new.pre_next_op(klass=klass, **kwargs)
 
     def convert_values(self, value, field, connection):

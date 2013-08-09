@@ -33,7 +33,7 @@ def update_contenttypes(app, created_models, verbosity=2, db=DEFAULT_DB_ALIAS, *
     # Get all the content types
     content_types = dict(
         (ct.model, ct)
-        for ct in ContentType.objects.using(db).filter(app_label=app_label)
+        for ct in ContentType.objects.inplace().using(db).filter(app_label=app_label)
     )
     to_remove = [
         ct
@@ -50,7 +50,7 @@ def update_contenttypes(app, created_models, verbosity=2, db=DEFAULT_DB_ALIAS, *
         for (model_name, model) in six.iteritems(app_models)
         if model_name not in content_types
     ]
-    ContentType.objects.using(db).bulk_create(cts)
+    ContentType.objects.inplace().using(db).bulk_create(cts)
     if verbosity >= 2:
         for ct in cts:
             print("Adding content type '%s | %s'" % (ct.app_label, ct.model))
