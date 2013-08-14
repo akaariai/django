@@ -5,7 +5,7 @@ except ImportError:
 
 from django import template
 from django.core.urlresolvers import resolve, Resolver404
-from django.utils.encoding import quote
+from django.utils.encoding import force_text, quote
 from django.utils.http import urlencode
 
 register = template.Library()
@@ -18,7 +18,7 @@ def admin_urlname(value, arg):
 
 @register.filter
 def admin_urlquote(value):
-    return quote(value)
+    return quote(force_text(value))
 
 
 @register.simple_tag(takes_context=True)

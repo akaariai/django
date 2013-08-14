@@ -694,9 +694,11 @@ class Choice(models.Model):
     choice = models.IntegerField(blank=True, null=True,
         choices=((1, 'Yes'), (0, 'No'), (None, 'No opinion')))
 
+
 class _Manager(models.Manager):
     def get_queryset(self):
         return super(_Manager, self).get_queryset().filter(pk__gt=1)
+
 
 class FilteredManager(models.Model):
     def __str__(self):
@@ -705,11 +707,47 @@ class FilteredManager(models.Model):
     pk_gt_1 = _Manager()
     objects = models.Manager()
 
+
 class EmptyModelVisible(models.Model):
     """ See ticket #11277. """
+
 
 class EmptyModelHidden(models.Model):
     """ See ticket #11277. """
 
+
 class EmptyModelMixin(models.Model):
     """ See ticket #11277. """
+
+
+@python_2_unicode_compatible
+class PersonWithCompositePK(models.Model):
+    first_name = models.CharField(max_length=47)
+    last_name = models.CharField(max_length=47)
+
+    full_name = models.CompositeField(first_name, last_name, primary_key=True)
+
+    def __str__(self):
+        return "%s %s" % self.full_name
+
+
+class WeekDay(models.Model):
+    pos = models.IntegerField(primary_key=True)
+    name = models.CharField(max_length=10)
+
+
+class Sentence(models.Model):
+    sentence = models.CharField(max_length=128)
+
+
+@python_2_unicode_compatible
+class SentenceFreq(models.Model):
+    weekday = models.ForeignKey(WeekDay, db_column='wd')
+    sentence = models.ForeignKey(Sentence)
+    score = models.FloatField()
+
+    composite_key = models.CompositeField(
+        weekday, sentence, primary_key=True)
+
+    def __str__(self):
+        return self.sentence.sentence.replace('?', self.weekday.name)

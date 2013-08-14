@@ -4,6 +4,7 @@ from __future__ import unicode_literals
 import os
 import re
 import datetime
+import posixpath
 import unittest
 
 from django.conf import settings, global_settings
@@ -29,7 +30,7 @@ from django.test.utils import override_settings
 from django.utils import formats
 from django.utils import translation
 from django.utils.cache import get_max_age
-from django.utils.encoding import iri_to_uri, force_bytes, quote
+from django.utils.encoding import iri_to_uri, force_bytes, force_text, quote
 from django.utils.html import escape
 from django.utils.http import urlencode, urlquote
 from django.utils.six.moves.urllib.parse import urljoin
@@ -43,11 +44,12 @@ from .models import (Article, BarAccount, CustomArticle, EmptyModel, FooAccount,
     DooHickey, FancyDoodad, Whatsit, Category, Post, Plot, FunkyTag, Chapter,
     Book, Promo, WorkHour, Employee, Question, Answer, Inquisition, Actor,
     FoodDelivery, RowLevelChangePermissionModel, Paper, CoverLetter, Story,
-    OtherStory, ComplexSortedPerson, PluggableSearchPerson, Parent, Child, AdminOrderedField,
-    AdminOrderedModelMethod, AdminOrderedAdminMethod, AdminOrderedCallable,
-    Report, MainPrepopulated, RelatedPrepopulated, UnorderedObject,
-    Simple, UndeletableObject, UnchangeableObject, Choice, ShortMessage,
-    Telegram, Pizza, Topping, FilteredManager)
+    OtherStory, ComplexSortedPerson, PluggableSearchPerson, Parent, Child,
+    AdminOrderedField, AdminOrderedModelMethod, AdminOrderedAdminMethod,
+    AdminOrderedCallable, Report, MainPrepopulated, RelatedPrepopulated,
+    UnorderedObject, Simple, UndeletableObject, UnchangeableObject,
+    Choice, ShortMessage, Telegram, Pizza, Topping, FilteredManager,
+    PersonWithCompositePK, WeekDay, Sentence, SentenceFreq)
 from .admin import site, site2
 
 
@@ -4614,3 +4616,194 @@ class TestLabelVisibility(TestCase):
 
     def assert_fieldline_hidden(self, response):
         self.assertContains(response, '<div class="form-row hidden')
+
+
+@override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
+class AdminCompositePrimaryKeysTests(TestCase):
+    """
+    Checks that all supported admin functionality plays with composite primary
+    keys nicely.
+    """
+    fixtures = ['admin-views-users.xml']
+    urls = "admin_views.urls"
+
+    def setUp(self):
+        self.client.login(username='super', password='secret')
+
+    def tearDown(self):
+        self.client.logout()
+
+    def insert_some_items(self):
+        self.bobby = PersonWithCompositePK.objects.create(
+            first_name="Robert,~_47_20'); DROP TABLE Students;--",
+            last_name="Bobby Tables"
+        )
+        self.elaine = PersonWithCompositePK.objects.create(
+            first_name="Help I'm trapped",
+            last_name="In a driver's license factory"
+        )
+
+    def insert_more_items(self):
+        self.wednesday = WeekDay.objects.create(name='Wednesday', pos=3)
+        self.ladies_night = Sentence.objects.create(
+            sentence='? is ladies’ night')
+        self.welani = SentenceFreq.objects.create(
+            weekday=self.wednesday, sentence=self.ladies_night, score=630)
+
+    def test_add_save(self):
+        """
+        Test creation of objects with composite primary keys using "Save".
+        """
+        data = {
+            "first_name": "Robert,~'); DROP TABLE Students;--",
+            "last_name": "Bobby Tables",
+            "_save": "",
+        }
+        response = self.client.post("/test_admin/admin/admin_views/personwithcompositepk/add/", data, follow=True)
+        self.assertRedirects(response, "/test_admin/admin/admin_views/personwithcompositepk/")
+        self.assertContains(response, "was added successfully")
+
+    def test_add_another(self):
+        """
+        Test creation of objects with composite primary keys using "Save and add another".
+        """
+        data = {
+            "first_name": "Robert,~'); DROP TABLE Students;--",
+            "last_name": "Bobby Tables",
+            "_addanother": "",
+        }
+        response = self.client.post("/test_admin/admin/admin_views/personwithcompositepk/add/", data, follow=True)
+        self.assertRedirects(response, "/test_admin/admin/admin_views/personwithcompositepk/add/")
+        self.assertContains(response, "was added successfully")
+
+    def test_add_continue(self):
+        """
+        Test creation of objects with composite primary keys using "Save and continue".
+        """
+        data = {
+            "first_name": "Robert,~'); DROP TABLE Students;--",
+            "last_name": "Bobby Tables",
+            "_continue": "",
+        }
+        response = self.client.post("/test_admin/admin/admin_views/personwithcompositepk/add/", data, follow=True)
+        expected_pk = iri_to_uri(urlquote(quote(force_text(PersonWithCompositePK.objects.all()[0].pk))))
+        self.assertRedirects(response, "/test_admin/admin/admin_views/personwithcompositepk/%s/" % expected_pk)
+        self.assertContains(response, "was added successfully")
+
+    def test_changelist_display(self):
+        """
+        Verify that the changelist displays fine for this model.
+        """
+        self.insert_some_items()
+        bobby_pk = force_text(self.bobby.pk)
+        bobby_url = iri_to_uri(urlquote(quote(bobby_pk)))
+        bobby_title = escape("%s %s" % self.bobby.full_name)
+        elaine_title = escape("%s %s" % self.elaine.full_name)
+
+        response = self.client.get("/test_admin/admin/admin_views/personwithcompositepk/")
+        self.assertContains(response, elaine_title)
+
+        # The value of the admin action checkbox shouldn't be quoted.
+        self.assertContains(response, 'value="%s"' % (escape(bobby_pk),))
+        # The link to the change page, on the other hand, has to.
+        should_contain = '<a href="/test_admin/admin/admin_views/personwithcompositepk/%s/">%s</a>' % (bobby_url, bobby_title)
+        self.assertContains(response, should_contain)
+        # TODO: verify the PK value in the checkbox and link correctness
+
+    def test_change_save(self):
+        """
+        Verifies that clicking "Save" in Change form works.
+        """
+        self.insert_some_items()
+        data = {
+            "first_name": "someone",
+            "last_name": "Bobby Tables",
+            "_save": "",
+        }
+        bobby_url = iri_to_uri(urlquote(quote(force_text(self.bobby.pk))))
+
+        response = self.client.post("/test_admin/admin/admin_views/personwithcompositepk/%s/" % bobby_url, data, follow=True)
+        self.assertRedirects(response, "/test_admin/admin/admin_views/personwithcompositepk/")
+        # Since we saved an instance with a modified explicit PK, we actually
+        # created a new one.
+        self.assertQuerysetEqual(PersonWithCompositePK.objects.order_by("last_name", "first_name"), [
+            "<PersonWithCompositePK: Robert,~_47_20'); DROP TABLE Students;-- Bobby Tables>",
+            "<PersonWithCompositePK: someone Bobby Tables>",
+            "<PersonWithCompositePK: Help I'm trapped In a driver's license factory>",
+        ])
+
+    def test_delete_instance(self):
+        """
+        Tests deletion via a single instance.
+        """
+        self.insert_some_items()
+
+        bobby_url = iri_to_uri(urlquote(quote(force_text(self.bobby.pk))))
+        bobby_title = escape("%s %s" % self.bobby.pk)
+
+        # Verify validity of the "Delete" link on change page.
+        response = self.client.get("/test_admin/admin/admin_views/personwithcompositepk/%s/" % bobby_url)
+        self.assertContains(response, "/test_admin/admin/admin_views/personwithcompositepk/%s/delete/" % bobby_url)
+
+        # Verify we get the confirmation page and the link inside the page
+        # is correct.
+        response = self.client.get("/test_admin/admin/admin_views/personwithcompositepk/%s/delete/" % bobby_url)
+        should_contain = """Person with composite pk: <a href="/test_admin/admin/admin_views/personwithcompositepk/%s/">%s</a>""" % (bobby_url, bobby_title)
+        self.assertContains(response, should_contain)
+
+        # Now we verify the actual deletion.
+        data = {
+            "submit": "Yes, I'm sure",
+            "post": "yes",
+        }
+        response = self.client.post("/test_admin/admin/admin_views/personwithcompositepk/%s/delete/" % bobby_url, data, follow=True)
+        self.assertRedirects(response, "/test_admin/admin/admin_views/personwithcompositepk/")
+        self.assertQuerysetEqual(PersonWithCompositePK.objects.all(), [
+            "<PersonWithCompositePK: Help I'm trapped In a driver's license factory>",
+        ])
+
+    def test_delete_action(self):
+        """
+        Tests deletion using the predefined admin action.
+        """
+        self.insert_some_items()
+
+        # Check the confirmation page.
+        bobby_title = escape("%s %s" % self.bobby.pk)
+        bobby_pk = force_text(self.bobby.pk)
+        bobby_url = iri_to_uri(urlquote(quote(bobby_pk)))
+        data = {
+            "_selected_action": [bobby_pk],
+            "index": 0,
+            "action": "delete_selected",
+        }
+        response = self.client.post("/test_admin/admin/admin_views/personwithcompositepk/", data)
+        # The response should contain both the description and a link.
+        self.assertContains(response, bobby_title)
+        self.assertContains(response, escape(bobby_url))
+
+        # Let's do it.
+        data["_selected_action"] = bobby_pk
+        data["post"] = "yes"
+        data["submit"] = "Yes, I'm sure"
+        response = self.client.post("/test_admin/admin/admin_views/personwithcompositepk/", data, follow=True)
+        self.assertRedirects(response, "/test_admin/admin/admin_views/personwithcompositepk/")
+        self.assertQuerysetEqual(PersonWithCompositePK.objects.all(), [
+            "<PersonWithCompositePK: Help I'm trapped In a driver's license factory>",
+        ])
+
+    def test_resolve_permalink(self):
+        self.insert_more_items()
+        sf_ct = ContentType.objects.get_for_model(SentenceFreq)
+        self.insert_some_items()
+
+        list_url = reverse(
+            'admin:%s_%s_changelist' % (sf_ct.app_label, sf_ct.model))
+        list_response = self.client.get(list_url)
+        self.assertEqual(list_response.status_code, 200)
+        href = re.search(
+            r'<a href="([^"]+)">Wednesday is', list_response.content).group(1)
+
+        item_url = posixpath.join(list_url, href)
+        item_response = self.client.get(item_url)
+        self.assertEqual(item_response.status_code, 200)

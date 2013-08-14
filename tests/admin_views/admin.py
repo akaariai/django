@@ -26,12 +26,14 @@ from .models import (Article, Chapter, Account, Media, Child, Parent, Picture,
     Gadget, Villain, SuperVillain, Plot, PlotDetails, CyclicOne, CyclicTwo,
     WorkHour, Reservation, FoodDelivery, RowLevelChangePermissionModel, Paper,
     CoverLetter, Story, OtherStory, Book, Promo, ChapterXtra1, Pizza, Topping,
-    Album, Question, Answer, ComplexSortedPerson, PluggableSearchPerson, PrePopulatedPostLargeSlug,
-    AdminOrderedField, AdminOrderedModelMethod, AdminOrderedAdminMethod,
-    AdminOrderedCallable, Report, Color2, UnorderedObject, MainPrepopulated,
-    RelatedPrepopulated, UndeletableObject, UnchangeableObject, UserMessenger, Simple, Choice,
+    Album, Question, Answer, ComplexSortedPerson, PluggableSearchPerson,
+    PrePopulatedPostLargeSlug, AdminOrderedField, AdminOrderedModelMethod,
+    AdminOrderedAdminMethod, AdminOrderedCallable, Report, Color2,
+    UnorderedObject, MainPrepopulated, RelatedPrepopulated,
+    UndeletableObject, UnchangeableObject, UserMessenger, Simple, Choice,
     ShortMessage, Telegram, FilteredManager, EmptyModelHidden,
-    EmptyModelVisible, EmptyModelMixin)
+    EmptyModelVisible, EmptyModelMixin, PersonWithCompositePK,
+    WeekDay, Sentence, SentenceFreq)
 
 
 def callable_year(dt_value):
@@ -824,6 +826,10 @@ site.register(Choice, ChoiceList)
 site.register(EmptyModelHidden, EmptyModelHiddenAdmin)
 site.register(EmptyModelVisible, EmptyModelVisibleAdmin)
 site.register(EmptyModelMixin, EmptyModelMixinAdmin)
+site.register(PersonWithCompositePK)
+site.register(WeekDay)
+site.register(Sentence)
+site.register(SentenceFreq)
 
 # Register core models we need in our tests
 from django.contrib.auth.models import User, Group

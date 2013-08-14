@@ -39,7 +39,7 @@ from django.utils.http import urlencode
 from django.utils.text import capfirst, get_text_list
 from django.utils.translation import ugettext as _
 from django.utils.translation import ungettext
-from django.utils.encoding import force_text, unquote
+from django.utils.encoding import force_text, quote, unquote
 from django.views.decorators.csrf import csrf_protect
 
 
@@ -1029,7 +1029,7 @@ class ModelAdmin(BaseModelAdmin):
             if post_url_continue is None:
                 post_url_continue = reverse('admin:%s_%s_change' %
                                             (opts.app_label, opts.model_name),
-                                            args=(pk_value,),
+                                            args=(quote(force_text(pk_value)),),
                                             current_app=self.admin_site.name)
             post_url_continue = add_preserved_filters({'preserved_filters': preserved_filters, 'opts': opts}, post_url_continue)
             return HttpResponseRedirect(post_url_continue)
@@ -1068,7 +1068,7 @@ class ModelAdmin(BaseModelAdmin):
             self.message_user(request, msg, messages.SUCCESS)
             redirect_url = reverse('admin:%s_%s_change' %
                                    (opts.app_label, opts.model_name),
-                                   args=(pk_value,),
+                                   args=(quote(force_text(pk_value)),),
                                    current_app=self.admin_site.name)
             redirect_url = add_preserved_filters({'preserved_filters': preserved_filters, 'opts': opts}, redirect_url)
             return HttpResponseRedirect(redirect_url)
