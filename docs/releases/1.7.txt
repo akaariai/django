@@ -199,6 +199,14 @@ Miscellaneous
   equal when primary keys match. Previously only instances of exact same
   class were considered equal on primary key match.
 
+* When comparing two ``Model`` instances without primary key value
+  the :meth:`django.db.models.Model.__eq__` method will compare them unequal
+  (unless they are the same instance).
+
+* The :meth:`django.db.models.Model.__hash__` will now raise
+  ``TypeError`` when called on an instance without primary key value.
+  This is done to avoid mutable ``__hash__`` values in containers.
+
 Features deprecated in 1.7
 ==========================
 
