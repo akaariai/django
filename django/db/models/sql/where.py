@@ -397,18 +397,9 @@ class SubqueryConstraint(object):
 
     def as_sql(self, qn, connection):
         query = self.query_object
-
-        # QuerySet was sent
-        if hasattr(query, 'values'):
-            if query._db and connection.alias != query._db:
-                raise ValueError("Can't do subqueries with queries on different DBs.")
-            # Do not override already existing values.
-            if not hasattr(query, 'field_names'):
-                query = query.values(*self.targets)
-            else:
-                query = query._clone()
-            query = query.query
-            query.clear_ordering(True)
+        if getattr(query, '_forced_pk', False):
+            query.clear_select_clause()
+            query.add_fields(self.targets, True)
 
         query_compiler = query.get_compiler(connection=connection)
         return query_compiler.as_subquery_condition(self.alias, self.columns, qn)

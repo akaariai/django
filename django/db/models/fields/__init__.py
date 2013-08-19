@@ -481,15 +481,13 @@ class Field(object):
             value = self.get_prep_lookup(lookup_type, value)
         if hasattr(value, 'get_compiler'):
             value = value.get_compiler(connection=connection)
-        if hasattr(value, 'as_sql') or hasattr(value, '_as_sql'):
+        if hasattr(value, 'as_sql'):
             # If the value has a relabeled_clone method it means the
             # value will be handled later on.
             if hasattr(value, 'relabeled_clone'):
                 return value
             if hasattr(value, 'as_sql'):
                 sql, params = value.as_sql()
-            else:
-                sql, params = value._as_sql(connection=connection)
             return QueryWrapper(('(%s)' % sql), params)
 
         if lookup_type in ('month', 'day', 'week_day', 'hour', 'minute',

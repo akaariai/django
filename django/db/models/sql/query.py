@@ -1010,17 +1010,16 @@ class Query(object):
         if value is None:
             if lookup_type != 'exact':
                 raise ValueError("Cannot use None as a query value")
-            lookup_type = 'isnull'
-            value = True
+            return True, 'isnull'
         elif callable(value):
             value = value()
         elif isinstance(value, ExpressionNode):
             # If value is a query expression, evaluate it
             value = SQLEvaluator(value, self, reuse=can_reuse)
-        if hasattr(value, 'query') and hasattr(value.query, 'bump_prefix'):
-            value = value._clone()
-            value.query.bump_prefix(self)
-        if hasattr(value, 'bump_prefix'):
+        if hasattr(value, '_prepare_as_filter_value'):
+            value = value._prepare_as_filter_value()
+            value.bump_prefix(self)
+        elif hasattr(value, 'bump_prefix'):
             value = value.clone()
             value.bump_prefix(self)
         # For Oracle '' is equivalent to null. The check needs to be done

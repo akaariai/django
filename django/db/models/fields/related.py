@@ -1069,8 +1069,7 @@ class ForeignObject(RelatedField):
             return value
 
         is_multicolumn = len(self.related_fields) > 1
-        if (hasattr(raw_value, '_as_sql') or
-                hasattr(raw_value, 'get_compiler')):
+        if hasattr(raw_value, 'get_compiler'):
             root_constraint.add(SubqueryConstraint(alias, [target.column for target in targets],
                                                    [source.name for source in sources], raw_value),
                                 AND)

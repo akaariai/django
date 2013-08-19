@@ -1019,14 +1019,13 @@ class QuerySet(object):
     def _prepare(self):
         return self
 
-    def _as_sql(self, connection):
-        """
-        Returns the internal query's SQL and parameters (as a tuple).
-        """
-        obj = self.values("pk")
-        if obj._db is None or connection == connections[obj._db]:
-            return obj.query.get_compiler(connection=connection).as_nested_sql()
-        raise ValueError("Can't do subqueries with queries on different DBs.")
+    def _prepare_as_filter_value(self):
+        obj = self.values('pk')
+        query = obj.query
+        query._forced_pk = True
+        if query.low_mark == 0 and query.high_mark is None:
+            query.clear_ordering(True)
+        return query
 
     # When used as part of a nested query, a queryset will never be an "always
     # empty" result.
@@ -1154,23 +1153,11 @@ class ValuesQuerySet(QuerySet):
 
         super(ValuesQuerySet, self)._setup_aggregate_query(aggregates)
 
-    def _as_sql(self, connection):
-        """
-        For ValuesQuerySet (and subclasses like ValuesListQuerySet), they can
-        only be used as nested queries if they're already set up to select only
-        a single field (in which case, that is the field column that is
-        returned). This differs from QuerySet.as_sql(), where the column to
-        select is set up by Django.
-        """
+    def _prepare_as_filter_value(self):
         if ((self._fields and len(self._fields) > 1) or
                 (not self._fields and len(self.model._meta.fields) > 1)):
-            raise TypeError('Cannot use a multi-field %s as a filter value.'
-                    % self.__class__.__name__)
-
-        obj = self._clone()
-        if obj._db is None or connection == connections[obj._db]:
-            return obj.query.get_compiler(connection=connection).as_nested_sql()
-        raise ValueError("Can't do subqueries with queries on different DBs.")
+            raise TypeError('Cannot use a multi-field QuerySet as a filter value.')
+        return self.query.clone()
 
     def _prepare(self):
         """
