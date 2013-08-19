@@ -657,7 +657,7 @@ class Model(six.with_metaclass(ModelBase)):
         updated = False
         # If possible, try an UPDATE. If that doesn't update anything, do an INSERT.
         if pk_set and not force_insert:
-            base_qs = cls._base_manager.inplace().using(using)
+            base_qs = cls._base_manager._inplace().using(using)
             values = [(f, None, (getattr(self, f.attname) if raw else f.pre_save(self, False)))
                       for f in non_pks]
             updated = self._do_update(base_qs, using, pk_val, values, update_fields)
@@ -670,7 +670,7 @@ class Model(six.with_metaclass(ModelBase)):
                 # If this is a model with an order_with_respect_to
                 # autopopulate the _order field
                 field = meta.order_with_respect_to
-                order_value = cls._base_manager.inplace().using(using).filter(
+                order_value = cls._base_manager._inplace().using(using).filter(
                     **{field.name: getattr(self, field.attname)}).count()
                 self._order = order_value
 

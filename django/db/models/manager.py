@@ -160,9 +160,9 @@ class BaseManager(six.with_metaclass(RenameManagerMethods)):
         """
         return self._queryset_class(self.model, using=self._db)
 
-    def inplace(self):
+    def _inplace(self):
         ret = self.get_queryset()
-        ret._inplace = True
+        ret._inplace_flag = True
         ret.query.inplace = True
         return ret
 

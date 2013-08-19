@@ -88,7 +88,7 @@ def create_permissions(app, created_models, verbosity, db=DEFAULT_DB_ALIAS, **kw
     # Find all the Permissions that have a content_type for a model we're
     # looking for.  We don't need to check for codenames since we already have
     # a list of the ones we're going to create.
-    all_perms = set(auth_app.Permission.objects.inplace().using(db).filter(
+    all_perms = set(auth_app.Permission.objects._inplace().using(db).filter(
         content_type__in=ctypes,
     ).values_list(
         "content_type", "codename"
@@ -99,7 +99,7 @@ def create_permissions(app, created_models, verbosity, db=DEFAULT_DB_ALIAS, **kw
         for ctype, (codename, name) in searched_perms
         if (ctype.pk, codename) not in all_perms
     ]
-    auth_app.Permission.objects.inplace().using(db).bulk_create(perms)
+    auth_app.Permission.objects._inplace().using(db).bulk_create(perms)
     if verbosity >= 2:
         for perm in perms:
             print("Adding permission '%s'" % perm)
