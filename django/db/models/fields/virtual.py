@@ -67,6 +67,15 @@ class CompositeField(VirtualField):
         # We can process the fields only after they've been added to the
         # model class.
         def process_enclosed_fields(sender, **kwargs):
+            # Resolve any field names to instances.
+            new_fields = []
+            for f in self.fields:
+                if isinstance(f, six.string_types):
+                    new_fields.append(cls._meta.get_field(f))
+                else:
+                    new_fields.append(f)
+            self.fields = new_fields
+
             nt_name = "%s_%s" % (cls.__name__, name)
             nt_fields = " ".join(f.name for f in self.fields)
             self.nt = get_composite_value_class(nt_name, nt_fields)

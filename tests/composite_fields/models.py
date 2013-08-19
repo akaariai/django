@@ -10,7 +10,7 @@ class Person(models.Model):
     last_name = models.CharField(max_length=100)
     birthday = models.DateField()
 
-    full_name = models.CompositeField(first_name, last_name, primary_key=True)
+    full_name = models.CompositeField('first_name', 'last_name', primary_key=True)
 
     class Meta:
         ordering = ('last_name', 'first_name')
