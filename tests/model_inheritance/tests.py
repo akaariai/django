@@ -10,7 +10,8 @@ from django.utils import six
 
 from .models import (
     Chef, CommonInfo, ItalianRestaurant, ParkingLot, Place, Post,
-    Restaurant, Student, StudentWorker, Supplier, Worker, MixinModel)
+    Restaurant, Student, StudentWorker, Supplier, Worker, MixinModel,
+    Base, SubBase)
 
 
 class ModelInheritanceTests(TestCase):
@@ -357,3 +358,10 @@ class ModelInheritanceTests(TestCase):
             [Place.objects.get(pk=s.pk)],
             lambda x: x
         )
+
+    def test_custompk_m2m(self):
+        Base.objects.create()
+        s = SubBase.objects.create()
+        b = Base.objects.get(pk=s.id)
+        self.assertNotEqual(b.pk, s.pk)
+        self.assertEqual(s.titles.all(), [])
