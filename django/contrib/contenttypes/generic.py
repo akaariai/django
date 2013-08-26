@@ -11,8 +11,8 @@ from django.db import connection
 from django.db import models, router, DEFAULT_DB_ALIAS
 from django.db.models import signals
 from django.db.models.fields.related import ForeignObject, ForeignObjectRel
+from django.db.models.lookups import Col, Exact
 from django.db.models.related import PathInfo
-from django.db.models.sql.where import Constraint
 from django.forms import ModelForm, ALL_FIELDS
 from django.forms.models import (BaseModelFormSet, modelformset_factory, save_instance,
     modelform_defines_fields)
@@ -227,7 +227,7 @@ class GenericRelation(ForeignObject):
         field = self.rel.to._meta.get_field_by_name(self.content_type_field_name)[0]
         contenttype_pk = self.get_content_type().pk
         cond = where_class()
-        cond.add((Constraint(remote_alias, field.column, field), 'exact', contenttype_pk), 'AND')
+        cond.add(Exact(Col(remote_alias, field.column), contenttype_pk, field), 'AND')
         return cond
 
     def bulk_related_objects(self, objs, using=DEFAULT_DB_ALIAS):

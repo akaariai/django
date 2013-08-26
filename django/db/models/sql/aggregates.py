@@ -64,6 +64,9 @@ class Aggregate(object):
 
         self.field = tmp
 
+    def get_lookup(self, lookup_type):
+        return self.field.get_lookup(lookup_type)
+
     def relabeled_clone(self, change_map):
         clone = copy.copy(self)
         if isinstance(self.col, (list, tuple)):
@@ -88,6 +91,9 @@ class Aggregate(object):
         substitutions.update(self.extra)
 
         return self.sql_template % substitutions, params
+
+    def get_cols(self):
+        return []
 
 
 class Avg(Aggregate):

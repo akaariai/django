@@ -5,6 +5,7 @@ from django.db.backends import utils
 from django.db.models import signals
 from django.db.models.fields import (AutoField, Field, IntegerField,
     PositiveIntegerField, PositiveSmallIntegerField, FieldDoesNotExist)
+from django.db.models.lookups import Col
 from django.db.models.related import RelatedObject, PathInfo
 from django.db.models.query import QuerySet
 from django.db.models.deletion import CASCADE
@@ -1077,26 +1078,31 @@ class ForeignObject(RelatedField):
                                 AND)
         elif lookup_type == 'isnull':
             root_constraint.add(
-                (Constraint(alias, targets[0].column, targets[0]), lookup_type, raw_value), AND)
+                targets[0].get_lookup([lookup_type])(
+                    Col(alias, targets[0].column), raw_value, targets[0]),
+                AND)
         elif (lookup_type == 'exact' or (lookup_type in ['gt', 'lt', 'gte', 'lte']
                                          and not is_multicolumn)):
             value = get_normalized_value(raw_value)
             for index, source in enumerate(sources):
                 root_constraint.add(
-                    (Constraint(alias, targets[index].column, sources[index]), lookup_type,
-                     value[index]), AND)
+                    targets[index].get_lookup([lookup_type])(
+                        Col(alias, targets[index].column), value[index], sources[index]), AND)
         elif lookup_type in ['range', 'in'] and not is_multicolumn:
             values = [get_normalized_value(value) for value in raw_value]
             value = [val[0] for val in values]
             root_constraint.add(
-                (Constraint(alias, targets[0].column, sources[0]), lookup_type, value), AND)
+                targets[0].get_lookup([lookup_type])(
+                    Col(alias, targets[0].column), value, sources[0]),
+                AND)
         elif lookup_type == 'in':
             values = [get_normalized_value(value) for value in raw_value]
             for value in values:
                 value_constraint = constraint_class()
                 for index, target in enumerate(targets):
                     value_constraint.add(
-                        (Constraint(alias, target.column, sources[index]), 'exact', value[index]),
+                        targets[0].get_lookup(['exact'])(
+                            Col(alias, target.column), value[index], sources[index]),
                         AND)
                 root_constraint.add(value_constraint, OR)
         else:

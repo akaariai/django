@@ -58,6 +58,8 @@ class WhereNode(tree.Node):
         """
         if not isinstance(data, (list, tuple)):
             return data
+        else:
+            import ipdb; ipdb.set_trace()
         obj, lookup_type, value = data
         if isinstance(value, collections.Iterator):
             # Consume any generators immediately, so that we can determine
@@ -282,6 +284,8 @@ class WhereNode(tree.Node):
             if hasattr(child, 'relabel_aliases'):
                 # For example another WhereNode
                 child.relabel_aliases(change_map)
+            elif hasattr(child, 'relabeled_clone'):
+                self.children[pos] = child.relabeled_clone(change_map)
             elif isinstance(child, (list, tuple)):
                 # tuple starting with Constraint
                 child = (child[0].relabeled_clone(change_map),) + child[1:]

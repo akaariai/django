@@ -14,6 +14,7 @@ from django.utils.encoding import force_text
 from django.utils.tree import Node
 from django.utils import six
 from django.db import connections, DEFAULT_DB_ALIAS
+from django.db.models.lookups import Col, IsNull
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.aggregates import refs_aggregate
 from django.db.models.expressions import ExpressionNode
@@ -1129,7 +1130,8 @@ class Query(object):
         if self._aggregates:
             for alias, aggregate in self.aggregates.items():
                 if alias in (parts[0], LOOKUP_SEP.join(parts)):
-                    clause.add((aggregate, lookup_type, value), AND)
+                    clause.add(aggregate.get_lookup([lookup_type])(
+                        aggregate, value, aggregate.field), AND)
                     return clause
 
         opts = self.get_meta()
@@ -1162,7 +1164,11 @@ class Query(object):
             constraint = field.get_lookup_constraint(self.where_class, alias, targets, sources,
                                                      lookup_type, value)
         else:
-            constraint = (Constraint(alias, targets[0].column, field), lookup_type, value)
+            if field.get_lookup([lookup_type]):
+                constraint = field.get_lookup([lookup_type])(Col(alias, targets[0].column),
+                                                             value, field)
+            else:
+                constraint = (Constraint(alias, targets[0].column, field), lookup_type, value)
         clause.add(constraint, AND)
         if current_negated and (lookup_type != 'isnull' or value is False):
             self.promote_joins(join_list)
@@ -1178,7 +1184,7 @@ class Query(object):
                 # (col IS NULL OR col != someval)
                 #   <=>
                 # NOT (col IS NOT NULL AND col = someval).
-                clause.add((Constraint(alias, targets[0].column, None), 'isnull', False), AND)
+                clause.add(IsNull(Col(alias, targets[0].column), False, field), AND)
         return clause
 
     def add_filter(self, filter_clause):
@@ -1458,7 +1464,7 @@ class Query(object):
         # nothing
         if self.is_nullable(query.select[0].field):
             alias, col = query.select[0].col
-            query.where.add((Constraint(alias, col, query.select[0].field), 'isnull', False), AND)
+            query.where.add(IsNull(Col(alias, col), False, query.select[0].field), AND)
 
         condition = self.build_filter(
             ('%s__in' % trimmed_prefix, query),

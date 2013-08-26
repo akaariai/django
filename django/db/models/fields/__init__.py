@@ -11,6 +11,8 @@ from itertools import tee
 
 from django.db import connection
 from django.db.models.loading import get_model
+from django.db.models.lookups import (
+    UnsupportedLookup, default_lookups)
 from django.db.models.query_utils import QueryWrapper
 from django.conf import settings
 from django import forms
@@ -144,6 +146,15 @@ class Field(object):
         messages.update(error_messages or {})
         self._error_messages = error_messages  # Store for deconstruction later
         self.error_messages = messages
+
+    _lookups = default_lookups.copy()
+
+    def get_lookup(self, lookups):
+        if len(lookups) > 1:
+            raise UnsupportedLookup(
+                "The lookup '%s' isn't supported for field '%s'" %
+                ('__'.join(lookups), self.__class__))
+        return self._lookups.get(lookups[0])
 
     def deconstruct(self):
         """
