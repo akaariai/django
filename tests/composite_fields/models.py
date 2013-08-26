@@ -19,6 +19,22 @@ class Person(models.Model):
         return '%s %s' % (self.first_name, self.last_name)
 
 
+class PersonWithBirthplace(Person):
+    birthplace = models.CharField(max_length=100)
+
+
+@python_2_unicode_compatible
+class Song(models.Model):
+    title = models.CharField(max_length=100)
+    author = models.ForeignKey(Person)
+
+    class Meta:
+        ordering = ('title',)
+
+    def __str__(self):
+        return self.title
+
+
 @python_2_unicode_compatible
 class MostFieldTypes(models.Model):
     """

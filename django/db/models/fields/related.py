@@ -1403,14 +1403,19 @@ class ForeignKey(ForeignObject):
         for new_name, new_field in to_add:
             self.model.add_to_class(new_name, new_field)
         aux_field = self.model._meta.get_field(self.attname)
-        # It is safe to assume here that all auxiliary fields are prepared
-        # by now -- they are supposed to be only basic concrete fields or
-        # a CompositeField which is added only after all its constituents.
-        self.from_fields = [f.name for f in aux_field.resolve_basic_fields()]
-        self.to_fields = [f.name for f in field.resolve_basic_fields()]
-        # Cache the aux field for later use.
-        self.auxiliary_field = aux_field
-        self.prepare()
+
+        def process_aux_field(sender, **kwargs):
+            self.from_fields = [f.name for f in aux_field.resolve_basic_fields()]
+            self.to_fields = [f.name for f in field.resolve_basic_fields()]
+            # Cache the aux field for later use.
+            self.auxiliary_field = aux_field
+            self.prepare()
+
+        if aux_field.prepared:
+            process_aux_field(aux_field)
+        else:
+            signals.field_prepared.connect(process_aux_field,
+                                           sender=aux_field, weak=False)
 
     def formfield(self, **kwargs):
         db = kwargs.pop('using', None)

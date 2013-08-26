@@ -7,23 +7,25 @@ from django.test import TestCase
 from django.db.models.fields import FieldDoesNotExist
 from django.utils.encoding import force_text
 
-from .models import (Person, MostFieldTypes, EvenMoreFields, WeekDay,
-    Sentence, SentenceFreq)
+from .models import (Person, PersonWithBirthplace, Song, MostFieldTypes,
+    EvenMoreFields, WeekDay, Sentence, SentenceFreq)
 
 
 class CompositeFieldTests(TestCase):
     def setUp(self):
-        self.p1 = Person.objects.create(
-            first_name='John', last_name='Lennon', birthday=date(1940, 10, 9)
+        self.p1 = PersonWithBirthplace.objects.create(
+            first_name='John', last_name='Lennon', birthday=date(1940, 10, 9),
+            birthplace='Liverpool',
         )
         self.p2 = Person.objects.create(
-            first_name='George', last_name='Harrison', birthday=date(1943, 2, 25)
+            first_name='George', last_name='Harrison', birthday=date(1943, 2, 25),
+        )
+        PersonWithBirthplace.objects.create(
+            first_name='Paul', last_name='McCartney', birthday=date(1942, 6, 18),
+            birthplace='Liverpool',
         )
         Person.objects.create(
-            first_name='Paul', last_name='McCartney', birthday=date(1942, 6, 18)
-        )
-        Person.objects.create(
-            first_name='Ringo', last_name='Starr', birthday=date(1940, 7, 7)
+            first_name='Ringo', last_name='Starr', birthday=date(1940, 7, 7),
         )
 
     def test_cf_retrieval(self):
@@ -184,3 +186,48 @@ class CompositeFieldTests(TestCase):
         self.assertQuerysetEqual(EvenMoreFields.objects.all(), [
             "<EvenMoreFields: char: a very pleasant string; dtime: datetime.datetime(2011, 4, 3, 10, 11, 12); int: 747474; extra: 47>",
         ])
+
+        emf_parent = MostFieldTypes.objects.exclude(pk=mft.pk).get()
+        self.assertEqual(emf_parent.all_fields, emf.all_fields)
+
+    def test_composite_fk_save_retrieve(self):
+        s1 = Song(title="Help!", author=self.p1)
+        s1.save()
+        s1 = Song.objects.get()
+        self.assertEqual(s1.author_first_name, "John")
+        self.assertEqual(s1.author_last_name, "Lennon")
+
+        s1.author = self.p2
+        self.assertEqual(s1.author_id, ('George', 'Harrison'))
+        s1.save()
+        s1 = Song.objects.get()
+        self.assertEqual(s1.author_id, ('George', 'Harrison'))
+
+    def test_composite_select_related(self):
+        s1 = Song(title="Help!", author=self.p1)
+        s1.save()
+        with self.assertNumQueries(1):
+            s1 = Song.objects.select_related('author').get()
+            self.assertEqual(s1.author.first_name, "John")
+            self.assertEqual(s1.author.last_name, "Lennon")
+
+    def test_composite_pk_concrete_inheritance(self):
+        self.assertEqual(self.p1.person_ptr_first_name, 'John')
+        self.assertEqual(self.p1.person_ptr_last_name, 'Lennon')
+
+        self.assertQuerysetEqual(PersonWithBirthplace.objects.all(), [
+            "<PersonWithBirthplace: John Lennon>",
+            "<PersonWithBirthplace: Paul McCartney>",
+        ])
+
+        self.assertEqual(self.p1.person_ptr_id, self.p1.full_name)
+        self.p1.birthday = date(1940, 10, 10)
+        self.p1.save()
+
+        john = Person.objects.get(pk=self.p1.pk)
+        self.assertEqual(john.birthday, date(1940, 10, 10))
+        self.assertEqual(john.personwithbirthplace.birthplace,
+                         self.p1.birthplace)
+
+        with self.assertRaises(PersonWithBirthplace.DoesNotExist):
+            self.p2.personwithbirthplace

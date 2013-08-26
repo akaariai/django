@@ -1,6 +1,7 @@
 from __future__ import unicode_literals
 
 from collections import namedtuple
+from fractions import Fraction
 
 from django.db.models import signals
 from django.db.models.fields import Field
@@ -57,9 +58,34 @@ class CompositeField(VirtualField):
     """
     Virtual field type enclosing several atomic fields into one.
     """
+    prepare_after_contribute_to_class = False
+
     def __init__(self, *fields, **kwargs):
         self.fields = fields
         super(CompositeField, self).__init__(**kwargs)
+
+    def clone_for_foreignkey(self, name, null, db_tablespace, counter_low,
+                             counter_high, db_column, klass=None,
+                             args=None, kwargs=None, fk_field=None):
+        counter_low = Fraction(counter_low)
+        counter_high = Fraction(counter_high)
+        counter_step = (counter_high - counter_low) / (len(self.fields) + 1)
+        if db_column is None:
+            db_column = [None] * len(self.fields)
+
+        result, field_names = [], []
+        curr_high = counter_low
+        for f, col in zip(self.fields, db_column):
+            curr_low, curr_high = curr_high, curr_high + counter_step
+            f_name = "%s_%s" % (fk_field.name, f.name)
+            field_names.append(f_name)
+            result.extend(f.clone_for_foreignkey(
+                f_name, null, db_tablespace, curr_low, curr_high, col))
+
+        result.extend(super(CompositeField, self).clone_for_foreignkey(
+            name, null, db_tablespace, curr_high, counter_high, db_column,
+            args=field_names, fk_field=fk_field))
+        return result
 
     def contribute_to_class(self, cls, name):
         super(CompositeField, self).contribute_to_class(cls, name)
@@ -79,9 +105,13 @@ class CompositeField(VirtualField):
             nt_name = "%s_%s" % (cls.__name__, name)
             nt_fields = " ".join(f.name for f in self.fields)
             self.nt = get_composite_value_class(nt_name, nt_fields)
+            self.prepare()
 
-        signals.class_prepared.connect(process_enclosed_fields,
-                                       sender=cls, weak=False)
+        if cls._meta.model_prepared:
+            process_enclosed_fields(cls)
+        else:
+            signals.class_prepared.connect(process_enclosed_fields,
+                                           sender=cls, weak=False)
 
     def get_enclosed_fields(self):
         return self.fields

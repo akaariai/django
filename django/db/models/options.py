@@ -87,6 +87,10 @@ class Options(object):
         # A custom AppCache to use, if you're making a separate model set.
         self.app_cache = cache
 
+        # Whether the ModelBase metaclass has finished processing the
+        # model.
+        self.model_prepared = False
+
     def contribute_to_class(self, cls, name):
         from django.db import connection
         from django.db.backends.utils import truncate_name
@@ -175,6 +179,8 @@ class Options(object):
                 auto = AutoField(verbose_name='ID', primary_key=True,
                         auto_created=True)
                 model.add_to_class('id', auto)
+
+        self.model_prepared = True
 
     def add_field(self, field):
         # Insert the given field in the order in which it was created, using
