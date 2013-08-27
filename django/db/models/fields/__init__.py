@@ -7,12 +7,12 @@ import decimal
 import math
 import warnings
 from base64 import b64decode, b64encode
+import inspect
 from itertools import tee
 
 from django.db import connection
 from django.db.models.loading import get_model
-from django.db.models.lookups import (
-    UnsupportedLookup, default_lookups)
+from django.db.models.lookups import default_lookups
 from django.db.models.query_utils import QueryWrapper
 from django.conf import settings
 from django import forms
@@ -146,15 +146,29 @@ class Field(object):
         messages.update(error_messages or {})
         self._error_messages = error_messages  # Store for deconstruction later
         self.error_messages = messages
+        # Per instance lookups
+        self.lookups = {}
 
-    _lookups = default_lookups.copy()
+    class_lookups = default_lookups.copy()
 
-    def get_lookup(self, lookups):
-        if len(lookups) > 1:
-            raise UnsupportedLookup(
-                "The lookup '%s' isn't supported for field '%s'" %
-                ('__'.join(lookups), self.__class__))
-        return self._lookups.get(lookups[0])
+    def get_lookup(self, lookup):
+        found = self.lookups.get(lookup)
+        if found:
+            return found
+        for parent in inspect.getmro(self.__class__):
+            if not 'class_lookups' in parent.__dict__:
+                continue
+            if lookup in parent.class_lookups:
+                return parent.class_lookups[lookup]
+
+    def register_lookup(self, lookup):
+        self.lookups[lookup.lookup_type] = lookup
+
+    @classmethod
+    def register_class_lookup(cls, lookup):
+        if not 'class_lookups' in cls.__dict__:
+            cls.class_lookups = {}
+        cls.class_lookups[lookup.lookup_type] = lookup
 
     def deconstruct(self):
         """

@@ -58,8 +58,6 @@ class WhereNode(tree.Node):
         """
         if not isinstance(data, (list, tuple)):
             return data
-        else:
-            import ipdb; ipdb.set_trace()
         obj, lookup_type, value = data
         if isinstance(value, collections.Iterator):
             # Consume any generators immediately, so that we can determine

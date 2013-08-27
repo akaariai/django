@@ -227,7 +227,9 @@ class GenericRelation(ForeignObject):
         field = self.rel.to._meta.get_field_by_name(self.content_type_field_name)[0]
         contenttype_pk = self.get_content_type().pk
         cond = where_class()
-        cond.add(Exact(Col(remote_alias, field.column), contenttype_pk, field), 'AND')
+        cond.add(field.get_lookup('exact').build_lookup(
+            lambda x, y: None, [Col(remote_alias, field)], field, where_class, contenttype_pk),
+            'AND')
         return cond
 
     def bulk_related_objects(self, objs, using=DEFAULT_DB_ALIAS):

@@ -461,7 +461,7 @@ class SQLCompiler(object):
         """
         if not alias:
             alias = self.query.get_initial_alias()
-        field, targets, opts, joins, path = self.query.setup_joins(
+        field, targets, opts, joins, path, _ = self.query.setup_joins(
             pieces, opts, alias)
         # We will later on need to promote those joins that were added to the
         # query afresh above.
@@ -624,7 +624,7 @@ class SQLCompiler(object):
                                           only_load.get(field_model)):
                 continue
             promote = nullable or f.null
-            _, _, _, joins, _ = self.query.setup_joins(
+            _, _, _, joins, _, _ = self.query.setup_joins(
                 [f.name], opts, root_alias, outer_if_first=promote)
             alias = joins[-1]
             columns, aliases = self.get_default_columns(start_alias=alias,
@@ -650,7 +650,7 @@ class SQLCompiler(object):
                                               only_load.get(model), reverse=True):
                     continue
 
-                _, _, _, joins, _ = self.query.setup_joins(
+                _, _, _, joins, _, _ = self.query.setup_joins(
                     [f.related_query_name()], opts, root_alias, outer_if_first=True)
                 alias = joins[-1]
                 from_parent = (opts.model if issubclass(model, opts.model)

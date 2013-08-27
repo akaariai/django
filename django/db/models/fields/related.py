@@ -1049,9 +1049,11 @@ class ForeignObject(RelatedField):
         pathinfos = [PathInfo(from_opts, opts, (opts.pk,), self.rel, not self.unique, False)]
         return pathinfos
 
-    def get_lookup_constraint(self, constraint_class, alias, targets, sources, lookup_type,
-                              raw_value):
-        from django.db.models.sql.where import SubqueryConstraint, Constraint, AND, OR
+    def get_lookup_constraint(self, lookup_rewriter, constraint_class, alias, targets, sources,
+                              lookup, raw_value):
+        # TODO: rewrite to use Lookup api directly.
+        from django.db.models.sql.where import SubqueryConstraint, AND, OR
+        lookup_type = lookup.lookup_type if hasattr(lookup, 'lookup_type') else lookup
         root_constraint = constraint_class()
         assert len(targets) == len(sources)
 
@@ -1078,22 +1080,25 @@ class ForeignObject(RelatedField):
                                 AND)
         elif lookup_type == 'isnull':
             root_constraint.add(
-                targets[0].get_lookup([lookup_type])(
-                    Col(alias, targets[0].column), raw_value, targets[0]),
+                targets[0].get_lookup(lookup_type).build_lookup(
+                    lookup_rewriter, [Col(alias, targets[0])], sources[0],
+                    constraint_class, raw_value),
                 AND)
         elif (lookup_type == 'exact' or (lookup_type in ['gt', 'lt', 'gte', 'lte']
                                          and not is_multicolumn)):
             value = get_normalized_value(raw_value)
             for index, source in enumerate(sources):
                 root_constraint.add(
-                    targets[index].get_lookup([lookup_type])(
-                        Col(alias, targets[index].column), value[index], sources[index]), AND)
+                    targets[index].get_lookup(lookup_type).build_lookup(
+                        lookup_rewriter, [Col(alias, targets[index])],
+                        sources[index], constraint_class, value[index]), AND)
         elif lookup_type in ['range', 'in'] and not is_multicolumn:
             values = [get_normalized_value(value) for value in raw_value]
             value = [val[0] for val in values]
             root_constraint.add(
-                targets[0].get_lookup([lookup_type])(
-                    Col(alias, targets[0].column), value, sources[0]),
+                targets[0].get_lookup(lookup_type).build_lookup(
+                    lookup_rewriter, [Col(alias, targets[0])],
+                    sources[0], constraint_class, value),
                 AND)
         elif lookup_type == 'in':
             values = [get_normalized_value(value) for value in raw_value]
@@ -1101,8 +1106,9 @@ class ForeignObject(RelatedField):
                 value_constraint = constraint_class()
                 for index, target in enumerate(targets):
                     value_constraint.add(
-                        targets[0].get_lookup(['exact'])(
-                            Col(alias, target.column), value[index], sources[index]),
+                        targets[0].get_lookup('exact').build_lookup(
+                            lookup_rewriter, [Col(alias, target)],
+                            sources[index], constraint_class, value[index]),
                         AND)
                 root_constraint.add(value_constraint, OR)
         else:

@@ -46,8 +46,9 @@ class DeleteQuery(Query):
         for offset in range(0, len(pk_list), GET_ITERATOR_CHUNK_SIZE):
             where = self.where_class()
             where.add(
-                In(Col(alias, field.column),
-                   pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE], field),
+                field.get_lookup('in').build_lookup(
+                    self.no_op_rewriter, [Col(alias, field)], field,
+                    self.where_class, pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]),
                 AND)
             self.do_query(self.get_meta().db_table, where, using=using)
 
@@ -85,7 +86,8 @@ class DeleteQuery(Query):
                 ]
                 values = innerq
             where = self.where_class()
-            where.add(In(Col(alias, pk.column), values, pk), AND)
+            where.add(pk.get_lookup('in').build_lookup(
+                self.no_op_rewriter, [Col(alias, pk)], pk, self.where_class, values), AND)
             self.where = where
         self.get_compiler(using).execute_sql(None)
 
@@ -122,9 +124,9 @@ class UpdateQuery(Query):
         alias = self.get_initial_alias()
         for offset in range(0, len(pk_list), GET_ITERATOR_CHUNK_SIZE):
             self.where = self.where_class()
-            self.where.add(
-                In(Col(alias, pk_field.column),
-                   pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE], pk_field),
+            self.where.add(pk_field.get_lookup('in').build_lookup(
+                self.no_op_rewriter, [Col(alias, pk_field)], pk_field, self.where_class,
+                pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]),
                 AND)
             self.get_compiler(using).execute_sql(None)
 

@@ -2,6 +2,7 @@ from functools import wraps
 
 from django.core.exceptions import ObjectDoesNotExist, ImproperlyConfigured
 from django.db.models.loading import get_apps, get_app_path, get_app_paths, get_app, get_models, get_model, register_models, UnavailableApp
+from django.db.models.lookups import SimpleLookup
 from django.db.models.query import Q, QuerySet
 from django.db.models.expressions import F
 from django.db.models.manager import Manager

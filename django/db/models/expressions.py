@@ -1,6 +1,6 @@
 import datetime
 
-from django.db.models.aggregates import refs_aggregate
+from django.db.models.aggregates import referred_aggregate
 from django.db.models.constants import LOOKUP_SEP
 from django.utils import tree
 
@@ -47,8 +47,8 @@ class ExpressionNode(tree.Node):
                        for child in self.children
                        if hasattr(child, 'contains_aggregate'))
         else:
-            return refs_aggregate(self.name.split(LOOKUP_SEP),
-                                  existing_aggregates)
+            return bool(referred_aggregate(self.name.split(LOOKUP_SEP),
+                                           existing_aggregates)[0])
 
     def prepare_database_save(self, unused):
         return self

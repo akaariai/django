@@ -63,6 +63,7 @@ class Aggregate(object):
                 tmp = tmp.source
 
         self.field = tmp
+        self.output_type = self.field
 
     def get_lookup(self, lookup_type):
         return self.field.get_lookup(lookup_type)

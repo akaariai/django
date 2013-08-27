@@ -57,7 +57,7 @@ class SQLEvaluator(object):
             self.cols.append((node, query.aggregate_select[node.name]))
         else:
             try:
-                field, sources, opts, join_list, path = query.setup_joins(
+                field, sources, opts, join_list, path, _ = query.setup_joins(
                     field_list, query.get_meta(),
                     query.get_initial_alias(), self.reuse)
                 targets, _, join_list = query.trim_joins(sources, join_list, path)
