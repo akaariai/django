@@ -56,3 +56,9 @@ class CustomColumnsTests(TestCase):
         self.assertEqual(
             Author.objects.aggregate(div3_sum=Sum('age__div3')),
             {'div3_sum': 3})
+
+    def test_order_by(self):
+        self.assertQuerysetEqual(
+            Author.objects.order_by('age__div3'),
+            [self.a3, self.a1, self.a2],
+            lambda x: x)

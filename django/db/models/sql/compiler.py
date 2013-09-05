@@ -4,7 +4,7 @@ from django.conf import settings
 from django.core.exceptions import FieldError
 from django.db.backends.utils import truncate_name
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.lookups import Col
+from django.db.models.lookups import Col, NoValueMarker
 from django.db.models.query_utils import select_related_descend, QueryWrapper
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
         GET_ITERATOR_CHUNK_SIZE)
@@ -294,7 +294,7 @@ class SQLCompiler(object):
 
         for name in self.query.distinct_fields:
             parts = name.split(LOOKUP_SEP)
-            _, targets, alias, joins, path, _ = self._setup_joins(parts, opts, None)
+            _, targets, alias, joins, path, _, _ = self._setup_joins(parts, opts, None)
             targets, alias, _ = self.query.trim_joins(targets, joins, path)
             for target in targets:
                 result.append("%s.%s" % (qn(alias), qn2(target.column)))
@@ -369,16 +369,17 @@ class SQLCompiler(object):
             elif not self.query._extra or get_order_dir(field)[0] not in self.query._extra:
                 # 'col' is of the form 'field' or 'field1__field2' or
                 # '-field1__field2__field', etc.
-                for table, cols, order in self.find_ordering_name(field,
+                for col, order in self.find_ordering_name(field,
                         self.query.get_meta(), default_order=asc):
-                    for col in cols:
-                        if (table, col) not in processed_pairs:
-                            elt = '%s.%s' % (qn(table), qn2(col))
-                            processed_pairs.add((table, col))
-                            if distinct and elt not in select_aliases:
-                                ordering_aliases.append(elt)
-                            result.append('%s %s' % (elt, order))
-                            group_by.append((elt, []))
+                    sql, col_params = col.as_sql(qn, self.connection)
+                    if sql not in processed_pairs:
+                        # TODO: this should take params in account...
+                        processed_pairs.add(sql)
+                        if distinct and sql not in select_aliases:
+                            ordering_aliases.append(sql)
+                        result.append('%s %s' % (sql, order))
+                        params.extend(col_params)
+                        group_by.append((sql, col_params))
             else:
                 elt = qn2(col)
                 if col not in self.query.extra_select:
@@ -404,11 +405,13 @@ class SQLCompiler(object):
         """
         name, order = get_order_dir(name, default_order)
         pieces = name.split(LOOKUP_SEP)
-        field, targets, alias, joins, path, opts = self._setup_joins(pieces, opts, alias)
+        field, targets, alias, joins, path, opts, lookups = self._setup_joins(pieces, opts, alias)
 
         # If we get to this point and the field is a relation to another model,
         # append the default ordering for that model.
         if field.rel and path and opts.ordering:
+            if lookups:
+                raise FieldError("Can't nest lookups for related field")
             # Firstly, avoid infinite loops.
             if not already_seen:
                 already_seen = set()
@@ -422,8 +425,14 @@ class SQLCompiler(object):
                 results.extend(self.find_ordering_name(item, opts, alias,
                                                        order, already_seen))
             return results
-        targets, alias, _ = self.query.trim_joins(targets, joins, path)
-        return [(alias, [t.column for t in targets], order)]
+        else:
+            assert len(targets) == 1
+            targets, alias, _ = self.query.trim_joins(targets, joins, path)
+            if lookups:
+                return [(self.query.build_lookup(
+                    lookups, field, Col(alias, targets[0], field),
+                    NoValueMarker, set())[0], order)]
+            return [(Col(alias, targets[0], field), order)]
 
     def _setup_joins(self, pieces, opts, alias):
         """
@@ -436,7 +445,7 @@ class SQLCompiler(object):
         """
         if not alias:
             alias = self.query.get_initial_alias()
-        field, targets, opts, joins, path, _ = self.query.setup_joins(
+        field, targets, opts, joins, path, lookups = self.query.setup_joins(
             pieces, opts, alias)
         # We will later on need to promote those joins that were added to the
         # query afresh above.
@@ -452,7 +461,7 @@ class SQLCompiler(object):
         # Ordering or distinct must not affect the returned set, and INNER
         # JOINS for nullable fields could do this.
         self.query.promote_joins(joins_to_promote)
-        return field, targets, alias, joins, path, opts
+        return field, targets, alias, joins, path, opts, lookups
 
     def get_from_clause(self):
         """

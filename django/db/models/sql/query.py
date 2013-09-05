@@ -998,7 +998,7 @@ class Query(object):
             if lookups:
                 col = self.build_lookup(
                     lookups, field, Col(final_alias, targets[0], field),
-                    sources, targets, NoValueMarker, set())[0]
+                    NoValueMarker, set())[0]
                 source = col.output_type
             else:
                 col = targets[0].column
@@ -1021,9 +1021,8 @@ class Query(object):
         # Add the aggregate to the query
         aggregate.add_to_query(self, alias, col=col, source=source, is_summary=is_summary)
 
-    def build_lookup(self, lookups, field, lhs, sources, targets, value, can_reuse):
-        if not lookups:
-            lookups = ['exact']
+    def build_lookup(self, lookups, field, lhs, value, can_reuse):
+        lookups = lookups or ['exact']
         nest_to = lhs
         lookup = field.get_lookup(lookups[0])
         if not lookup and (lookups[0] not in self.query_terms or len(lookups) > 1):
@@ -1121,7 +1120,7 @@ class Query(object):
         # Check if this is a reference to an aggregate.
         aggregate, lookups = referred_aggregate(parts, self._aggregates)
         if aggregate:
-            lookup, _ = self.build_lookup(lookups, aggregate, aggregate, [], [], value,
+            lookup, _ = self.build_lookup(lookups, aggregate, aggregate, value,
                                           can_reuse)
             clause.add(lookup, AND)
             return clause
@@ -1142,8 +1141,8 @@ class Query(object):
         # the far end (fewer tables in a query is better).
         targets, alias, _ = self.trim_joins(sources, join_list, path)
 
-        lookup, value = self.build_lookup(lookups, field, Col(alias, targets[0], field), sources,
-                                          targets, value, can_reuse)
+        lookup, value = self.build_lookup(lookups, field, Col(alias, targets[0], field),
+                                          value, can_reuse)
 
         if hasattr(field, 'get_lookup_constraint'):
             constraint = field.get_lookup_constraint(self.no_op_rewriter, self.where_class, alias,
@@ -1579,7 +1578,7 @@ class Query(object):
                 if lookups:
                     extracts = [self.build_lookup(
                         lookups, field, Col(final_alias, targets[0], field),
-                        sources, targets, NoValueMarker, set())[0]]
+                        NoValueMarker, set())[0]]
                 else:
                     extracts = [Col(final_alias, targets[0], field)]
 
