@@ -517,8 +517,8 @@ class Field(object):
             except ValueError:
                 raise ValueError("The __year lookup type requires an integer "
                                  "argument")
-
-        raise TypeError("Field has invalid lookup: %s" % lookup_type)
+        else:
+            return self.get_prep_value(value)
 
     def get_db_prep_lookup(self, lookup_type, value, connection,
                            prepared=False):
@@ -567,6 +567,9 @@ class Field(object):
                 return connection.ops.year_lookup_bounds_for_date_field(value)
             else:
                 return [value]          # this isn't supposed to happen
+        else:
+            return [self.get_db_prep_value(value, connection=connection,
+                                           prepared=prepared)]
 
     def has_default(self):
         """

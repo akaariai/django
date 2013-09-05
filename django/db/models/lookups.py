@@ -113,8 +113,13 @@ class SimpleLookup(Lookup):
         elif not self.supports_nesting:
             raise LookupError("This lookup can't be used in nested context!")
 
+    def get_db_prep_lookup(self, value, connection):
+        return (
+            '%s', self.field.get_db_prep_lookup(
+            self.lookup_type, value, connection, prepared=True))
+
     def get_prep_lookup(self):
-        return self.value
+        return self.field.get_prep_lookup(self.lookup_type, self.value)
 
     def process_lhs(self, qn, connection):
         lhs_sql, params = self.lhs.as_sql(qn, connection)
@@ -132,9 +137,6 @@ class SimpleLookup(Lookup):
             return '(' + sql + ')', params
         else:
             return self.get_db_prep_lookup(value, connection)
-
-    def get_db_prep_lookup(self, value, connection):
-        return '%s', [value]
 
     def get_lhs_rhs(self, qn, connection):
         rhs, value = self.process_rhs(qn, connection)
@@ -172,13 +174,6 @@ class SimpleLookup(Lookup):
         return None
 
 class DjangoLookup(SimpleLookup):
-    def get_db_prep_lookup(self, value, connection):
-        return (
-            '%s', self.field.get_db_prep_lookup(
-            self.lookup_type, value, connection, prepared=True))
-
-    def get_prep_lookup(self):
-        return self.field.get_prep_lookup(self.lookup_type, self.value)
 
     def get_rhs_op(self, qn, connection, rhs):
         return connection.operators[self.lookup_type] % rhs
