@@ -56,8 +56,8 @@ class Lookup(object):
         raise NotImplementedError
 
     @classmethod
-    def build_lookup(cls, lookup_rewriter, target_cols, sources, constraint_class,
-                     value=NoValueMarker):
+    def build_lookup(cls, lookup_rewriter, target_cols, source_field,
+                     constraint_class, value=NoValueMarker):
         raise NotImplementedError
 
 
