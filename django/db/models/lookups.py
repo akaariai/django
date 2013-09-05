@@ -19,7 +19,11 @@ class Col(object):
         return self.field.get_lookup(lookup)
 
     def get_cols(self):
-        return [(self.alias, self.field.column)]
+        return [self]
+
+    @property
+    def alias_label(self):
+        return self.field.column
 
 default_lookups = {}
 NoValueMarker = object()

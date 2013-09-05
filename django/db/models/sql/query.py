@@ -22,7 +22,7 @@ from django.db.models.fields import FieldDoesNotExist
 from django.db.models.related import PathInfo
 from django.db.models.sql import aggregates as base_aggregates_module
 from django.db.models.sql.constants import (QUERY_TERMS, ORDER_DIR, SINGLE,
-        ORDER_PATTERN, JoinInfo, SelectInfo)
+        ORDER_PATTERN, JoinInfo)
 from django.db.models.sql.datastructures import EmptyResultSet, Empty, MultiJoin
 from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.where import (WhereNode, Constraint, EverythingNode,
@@ -122,10 +122,9 @@ class Query(object):
         self.included_inherited_models = {}
 
         # SQL-related attributes
-        # Select and related select clauses as SelectInfo instances.
         # The select is used for cases where we want to set up the select
         # clause to contain other than default fields (values(), annotate(),
-        # subqueries...)
+        # subqueries...). The select clauses should respond to Col API.
         self.select = []
         # The related_select_cols is used for columns needed for
         # select_related - this is populated in compile stage.
@@ -532,14 +531,7 @@ class Query(object):
         self.where.add(w, connector)
 
         # Selection columns and extra extensions are those provided by 'rhs'.
-        self.select = []
-        for col, field in rhs.select:
-            if isinstance(col, (list, tuple)):
-                new_col = change_map.get(col[0], col[0]), col[1]
-                self.select.append(SelectInfo(new_col, field))
-            else:
-                new_col = col.relabeled_clone(change_map)
-                self.select.append(SelectInfo(new_col, field))
+        self.select = [col.relabeled_clone(change_map) for col in rhs.select]
 
         if connector == OR:
             # It would be nice to be able to handle this, but the queries don't
@@ -759,27 +751,16 @@ class Query(object):
         clause.
         """
         assert set(change_map.keys()).intersection(set(change_map.values())) == set()
-
-        def relabel_column(col):
-            if isinstance(col, (list, tuple)):
-                old_alias = col[0]
-                return (change_map.get(old_alias, old_alias), col[1])
-            else:
-                return col.relabeled_clone(change_map)
         # 1. Update references in "select" (normal columns plus aliases),
         # "group by", "where" and "having".
         self.where.relabel_aliases(change_map)
         self.having.relabel_aliases(change_map)
         if self.group_by:
-            self.group_by = [relabel_column(col) for col in self.group_by]
-        for pos, s in enumerate(self.select):
-            if hasattr(s[0], 'relabeled_clone'):
-                self.select[pos] = (s[0].relabeled_clone(change_map), None)
-            else:
-                self.select[pos] = SelectInfo(relabel_column(s.col), s.field)
+            self.group_by = [col.relabeled_clone(change_map) for col in self.group_by]
+        self.select = [s.relabeled_clone(change_map) for s in self.select]
         if self._aggregates:
-            self._aggregates = OrderedDict(
-                (key, relabel_column(col)) for key, col in self._aggregates.items())
+            self.aggregates = OrderedDict(
+                (key, col.relabeled_clone(change_map)) for key, col in self.aggregates.items())
 
         # 2. Rename the alias in the internal table/alias datastructures.
         for ident, aliases in self.join_map.items():
@@ -1008,20 +989,26 @@ class Query(object):
             #   - this is an annotation over a model field
             # then we need to explore the joins that are required.
 
-            field, sources, opts, join_list, path, _ = self.setup_joins(
+            field, sources, opts, join_list, path, lookups = self.setup_joins(
                 field_list, opts, self.get_initial_alias())
 
             # Process the join chain to see if it can be trimmed
-            targets, _, join_list = self.trim_joins(sources, join_list, path)
+            targets, final_alias, join_list = self.trim_joins(sources, join_list, path)
+            assert len(targets) == 1
+            if lookups:
+                col = self.build_lookup(
+                    lookups, field, Col(final_alias, targets[0], field),
+                    sources, targets, NoValueMarker, set())[0]
+                source = col.output_type
+            else:
+                col = targets[0].column
+                source = sources[0]
+                col = (final_alias, col)
 
             # If the aggregate references a model or field that requires a join,
             # those joins must be LEFT OUTER - empty join rows must be returned
             # in order for zeros to be returned for those aggregates.
             self.promote_joins(join_list)
-
-            col = targets[0].column
-            source = sources[0]
-            col = (join_list[-1], col)
         else:
             # The simplest cases. No joins required -
             # just reference the provided column alias.
@@ -1483,11 +1470,11 @@ class Query(object):
         # database from tripping over IN (...,NULL,...) selects and returning
         # nothing
         if self.is_nullable(query.select[0].field):
-            alias = query.select[0].col[0]
+            column = query.select[0]
             query.where.add(
                 query.select[0].field.get_lookup('isnull').build_lookup(
-                    self.no_op_rewriter, [Col(alias, query.select[0].field)],
-                    query.select[0].field, self.where_class, False),
+                    self.no_op_rewriter, [column],
+                    query.select[0].output_type, self.where_class, False),
                 AND)
 
         condition = self.build_filter(
@@ -1587,18 +1574,16 @@ class Query(object):
                         name.split(LOOKUP_SEP), opts, alias, None, allow_m2m,
                         True)
 
-                # Trim last join if possible
-                targets, final_alias, remaining_joins = self.trim_joins(targets, joins[-2:], path)
-                joins = joins[:-2] + remaining_joins
+                targets, final_alias, joins = self.trim_joins(targets, joins, path)
+                assert len(targets) == 1
                 if lookups:
-                    assert len(targets) == 1
-                    extracts = [(self.build_lookup(
+                    extracts = [self.build_lookup(
                         lookups, field, Col(final_alias, targets[0], field),
-                        sources, targets, NoValueMarker, set()), None)]
+                        sources, targets, NoValueMarker, set())[0]]
                 else:
-                    extracts = [(Col(final_alias, t, field), None) for t in targets]
+                    extracts = [Col(final_alias, targets[0], field)]
 
-                self.promote_joins(joins[1:])
+                self.promote_joins(joins)
                 self.select.extend(extracts)
         except MultiJoin:
             raise FieldError("Invalid field name: '%s'" % name)
@@ -1655,7 +1640,7 @@ class Query(object):
         """
         self.group_by = []
 
-        for col, _ in self.select:
+        for col in self.select:
             self.group_by.append(col)
 
     def add_count_column(self):
@@ -1669,7 +1654,7 @@ class Query(object):
             else:
                 assert len(self.select) == 1, \
                         "Cannot add count col with multiple cols in 'select': %r" % self.select
-                count = self.aggregates_module.Count(self.select[0][0].field.column)
+                count = self.aggregates_module.Count(self.select[0])
         else:
             opts = self.get_meta()
             if not self.select:
@@ -1682,7 +1667,7 @@ class Query(object):
                 assert len(self.select) == 1, \
                         "Cannot add count col with multiple cols in 'select'."
 
-                count = self.aggregates_module.Count(self.select[0].col, distinct=True)
+                count = self.aggregates_module.Count(self.select[0], distinct=True)
             # Distinct handling is done in Count(), so don't do it at this
             # level.
             self.distinct = False
@@ -1926,7 +1911,7 @@ class Query(object):
             # values in select_fields. Lets punt this one for now.
             select_fields = [r[1] for r in join_field.related_fields]
             select_alias = self.tables[pos]
-        self.select = [SelectInfo((select_alias, f.column), f) for f in select_fields]
+        self.select = [Col(select_alias, f) for f in select_fields]
         return trimmed_prefix, contains_louter
 
     def is_nullable(self, field):

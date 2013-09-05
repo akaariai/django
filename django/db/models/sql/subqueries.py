@@ -7,8 +7,8 @@ from django.core.exceptions import FieldError
 from django.db import connections
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import DateField, DateTimeField, FieldDoesNotExist
-from django.db.models.lookups import Col, In
-from django.db.models.sql.constants import GET_ITERATOR_CHUNK_SIZE, SelectInfo
+from django.db.models.lookups import Col
+from django.db.models.sql.constants import GET_ITERATOR_CHUNK_SIZE
 from django.db.models.sql.datastructures import Date, DateTime
 from django.db.models.sql.query import Query
 from django.db.models.sql.where import AND
@@ -82,7 +82,7 @@ class DeleteQuery(Query):
             else:
                 innerq.clear_select_clause()
                 innerq.select = [
-                    SelectInfo((self.get_initial_alias(), pk.column), None)
+                    Col(self.get_initial_alias(), pk)
                 ]
                 values = innerq
             where = self.where_class()
@@ -239,9 +239,9 @@ class DateQuery(Query):
         field = result[0]
         self._check_field(field)                # overridden in DateTimeQuery
         alias = result[3][-1]
-        select = self._get_select((alias, field.column), lookup_type)
+        select = self._get_select(alias, field, lookup_type)
         self.clear_select_clause()
-        self.select = [SelectInfo(select, None)]
+        self.select = [select]
         self.distinct = True
         self.order_by = [1] if order == 'ASC' else [-1]
 
@@ -255,8 +255,8 @@ class DateQuery(Query):
             assert not isinstance(field, DateTimeField), \
                 "%r is a DateTimeField, not a DateField." % field.name
 
-    def _get_select(self, col, lookup_type):
-        return Date(col, lookup_type)
+    def _get_select(self, alias, field, lookup_type):
+        return Date(alias, field, lookup_type)
 
 
 class DateTimeQuery(DateQuery):
@@ -272,12 +272,12 @@ class DateTimeQuery(DateQuery):
         assert isinstance(field, DateTimeField), \
                 "%r isn't a DateTimeField." % field.name
 
-    def _get_select(self, col, lookup_type):
+    def _get_select(self, alias, field, lookup_type):
         if self.tzinfo is None:
             tzname = None
         else:
             tzname = timezone._get_timezone_name(self.tzinfo)
-        return DateTime(col, lookup_type, tzname)
+        return DateTime(alias, field, lookup_type, tzname)
 
 
 class AggregateQuery(Query):

@@ -1,5 +1,6 @@
 from __future__ import unicode_literals
 
+from django.db.models import Sum
 from django.test import TestCase
 
 from .models import Author, NotEqual, FakeNotEqual, CustomIntegerField, SubCustomIntegerField
@@ -40,3 +41,18 @@ class CustomColumnsTests(TestCase):
         with self.assertNumQueries(0):
             self.assertQuerysetEqual(
                 Author.objects.filter(age__div3__in=[]), [], lambda x: x)
+
+    def test_values_list(self):
+        self.assertQuerysetEqual(
+            Author.objects.values_list('age__div3', flat=True),
+            [1, 2, 0], lambda x: x)
+
+    def test_annotate(self):
+        self.assertQuerysetEqual(
+            Author.objects.annotate(div3_sum=Sum('age__div3')),
+            [1, 2, 0], lambda x: x.div3_sum)
+
+    def test_aggregate(self):
+        self.assertEqual(
+            Author.objects.aggregate(div3_sum=Sum('age__div3')),
+            {'div3_sum': 3})

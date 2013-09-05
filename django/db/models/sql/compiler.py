@@ -4,9 +4,10 @@ from django.conf import settings
 from django.core.exceptions import FieldError
 from django.db.backends.utils import truncate_name
 from django.db.models.constants import LOOKUP_SEP
+from django.db.models.lookups import Col
 from django.db.models.query_utils import select_related_descend, QueryWrapper
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
-        GET_ITERATOR_CHUNK_SIZE, SelectInfo)
+        GET_ITERATOR_CHUNK_SIZE)
 from django.db.models.sql.datastructures import EmptyResultSet
 from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.query import get_order_dir, Query
@@ -191,40 +192,27 @@ class SQLCompiler(object):
             col_aliases = set()
         if self.query.select:
             only_load = self.deferred_to_columns()
-            for col, _ in self.query.select:
-                if isinstance(col, (list, tuple)):
-                    alias, column = col
+            for col in self.query.select:
+                if hasattr(col, 'alias') and hasattr(col, 'field'):
+                    alias, column = col.alias, col.field.column
                     table = self.query.alias_map[alias].table_name
                     if table in only_load and column not in only_load[table]:
                         continue
-                    r = '%s.%s' % (qn(alias), qn(column))
-                    if with_aliases:
-                        if col[1] in col_aliases:
-                            c_alias = 'Col%d' % len(col_aliases)
-                            result.append('%s AS %s' % (r, c_alias))
-                            aliases.add(c_alias)
-                            col_aliases.add(c_alias)
-                        else:
-                            result.append('%s AS %s' % (r, qn2(col[1])))
-                            aliases.add(r)
-                            col_aliases.add(col[1])
-                    else:
-                        result.append(r)
-                        aliases.add(r)
-                        col_aliases.add(col[1])
-                else:
-                    col_sql, col_params = col.as_sql(qn, self.connection)
-                    result.append(col_sql)
-                    params.extend(col_params)
+                col_sql, col_params = col.as_sql(qn, self.connection)
+                result.append(col_sql)
+                params.extend(col_params)
 
-                    if hasattr(col, 'alias'):
-                        aliases.add(col.alias)
-                        col_aliases.add(col.alias)
+                if hasattr(col, 'alias'):
+                    aliases.add(col.alias)
+                    col_aliases.add(col.alias)
 
         elif self.query.default_cols:
             cols, new_aliases = self.get_default_columns(with_aliases,
                     col_aliases)
-            result.extend(cols)
+            for col in cols:
+                sql, col_params = col.as_sql(qn, self.connection)
+                result.append(sql)
+                params.extend(col_params)
             aliases.update(new_aliases)
 
         max_name_length = self.connection.ops.max_name_length()
@@ -236,9 +224,10 @@ class SQLCompiler(object):
                 result.append('%s AS %s' % (agg_sql, qn(truncate_name(alias, max_name_length))))
             params.extend(agg_params)
 
-        for (table, col), _ in self.query.related_select_cols:
-            r = '%s.%s' % (qn(table), qn(col))
-            if with_aliases and col in col_aliases:
+        for col in self.query.related_select_cols:
+            r, col_params = col.as_sql(qn, self.connection)
+            params.extend(col_params)
+            if with_aliases and col.alias_label in col_aliases:
                 c_alias = 'Col%d' % len(col_aliases)
                 result.append('%s AS %s' % (r, c_alias))
                 aliases.add(c_alias)
@@ -287,22 +276,8 @@ class SQLCompiler(object):
             table = self.query.alias_map[alias].table_name
             if table in only_load and field.column not in only_load[table]:
                 continue
-            if as_pairs:
-                result.append((alias, field.column))
-                aliases.add(alias)
-                continue
-            if with_aliases and field.column in col_aliases:
-                c_alias = 'Col%d' % len(col_aliases)
-                result.append('%s.%s AS %s' % (qn(alias),
-                    qn2(field.column), c_alias))
-                col_aliases.add(c_alias)
-                aliases.add(c_alias)
-            else:
-                r = '%s.%s' % (qn(alias), qn2(field.column))
-                result.append(r)
-                aliases.add(r)
-                if with_aliases:
-                    col_aliases.add(field.column)
+            result.append(Col(alias, field))
+            aliases.add(alias)
         return result, aliases
 
     def get_distinct(self):
@@ -546,21 +521,17 @@ class SQLCompiler(object):
         result, params = [], []
         if self.query.group_by is not None:
             select_cols = self.query.select + self.query.related_select_cols
-            # Just the column, not the fields.
-            select_cols = [s[0] for s in select_cols]
             if (len(self.query.get_meta().concrete_fields) == len(self.query.select)
                     and self.connection.features.allows_group_by_pk):
                 self.query.group_by = [
-                    (self.query.get_meta().db_table, self.query.get_meta().pk.column)
+                    Col(self.query.get_meta().db_table, self.query.get_meta().pk)
                 ]
                 select_cols = []
             seen = set()
             cols = self.query.group_by + having_group_by + select_cols
             for col in cols:
                 col_params = ()
-                if isinstance(col, (list, tuple)):
-                    sql = '%s.%s' % (qn(col[0]), qn(col[1]))
-                elif hasattr(col, 'as_sql'):
+                if hasattr(col, 'as_sql'):
                     sql, col_params = col.as_sql(qn, self.connection)
                 else:
                     sql = '(%s)' % str(col)
@@ -627,10 +598,9 @@ class SQLCompiler(object):
             _, _, _, joins, _, _ = self.query.setup_joins(
                 [f.name], opts, root_alias, outer_if_first=promote)
             alias = joins[-1]
-            columns, aliases = self.get_default_columns(start_alias=alias,
+            columns, _ = self.get_default_columns(start_alias=alias,
                     opts=f.rel.to._meta, as_pairs=True)
-            self.query.related_select_cols.extend(
-                SelectInfo(col, field) for col, field in zip(columns, f.rel.to._meta.concrete_fields))
+            self.query.related_select_cols.extend(columns)
             if restricted:
                 next = requested.get(f.name, {})
             else:
@@ -655,11 +625,9 @@ class SQLCompiler(object):
                 alias = joins[-1]
                 from_parent = (opts.model if issubclass(model, opts.model)
                                else None)
-                columns, aliases = self.get_default_columns(start_alias=alias,
+                columns, _ = self.get_default_columns(start_alias=alias,
                     opts=model._meta, as_pairs=True, from_parent=from_parent)
-                self.query.related_select_cols.extend(
-                    SelectInfo(col, field) for col, field
-                    in zip(columns, model._meta.concrete_fields))
+                self.query.related_select_cols.extend(columns)
                 next = requested.get(f.related_query_name(), {})
                 # Use True here because we are looking at the _reverse_ side of
                 # the relation, which is always nullable.
@@ -792,10 +760,7 @@ class SQLCompiler(object):
 
         for index, select_col in enumerate(self.query.select):
             params = []
-            if hasattr(select_col[0], 'as_sql'):
-                lhs, params = select_col[0].as_sql(inner_qn, self.connection)
-            else:
-                lhs = '%s.%s' % (inner_qn(select_col.col[0]), qn2(select_col.col[1]))
+            lhs, params = select_col.as_sql(inner_qn, self.connection)
             rhs = '%s.%s' % (qn(alias), qn2(columns[index]))
             self.query.where.add(
                 QueryWrapper('%s = %s' % (lhs, rhs), params), 'AND')
