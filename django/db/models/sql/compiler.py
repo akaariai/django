@@ -791,10 +791,14 @@ class SQLCompiler(object):
             return '%s.%s IN (%s)' % (qn(alias), qn2(columns[0]), sql), params
 
         for index, select_col in enumerate(self.query.select):
-            lhs = '%s.%s' % (inner_qn(select_col.col[0]), qn2(select_col.col[1]))
+            params = []
+            if hasattr(select_col[0], 'as_sql'):
+                lhs, params = select_col[0].as_sql(inner_qn, self.connection)
+            else:
+                lhs = '%s.%s' % (inner_qn(select_col.col[0]), qn2(select_col.col[1]))
             rhs = '%s.%s' % (qn(alias), qn2(columns[index]))
             self.query.where.add(
-                QueryWrapper('%s = %s' % (lhs, rhs), []), 'AND')
+                QueryWrapper('%s = %s' % (lhs, rhs), params), 'AND')
 
         sql, params = self.as_sql()
         return 'EXISTS (%s)' % sql, params

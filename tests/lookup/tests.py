@@ -479,6 +479,9 @@ class LookupTests(TestCase):
             self.assertEqual(str(ex), "Join on field 'headline' not permitted. "
                              "Did you misspell 'starts' for the lookup type?")
 
+        with self.assertRaises(ValueError):
+            Article.objects.filter(author__id__exact="NotAnInteger")
+
     def test_regex(self):
         # Create some articles with a bit more interesting headlines for testing field lookups:
         for a in Article.objects.all():

@@ -5,15 +5,15 @@ class UnsupportedLookup(Exception):
     pass
 
 class Col(object):
-    def __init__(self, alias, field):
-        self.alias, self.field, self.output_type = alias, field, field
+    def __init__(self, alias, field, output_type=None):
+        self.alias, self.field, self.output_type = alias, field, output_type or field
 
     def as_sql(self, qn, connection):
         return "%s.%s" % (qn(self.alias), qn(self.field.column)), []
 
     def relabeled_clone(self, change_map):
         return self.__class__(change_map.get(self.alias, self.alias),
-                              self.field)
+                              self.field, self.output_type)
 
     def get_lookup(self, lookup):
         return self.field.get_lookup(lookup)

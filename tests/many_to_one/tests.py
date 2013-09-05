@@ -432,7 +432,7 @@ class ManyToOneTests(TestCase):
         expected_message = "Cannot resolve keyword 'notafield' into field. Choices are: %s"
 
         self.assertRaisesMessage(FieldError,
-                                 expected_message % ', '.join(Reporter._meta.get_all_field_names()),
+                                 "Join on field 'reporter' not permitted. Did you misspell 'notafield' for the lookup type?",
                                  Article.objects.values_list,
                                  'reporter__notafield')
         self.assertRaisesMessage(FieldError,

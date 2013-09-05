@@ -14,7 +14,7 @@ from django.utils.encoding import force_text
 from django.utils.tree import Node
 from django.utils import six
 from django.db import connections, DEFAULT_DB_ALIAS
-from django.db.models.lookups import Col, IsNull
+from django.db.models.lookups import Col, NoValueMarker
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.aggregates import referred_aggregate
 from django.db.models.expressions import ExpressionNode
@@ -772,8 +772,11 @@ class Query(object):
         self.having.relabel_aliases(change_map)
         if self.group_by:
             self.group_by = [relabel_column(col) for col in self.group_by]
-        self.select = [SelectInfo(relabel_column(s.col), s.field)
-                       for s in self.select]
+        for pos, s in enumerate(self.select):
+            if hasattr(s[0], 'relabeled_clone'):
+                self.select[pos] = (s[0].relabeled_clone(change_map), None)
+            else:
+                self.select[pos] = SelectInfo(relabel_column(s.col), s.field)
         if self._aggregates:
             self._aggregates = OrderedDict(
                 (key, relabel_column(col)) for key, col in self._aggregates.items())
@@ -1081,6 +1084,11 @@ class Query(object):
             value = True
             lookup = isnull_lookup
         if not hasattr(lookup, 'lookup_type'):
+            if value is NoValueMarker:
+                raise FieldError(
+                    "The lookup '%s' for field '%s' doesn't support value extraction." %
+                    (lookup, field.__class__.__name__)
+                )
             return lookup, value
         if hasattr(field, 'get_lookup_constraint'):
             return lookup, value
@@ -1147,8 +1155,8 @@ class Query(object):
         # the far end (fewer tables in a query is better).
         targets, alias, _ = self.trim_joins(sources, join_list, path)
 
-        lookup, value = self.build_lookup(lookups, field, Col(alias, targets[0]), sources, targets,
-                                          value, can_reuse)
+        lookup, value = self.build_lookup(lookups, field, Col(alias, targets[0], field), sources,
+                                          targets, value, can_reuse)
 
         if hasattr(field, 'get_lookup_constraint'):
             constraint = field.get_lookup_constraint(self.no_op_rewriter, self.where_class, alias,
@@ -1575,17 +1583,23 @@ class Query(object):
 
         try:
             for name in field_names:
-                field, targets, _, joins, path, _ = self.setup_joins(
+                field, targets, sources, joins, path, lookups = self.setup_joins(
                         name.split(LOOKUP_SEP), opts, alias, None, allow_m2m,
                         True)
 
                 # Trim last join if possible
                 targets, final_alias, remaining_joins = self.trim_joins(targets, joins[-2:], path)
                 joins = joins[:-2] + remaining_joins
+                if lookups:
+                    assert len(targets) == 1
+                    extracts = [(self.build_lookup(
+                        lookups, field, Col(final_alias, targets[0], field),
+                        sources, targets, NoValueMarker, set()), None)]
+                else:
+                    extracts = [(Col(final_alias, t, field), None) for t in targets]
 
                 self.promote_joins(joins[1:])
-                for target in targets:
-                    self.select.append(SelectInfo((final_alias, target.column), target))
+                self.select.extend(extracts)
         except MultiJoin:
             raise FieldError("Invalid field name: '%s'" % name)
         except FieldError:
@@ -1655,7 +1669,7 @@ class Query(object):
             else:
                 assert len(self.select) == 1, \
                         "Cannot add count col with multiple cols in 'select': %r" % self.select
-                count = self.aggregates_module.Count(self.select[0].col)
+                count = self.aggregates_module.Count(self.select[0][0].field.column)
         else:
             opts = self.get_meta()
             if not self.select:
