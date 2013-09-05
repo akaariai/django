@@ -1034,12 +1034,19 @@ class Query(object):
     def build_lookup(self, lookups, field, lhs, sources, targets, value, can_reuse):
         if not lookups:
             lookups = ['exact']
-        lookup = field.get_lookup(lookups[0])
         nest_to = lhs
+        lookup = field.get_lookup(lookups[0])
+        if not lookup and (lookups[0] not in self.query_terms or len(lookups) > 1):
+            raise FieldError(
+                "Join on field '%s' not permitted. Did you misspell '%s' for the lookup type?" %
+                (field.name, lookups[0]))
         for next_lookup in lookups[1:]:
             nest_to = lookup.build_lookup(self.no_op_rewriter, [nest_to], nest_to.output_type,
                                           self.where_class)
             lookup = nest_to.get_lookup(next_lookup)
+            if not lookup:
+                raise FieldError("'%s' doesn't support nesting lookup '%s'" %
+                                 (nest_to.__class__.__name__, next_lookup))
         # Interpret '__exact=None' as the sql 'is NULL'; otherwise, reject all
         # uses of None as a query value.
         if not hasattr(lookup, 'lookup_type'):
@@ -1349,7 +1356,6 @@ class Query(object):
         return path, final_field, targets, list(reversed(names))
 
     def raise_lookup_error(self, names, prev_name, opts, final_field):
-        assert names
         if final_field and not hasattr(final_field, 'get_path_info'):
             names.insert(0, prev_name)
             if len(names) == 2:
