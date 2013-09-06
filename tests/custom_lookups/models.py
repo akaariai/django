@@ -54,13 +54,6 @@ class Div3Lookup(models.SimpleLookup):
         lhs, value = self.process_lhs(qn, connection)
         return '%s %%%% 3' % lhs, value
 
-    def get_lookup(self, lookups):
-        return self.lhs.field.get_lookup(lookups)
-
-    @property
-    def output_type(self):
-        return self.lhs.output_type
-
 Author._meta.get_field('age').register_lookup(Div2Lookup)
 Author._meta.get_field('age').register_lookup(Div3Lookup)
 
@@ -77,3 +70,14 @@ class FakeNotEqual(models.SimpleLookup):
     def as_sql(self, qn, connection):
         rhs, lhs, params = self.get_lhs_rhs(qn, connection)
         return '%s = %s' % (lhs, rhs), params
+
+class Lower(models.SimpleLookup):
+    lookup_type = 'lower'
+    supports_nesting = True
+    supports_filtering = False
+
+    def as_nested_sql(self, qn, connection):
+        lhs, value = self.process_lhs(qn, connection)
+        return 'lower(%s)' % lhs, value
+
+models.CharField.register_class_lookup(Lower)

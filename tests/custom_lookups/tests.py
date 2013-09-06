@@ -62,3 +62,18 @@ class CustomColumnsTests(TestCase):
             Author.objects.order_by('age__div3'),
             [self.a3, self.a1, self.a2],
             lambda x: x)
+
+    def test_order_by_lower(self):
+        Author.objects.all().delete()
+        a1 = Author.objects.create(name='A1', age=1)
+        a2 = Author.objects.create(name='a1', age=2)
+        a3 = Author.objects.create(name='A1', age=3)
+        a4 = Author.objects.create(name='a1', age=4)
+        self.assertQuerysetEqual(
+            Author.objects.order_by('name__lower', 'age'),
+            [a1, a2, a3, a4],
+            lambda x: x)
+        self.assertQuerysetEqual(
+            Author.objects.order_by('name'),
+            [a1, a3, a2, a4],
+            lambda x: x)

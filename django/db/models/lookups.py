@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.utils import timezone
+from django.utils.functional import cached_property
 
 class UnsupportedLookup(Exception):
     pass
@@ -65,7 +66,8 @@ class SimpleLookup(Lookup):
     """
     A simple lookup
     """
-    supports_nesting = None
+    supports_nesting = False
+    supports_filtering = True
     lookup_type = None
 
     @classmethod
@@ -109,6 +111,8 @@ class SimpleLookup(Lookup):
         self.constraint_class, self.lhs, self.value = constraint_class, lhs, value
         self.field = field
         if self.value is not NoValueMarker:
+            if not self.supports_filtering:
+                raise LookupError("This lookup can't be used as filter condition!")
             self.value = self.get_prep_lookup()
         elif not self.supports_nesting:
             raise LookupError("This lookup can't be used in nested context!")
@@ -169,9 +173,17 @@ class SimpleLookup(Lookup):
     def get_cols(self):
         return self.lhs.get_cols()
 
-    @classmethod
-    def get_lookup(cls, lookups):
+    def get_lookup(self, lookup):
+        if self.supports_nesting:
+            return self.output_type.get_lookup(lookup)
         return None
+
+    @cached_property
+    def output_type(self):
+        # The default is that the transformation doesn't change the type of
+        # LHS. This can be overridden, for example if you extract year from
+        # datetime.
+        return self.lhs.output_type
 
 class DjangoLookup(SimpleLookup):
 
