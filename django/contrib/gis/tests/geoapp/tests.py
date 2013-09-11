@@ -190,7 +190,9 @@ class GeoModelTest(TestCase):
         qs = PennsylvaniaCity.objects.transform(32128)
 
         self.assertEqual(1, qs.count())
-        for pc in qs: self.assertEqual(32128, pc.point.srid)
+        self.assertEqual(qs.query.transformed_srid, 32128)
+        for pc in qs:
+            self.assertEqual(32128, pc.point.srid)
 
     def test_raw_sql_query(self):
         "Testing raw SQL query."

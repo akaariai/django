@@ -1,4 +1,5 @@
 from django.db.models.fields import Field
+from django.db.models.lookups import Col
 from django.db.models.sql.expressions import SQLEvaluator
 from django.utils.translation import ugettext_lazy as _
 from django.contrib.gis import forms
@@ -10,6 +11,41 @@ from django.utils import six
 # spatial database alias. This cache exists so that the database isn't queried
 # for SRID info each time a distance query is constructed.
 _srid_cache = {}
+
+class GeoCol(Col):
+    def get_select_format(self, query, connection, fld):
+        """
+        Returns the selection format string, depending on the requirements
+        of the spatial backend.  For example, Oracle and MySQL require custom
+        selection formats in order to retrieve geometries in OGC WKT. For all
+        other fields a simple '%s' format string is returned.
+        """
+        if connection.ops.select and hasattr(fld, 'geom_type'):
+            # This allows operations to be done on fields in the SELECT,
+            # overriding their values -- used by the Oracle and MySQL
+            # spatial backends to get database values as WKT, and by the
+            # `transform` method.
+            sel_fmt = connection.ops.select
+
+            # Because WKT doesn't contain spatial reference information,
+            # the SRID is prefixed to the returned WKT to ensure that the
+            # transformed geometries have an SRID different than that of the
+            # field -- this is only used by `transform` for Oracle and
+            # SpatiaLite backends.
+            if self.query.transformed_srid and (self.connection.ops.oracle or
+                                                self.connection.ops.spatialite):
+                sel_fmt = "'SRID=%d;'||%s" % (query.transformed_srid, sel_fmt)
+        else:
+            sel_fmt = '%s'
+        return sel_fmt
+
+    def as_sql(self, qn, connection):
+        sql, params = super(GeoCol, self).as_sql(qn, connection)
+        query = qn.__self__.query
+        for f in query.custom_select:
+            if f.output_type == self.field:
+                return f.as_sql(qn, connection)
+        return self.get_select_format(qn.__self__.query, connection, self.field) % sql, params
 
 def get_srid_info(srid, connection):
     """
@@ -50,6 +86,8 @@ class GeometryField(Field):
     geodetic_units = ('Decimal Degree', 'degree')
 
     description = _("The base GIS field -- maps to the OpenGIS Specification Geometry type.")
+
+    col_class = GeoCol
 
     def __init__(self, verbose_name=None, srid=4326, spatial_index=True, dim=2,
                  geography=False, **kwargs):
@@ -179,6 +217,10 @@ class GeometryField(Field):
             return tuple(lookup_val)
         else:
             return geom
+
+    def get_lookup(self, lookup):
+        # For now, use the old-style lookups
+        return None
 
     def get_srid(self, geom):
         """

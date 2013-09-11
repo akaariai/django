@@ -185,6 +185,10 @@ class SQLCompiler(object):
         qn2 = self.connection.ops.quote_name
         result = ['(%s) AS %s' % (col[0], qn2(alias)) for alias, col in six.iteritems(self.query.extra_select)]
         params = []
+        for col in self.query.custom_select:
+            sql, col_params = col.as_sql(qn, self.connection)
+            result.append(sql)
+            params.extend(col_params)
         aliases = set(self.query.extra_select.keys())
         if with_aliases:
             col_aliases = aliases.copy()
@@ -276,7 +280,7 @@ class SQLCompiler(object):
             table = self.query.alias_map[alias].table_name
             if table in only_load and field.column not in only_load[table]:
                 continue
-            result.append(Col(alias, field))
+            result.append(field.create_col(alias))
             aliases.add(alias)
         return result, aliases
 
@@ -430,9 +434,9 @@ class SQLCompiler(object):
             targets, alias, _ = self.query.trim_joins(targets, joins, path)
             if lookups:
                 return [(self.query.build_lookup(
-                    lookups, field, Col(alias, targets[0], field),
+                    lookups, field, targets[0].create_col(alias, field),
                     NoValueMarker, set())[0], order)]
-            return [(Col(alias, targets[0], field), order)]
+            return [(targets[0].create_col(alias, field), order)]
 
     def _setup_joins(self, pieces, opts, alias):
         """
@@ -533,7 +537,7 @@ class SQLCompiler(object):
             if (len(self.query.get_meta().concrete_fields) == len(self.query.select)
                     and self.connection.features.allows_group_by_pk):
                 self.query.group_by = [
-                    Col(self.query.get_meta().db_table, self.query.get_meta().pk)
+                    self.query.get_meta().pk.create_col(self.query.get_meta().db_table)
                 ]
                 select_cols = []
             seen = set()

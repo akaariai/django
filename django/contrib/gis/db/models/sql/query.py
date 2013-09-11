@@ -37,17 +37,13 @@ class GeoQuery(sql.Query):
         # The following attributes are customized for the GeoQuerySet.
         # The GeoWhereNode and SpatialBackend classes contain backend-specific
         # routines and functions.
-        self.custom_select = {}
         self.transformed_srid = None
-        self.extra_select_fields = {}
 
     def clone(self, *args, **kwargs):
         obj = super(GeoQuery, self).clone(*args, **kwargs)
         # Customized selection dictionary and transformed srid flag have
         # to also be added to obj.
-        obj.custom_select = self.custom_select.copy()
         obj.transformed_srid = self.transformed_srid
-        obj.extra_select_fields = self.extra_select_fields.copy()
         return obj
 
     def convert_values(self, value, field, connection):
@@ -75,16 +71,6 @@ class GeoQuery(sql.Query):
         elif field is not None:
             return super(GeoQuery, self).convert_values(value, field, connection)
         return value
-
-    def get_aggregation(self, using, force_subq=False):
-        # Remove any aggregates marked for reduction from the subquery
-        # and move them to the outer AggregateQuery.
-        connection = connections[using]
-        for alias, aggregate in self.aggregate_select.items():
-            if isinstance(aggregate, gis_aggregates.GeoAggregate):
-                if not getattr(aggregate, 'is_extent', False) or connection.ops.oracle:
-                    self.extra_select_fields[alias] = GeomField()
-        return super(GeoQuery, self).get_aggregation(using, force_subq)
 
     def resolve_aggregate(self, value, aggregate, connection):
         """

@@ -214,6 +214,7 @@ class QuerySet(object):
             requested = None
         max_depth = self.query.max_depth
 
+        custom_select = self.query.custom_select
         extra_select = list(self.query.extra_select)
         aggregate_select = list(self.query.aggregate_select)
 
@@ -237,7 +238,8 @@ class QuerySet(object):
                     # Therefore, we need to load all fields from this model
                     load_fields.append(field.name)
 
-        index_start = len(extra_select)
+        custom_start = len(extra_select)
+        index_start = len(extra_select) + len(custom_select)
         aggregate_start = index_start + len(load_fields or self.model._meta.concrete_fields)
 
         skip = None
@@ -280,6 +282,10 @@ class QuerySet(object):
             if extra_select:
                 for i, k in enumerate(extra_select):
                     setattr(obj, k, row[i])
+
+            if custom_select:
+                for i, f in enumerate(custom_select):
+                    setattr(obj, f.label, row[custom_start + i])
 
             # Add the aggregates to the model
             if aggregate_select:

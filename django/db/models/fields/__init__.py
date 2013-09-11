@@ -12,7 +12,7 @@ from itertools import tee
 
 from django.db import connection
 from django.db.models.loading import get_model
-from django.db.models.lookups import default_lookups
+from django.db.models.lookups import default_lookups, Col
 from django.db.models.query_utils import QueryWrapper
 from django.conf import settings
 from django import forms
@@ -92,6 +92,8 @@ class Field(object):
                     'already exists.'),
     }
 
+    col_class = Col
+
     # Generic field type description, usually overridden by subclasses
     def _description(self):
         return _('Field of type: %(field_type)s') % {
@@ -169,6 +171,9 @@ class Field(object):
         if not 'class_lookups' in cls.__dict__:
             cls.class_lookups = {}
         cls.class_lookups[lookup.lookup_type] = lookup
+
+    def create_col(self, alias, field=None):
+        return self.col_class(alias, self, field)
 
     def deconstruct(self):
         """

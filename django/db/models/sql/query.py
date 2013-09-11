@@ -14,7 +14,7 @@ from django.utils.encoding import force_text
 from django.utils.tree import Node
 from django.utils import six
 from django.db import connections, DEFAULT_DB_ALIAS
-from django.db.models.lookups import Col, NoValueMarker
+from django.db.models.lookups import NoValueMarker
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.aggregates import referred_aggregate
 from django.db.models.expressions import ExpressionNode
@@ -126,6 +126,7 @@ class Query(object):
         # clause to contain other than default fields (values(), annotate(),
         # subqueries...). The select clauses should respond to Col API.
         self.select = []
+        self.custom_select = []
         # The related_select_cols is used for columns needed for
         # select_related - this is populated in compile stage.
         self.related_select_cols = []
@@ -245,6 +246,7 @@ class Query(object):
         obj.standard_ordering = self.standard_ordering
         obj.included_inherited_models = self.included_inherited_models.copy()
         obj.select = self.select[:]
+        obj.custom_select = self.custom_select[:]
         obj.related_select_cols = []
         obj.tables = self.tables[:]
         obj.where = self.where.clone()
@@ -399,7 +401,8 @@ class Query(object):
         Performs a COUNT() query using the current filter constraints.
         """
         obj = self.clone()
-        if len(self.select) > 1 or self.aggregate_select or (self.distinct and self.distinct_fields):
+        if len(self.select) > 1 or self.custom_select or self.aggregate_select or (
+                self.distinct and self.distinct_fields):
             # If a select clause exists, then the query has already started to
             # specify the columns that are to be returned.
             # In this case, we need to use a subquery to evaluate the count.
@@ -997,7 +1000,7 @@ class Query(object):
             assert len(targets) == 1
             if lookups:
                 col = self.build_lookup(
-                    lookups, field, Col(final_alias, targets[0], field),
+                    lookups, field, targets[0].create_col(final_alias, field),
                     NoValueMarker, set())[0]
                 source = col.output_type
             else:
@@ -1029,13 +1032,16 @@ class Query(object):
             raise FieldError(
                 "Join on field '%s' not permitted. Did you misspell '%s' for the lookup type?" %
                 (field.name, lookups[0]))
-        for next_lookup in lookups[1:]:
-            nest_to = lookup.build_lookup(self.no_op_rewriter, [nest_to], nest_to.output_type,
-                                          self.where_class)
-            lookup = nest_to.get_lookup(next_lookup)
-            if not lookup:
-                raise FieldError("'%s' doesn't support nesting lookup '%s'" %
-                                 (nest_to.__class__.__name__, next_lookup))
+        if lookup:
+            for next_lookup in lookups[1:]:
+                nest_to = lookup.build_lookup(self.no_op_rewriter, [nest_to], nest_to.output_type,
+                                            self.where_class)
+                lookup = nest_to.get_lookup(next_lookup)
+                if not lookup:
+                    raise FieldError("'%s' doesn't support nesting lookup '%s'" %
+                                    (nest_to.__class__.__name__, next_lookup))
+        else:
+            lookup = lookups[0]
         # Interpret '__exact=None' as the sql 'is NULL'; otherwise, reject all
         # uses of None as a query value.
         if not hasattr(lookup, 'lookup_type'):
@@ -1141,15 +1147,15 @@ class Query(object):
         # the far end (fewer tables in a query is better).
         targets, alias, _ = self.trim_joins(sources, join_list, path)
 
-        lookup, value = self.build_lookup(lookups, field, Col(alias, targets[0], field),
+        lookup, value = self.build_lookup(lookups, field, targets[0].create_col(alias, field),
                                           value, can_reuse)
 
         if hasattr(field, 'get_lookup_constraint'):
             constraint = field.get_lookup_constraint(self.no_op_rewriter, self.where_class, alias,
                                                      targets, sources, lookup, value)
         else:
-            if isinstance(lookup, six.text_type):
-                constraint = (Constraint(alias, targets[0].column, field), lookups[0], value)
+            if isinstance(lookup, basestring):
+                constraint = (Constraint(alias, targets[0].column, field), lookup, value)
             else:
                 constraint = lookup
         clause.add(constraint, AND)
@@ -1176,7 +1182,7 @@ class Query(object):
                 #   <=>
                 # NOT (col IS NOT NULL AND col = someval).
                 clause.add(targets[0].get_lookup('isnull').build_lookup(
-                    self.no_op_rewriter, [Col(alias, targets[0])], sources[0],
+                    self.no_op_rewriter, [targets[0].create_col(alias)], sources[0],
                     self.where_class, False), AND)
         return clause
 
@@ -1577,10 +1583,10 @@ class Query(object):
                 assert len(targets) == 1
                 if lookups:
                     extracts = [self.build_lookup(
-                        lookups, field, Col(final_alias, targets[0], field),
+                        lookups, field, targets[0].create_col(final_alias, field),
                         NoValueMarker, set())[0]]
                 else:
-                    extracts = [Col(final_alias, targets[0], field)]
+                    extracts = [targets[0].create_col(final_alias, field)]
 
                 self.promote_joins(joins)
                 self.select.extend(extracts)
@@ -1910,7 +1916,7 @@ class Query(object):
             # values in select_fields. Lets punt this one for now.
             select_fields = [r[1] for r in join_field.related_fields]
             select_alias = self.tables[pos]
-        self.select = [Col(select_alias, f) for f in select_fields]
+        self.select = [f.create_col(select_alias) for f in select_fields]
         return trimmed_prefix, contains_louter
 
     def is_nullable(self, field):
