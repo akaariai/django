@@ -147,6 +147,9 @@ class GeometryField(Field):
         # Get attributes from `get_srid_info`.
         self._units, self._units_name, self._spheroid = get_srid_info(self.srid, connection)
 
+    def convert_value(self, value, connection):
+        return value and Geometry(value) or value
+
     def spheroid(self, connection):
         if not hasattr(self, '_spheroid'):
             self._get_srid_info(connection)

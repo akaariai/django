@@ -14,10 +14,47 @@ class GeoSQLCompiler(compiler.SQLCompiler):
 
     def setup_converters(self, offset):
         converters = []
+
+        def add_backend_converter(converters, offset, field):
+            backend_converter = self.connection.ops.get_field_converter(field)
+            if backend_converter:
+                converters.append(offset, backend_converter)
         offset = offset + len(self.query.extra_select)
         for i, field in enumerate(self.query.custom_select):
             if hasattr(field, 'convert_value'):
-                converters.append((i, field.convert_value))
+                converters.append((offset + i, field.convert_value))
+            add_backend_converter(converters, offset + i, field)
+        offset = offset + len(self.query.custom_select)
+        only_load = self.deferred_to_columns()
+        if self.query.select:
+            for col in self.query.select:
+                table = col.field.model._meta.db_table
+                if table in only_load and col.field.column not in only_load[table]:
+                    continue
+                if hasattr(col.output_type, 'convert_value'):
+                    converters.append((offset, col.output_type.convert_value))
+                add_backend_converter(converters, offset, col.output_type)
+                offset += 1
+            for col in self.query.related_select_cols:
+                table = col.field.model._meta.db_table
+                if table in only_load and col.field.column not in only_load[table]:
+                    continue
+                if hasattr(col.output_type, 'convert_value'):
+                    converters.append((offset, col.output_type.convert_value))
+                add_backend_converter(converters, offset, col.output_type)
+                offset += 1
+        else:
+            def_cols = self.get_default_columns()[0]
+            for i, col in enumerate(def_cols):
+                if hasattr(col.output_type, 'convert_value'):
+                    converters.append((offset + i, col.output_type.convert_value))
+                add_backend_converter(converters, offset + i, col.output_type)
+            offset += len(def_cols)
+
+        for i, agg in enumerate(self.query.aggregate_select.values()):
+            if hasattr(agg.output_type, 'convert_value'):
+                converters.append((offset + i, agg.output_type.convert_value))
+            add_backend_converter(converters, offset + i, agg.output_type)
         self.converters = converters
 
     def resolve_columns(self, row, fields=()):
@@ -27,37 +64,19 @@ class GeoSQLCompiler(compiler.SQLCompiler):
         objects.
         """
         values = []
-        aliases = list(self.query.extra_select)
 
         # Have to set a starting row number offset that is used for
         # determining the correct starting row index -- needed for
         # doing pagination with Oracle.
         rn_offset = 0
         if self.connection.ops.oracle:
-            if self.query.high_mark is not None or self.query.low_mark: rn_offset = 1
-        index_start = rn_offset + len(aliases)
-
-        # Converting any extra selection values (e.g., geometries and
-        # distance objects added by GeoQuerySet methods).
-        values = [self.query.convert_values(v,
-                               self.query.extra_select_fields.get(a, None),
-                               self.connection)
-                  for v, a in zip(row[rn_offset:index_start], aliases)]
+            if self.query.high_mark is not None or self.query.low_mark:
+                rn_offset = 1
         if not hasattr(self, 'converters'):
             self.setup_converters(rn_offset)
-
+        values = list(row)
         for row_pos, converter in self.converters:
-            if converter:
-                values.append(converter(row[row_pos], self.connection))
-            else:
-                values.append(row[row_pos])
-        if self.connection.ops.oracle or getattr(self.query, 'geo_values', False):
-            # We resolve the rest of the columns if we're on Oracle or if
-            # the `geo_values` attribute is defined.
-            for value, field in zip_longest(row[index_start + len(self.converters):], fields):
-                values.append(self.query.convert_values(value, field, self.connection))
-        else:
-            values.extend(row[index_start + len(self.converters):])
+            values[row_pos] = converter(row[row_pos], self.connection)
         return tuple(values)
 
     # Private API utilities, subject to change.

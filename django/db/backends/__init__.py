@@ -713,6 +713,9 @@ class BaseDatabaseOperations(object):
         self.connection = connection
         self._cache = None
 
+    def get_field_converter(self, field):
+        return None
+
     def autoinc_sql(self, table, column):
         """
         Returns any SQL needed to support auto-incrementing primary keys, or

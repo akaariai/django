@@ -260,8 +260,6 @@ class SQLCompiler(object):
         result = []
         if opts is None:
             opts = self.query.get_meta()
-        qn = self.quote_name_unless_alias
-        qn2 = self.connection.ops.quote_name
         aliases = set()
         only_load = self.deferred_to_columns()
         if not start_alias:

@@ -1,5 +1,5 @@
 from django.db import connections
-from django.db.models.query import QuerySet, ValuesQuerySet, ValuesListQuerySet
+from django.db.models.query import QuerySet
 
 from django.contrib.gis import memoryview
 from django.contrib.gis.db.models import aggregates
@@ -15,11 +15,14 @@ class RawSQL(object):
         self.sql, self.params, self.output_type, self.field = sql, params, output_type, output_type
         self.label = to_label
 
+    def as_sql(self, qn, connection):
+        return '(' + self.sql + ')', self.params
+
     def convert_value(self, value, connection):
         if connection.ops.oracle:
             # Running through Oracle's first.
-            value = super(GeoQuery, self).convert_values(value, self.output_type or GeomField(), connection)
-
+            value = super(GeoQuery, self).convert_values(value, self.output_type or GeomField(),
+                                                         connection)
         if value is None:
             # Output from spatial function is NULL (e.g., called
             # function on a geometry field with NULL value).
@@ -27,15 +30,13 @@ class RawSQL(object):
         elif isinstance(self.output_type, DistanceField):
             # Using the field's distance attribute, can instantiate
             # `Distance` with the right context.
-            value = Distance(**{self.output_type.distance_att : value})
+            value = Distance(**{self.output_type.distance_att: value})
         elif isinstance(self.output_type, AreaField):
-            value = Area(**{self.output_type.area_att : value})
+            value = Area(**{self.output_type.area_att: value})
         elif isinstance(self.output_type, (GeomField, GeometryField)) and value:
             value = Geometry(value)
         return value
 
-    def as_sql(self, qn, connection):
-        return '(' + self.sql + ')', self.params
 
 class GeoQuerySet(QuerySet):
     "The Geographic QuerySet."
@@ -44,19 +45,6 @@ class GeoQuerySet(QuerySet):
     def __init__(self, model=None, query=None, using=None):
         super(GeoQuerySet, self).__init__(model=model, query=query, using=using)
         self.query = query or GeoQuery(self.model)
-
-    def values(self, *fields):
-        return self._clone(klass=GeoValuesQuerySet, setup=True, _fields=fields)
-
-    def values_list(self, *fields, **kwargs):
-        flat = kwargs.pop('flat', False)
-        if kwargs:
-            raise TypeError('Unexpected keyword arguments to values_list: %s'
-                    % (list(kwargs),))
-        if flat and len(fields) > 1:
-            raise TypeError("'flat' is not valid when values_list is called with more than one field.")
-        return self._clone(klass=GeoValuesListQuerySet, setup=True, flat=flat,
-                           _fields=fields)
 
     ### GeoQuerySet Methods ###
     def area(self, tolerance=0.05, **kwargs):
@@ -816,14 +804,3 @@ class GeoQuerySet(QuerySet):
             return self.query.get_compiler(self.db)._field_column(geo_field, parent_model._meta.db_table)
         else:
             return self.query.get_compiler(self.db)._field_column(geo_field)
-
-class GeoValuesQuerySet(ValuesQuerySet):
-    def __init__(self, *args, **kwargs):
-        super(GeoValuesQuerySet, self).__init__(*args, **kwargs)
-        # This flag tells `resolve_columns` to run the values through
-        # `convert_values`.  This ensures that Geometry objects instead
-        # of string values are returned with `values()` or `values_list()`.
-        self.query.geo_values = True
-
-class GeoValuesListQuerySet(GeoValuesQuerySet, ValuesListQuerySet):
-    pass
