@@ -94,7 +94,6 @@ class DatabaseErrorWrapper(object):
                 six.reraise(dj_exc_type, dj_exc_value, traceback)
 
     def __call__(self, func):
-        @wraps(func)
         def inner(*args, **kwargs):
             with self:
                 return func(*args, **kwargs)
