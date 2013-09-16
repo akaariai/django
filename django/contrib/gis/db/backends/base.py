@@ -124,9 +124,9 @@ class BaseSpatialOperations(object):
         Helper method to return the quoted column string from the evaluator
         for its expression.
         """
-        for expr, col_tup in evaluator.cols:
+        for expr, col in evaluator.cols:
             if expr is evaluator.expression:
-                return '%s.%s' % tuple(map(self.quote_name, col_tup))
+                return col.as_sql(self.quote_name, self.connection)[0]
         raise Exception("Could not find the column for the expression.")
 
     # Spatial SQL Construction

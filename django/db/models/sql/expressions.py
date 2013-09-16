@@ -29,8 +29,8 @@ class SQLEvaluator(object):
         for node, col in self.cols:
             if hasattr(node, 'get_cols'):
                 cols.extend(node.get_cols())
-            elif isinstance(col, tuple):
-                cols.append(col)
+            else:
+                cols.extend(col.get_cols())
         return cols
 
     def prepare(self):
@@ -53,8 +53,8 @@ class SQLEvaluator(object):
             raise FieldError("Joined field references are not permitted in this query")
 
         field_list = node.name.split(LOOKUP_SEP)
-        if node.name in query.aggregates:
-            self.cols.append((node, query.aggregate_select[node.name]))
+        if node.name in query.custom_select:
+            self.cols.append((node, query.custom_select[node.name]))
         else:
             try:
                 field, sources, opts, join_list, path, _ = query.setup_joins(
@@ -64,7 +64,7 @@ class SQLEvaluator(object):
                 if self.reuse is not None:
                     self.reuse.update(join_list)
                 for t in targets:
-                    self.cols.append((node, (join_list[-1], t.column)))
+                    self.cols.append((node, t.create_col(join_list[-1])))
             except FieldDoesNotExist:
                 raise FieldError("Cannot resolve keyword %r into field. "
                                  "Choices are: %s" % (self.name,

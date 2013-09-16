@@ -1,5 +1,6 @@
 from django.db import connections
 from django.db.models.query import QuerySet
+from django.db.models.sql.query import RawSQL
 
 from django.contrib.gis import memoryview
 from django.contrib.gis.db.models import aggregates
@@ -10,19 +11,10 @@ from django.contrib.gis.measure import Area, Distance
 
 from django.utils import six
 
-class RawSQL(object):
-    def __init__(self, sql, params, output_type, to_label):
-        self.sql, self.params, self.output_type, self.field = sql, params, output_type, output_type
-        self.label = to_label
-
-    def as_sql(self, qn, connection):
-        return '(' + self.sql + ')', self.params
+class GeoRawSQL(RawSQL):
+    is_aggregate = False
 
     def convert_value(self, value, connection):
-        if connection.ops.oracle:
-            # Running through Oracle's first.
-            value = super(GeoQuery, self).convert_values(value, self.output_type or GeomField(),
-                                                         connection)
         if value is None:
             # Output from spatial function is NULL (e.g., called
             # function on a geometry field with NULL value).
@@ -416,18 +408,17 @@ class GeoQuerySet(QuerySet):
         tmp, geo_field = self._spatial_setup('transform', field_name=field_name)
 
         # Getting the selection SQL for the given geographic field.
-        field_col = RawSQL(self._geocol_select(geo_field, field_name), [], geo_field,
+        field_col = GeoRawSQL(self._geocol_select(geo_field, field_name), [], geo_field,
                            geo_field.attname)
 
         # Why cascading substitutions? Because spatial backends like
         # Oracle and MySQL already require a function call to convert to text, thus
         # when there's also a transformation we need to cascade the substitutions.
         # For example, 'SDO_UTIL.TO_WKTGEOMETRY(SDO_CS.TRANSFORM( ... )'
-        found = False
-        for pos, field in enumerate(self.query.custom_select):
-            if field.label == geo_field:
+        key = None
+        for key, field in self.query.custom_select.items():
+            if key == geo_field:
                 field_col = field
-                found = True
                 break
 
         # Setting the key for the field's column with the custom SELECT SQL to
@@ -437,12 +428,13 @@ class GeoQuerySet(QuerySet):
         # TODO: Should we have this as an alias?
         # custom_sel = '(%s(%s, %s)) AS %s' % (SpatialBackend.transform, geo_col, srid, qn(geo_field.name))
         self.query.transformed_srid = srid # So other GeoQuerySet methods
-        if found:
-            self.query.custom_select[pos] = RawSQL(custom_sel, params, field_col.output_type,
-                                                   field_col.label)
+        if key:
+            self.query.custom_select[key] = GeoRawSQL(custom_sel, params, field_col.output_type,
+                                                      field_col.label)
         else:
-            self.query.custom_select.append(RawSQL(custom_sel, params, field_col.output_type,
-                                                   field_col.label))
+            self.query.custom_select[field_col.label] = (
+                GeoRawSQL(custom_sel, params, field_col.output_type,
+                       field_col.label))
         return self._clone()
 
     def union(self, geom, **kwargs):
@@ -601,9 +593,9 @@ class GeoQuerySet(QuerySet):
         # Finally, setting the extra selection attribute with
         # the format string expanded with the stored procedure
         # arguments.
-        clone.query.custom_select.append(
-            RawSQL(fmt % settings['procedure_args'], settings['select_params'],
-                   sel_fld, model_att))
+        clone.query.custom_select[model_att] = (
+            GeoRawSQL(fmt % settings['procedure_args'], settings['select_params'],
+                      sel_fld, model_att))
         return clone
 
     def _distance_attribute(self, func, geom=None, tolerance=0.05, spheroid=False, **kwargs):
@@ -792,6 +784,7 @@ class GeoQuerySet(QuerySet):
             # (e.g., if 'location__point' was given as the field name).
             self.query.add_select_related([field_name])
             compiler = self.query.get_compiler(self.db)
+            # How beautiful...
             compiler.pre_sql_setup()
             for col in self.query.related_select_cols:
                 if col.field == geo_field:

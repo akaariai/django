@@ -2,10 +2,7 @@ from django.db.models.query import sql
 
 from django.contrib.gis.db.models.fields import GeometryField
 from django.contrib.gis.db.models.sql import aggregates as gis_aggregates
-from django.contrib.gis.db.models.sql.conversion import AreaField, DistanceField, GeomField
 from django.contrib.gis.db.models.sql.where import GeoWhereNode
-from django.contrib.gis.geometry.backend import Geometry
-from django.contrib.gis.measure import Area, Distance
 
 
 ALL_TERMS = set([
@@ -44,22 +41,6 @@ class GeoQuery(sql.Query):
         # to also be added to obj.
         obj.transformed_srid = self.transformed_srid
         return obj
-
-    def resolve_aggregate(self, value, aggregate, connection):
-        """
-        Overridden from GeoQuery's normalize to handle the conversion of
-        GeoAggregate objects.
-        """
-        if isinstance(aggregate, self.aggregates_module.GeoAggregate):
-            if aggregate.is_extent:
-                if aggregate.is_extent == '3D':
-                    return connection.ops.convert_extent3d(value)
-                else:
-                    return connection.ops.convert_extent(value)
-            else:
-                return connection.ops.convert_geom(value, aggregate.source)
-        else:
-            return super(GeoQuery, self).resolve_aggregate(value, aggregate, connection)
 
     # Private API utilities, subject to change.
     def _geo_field(self, field_name=None):

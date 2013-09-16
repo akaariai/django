@@ -1,10 +1,8 @@
-import datetime
 
-from django.conf import settings
 from django.core.exceptions import FieldError
 from django.db.backends.utils import truncate_name
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.lookups import Col, NoValueMarker
+from django.db.models.lookups import NoValueMarker
 from django.db.models.query_utils import select_related_descend, QueryWrapper
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
         GET_ITERATOR_CHUNK_SIZE)
@@ -12,9 +10,7 @@ from django.db.models.sql.datastructures import EmptyResultSet
 from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.query import get_order_dir, Query
 from django.db.utils import DatabaseError
-from django.utils import six
 from django.utils.six.moves import zip
-from django.utils import timezone
 
 
 class SQLCompiler(object):
@@ -55,7 +51,7 @@ class SQLCompiler(object):
         if name in self.quote_cache:
             return self.quote_cache[name]
         if ((name in self.query.alias_map and name not in self.query.table_map) or
-                name in self.query.extra_select):
+                name in self.query.custom_select):
             self.quote_cache[name] = name
             return name
         r = self.connection.ops.quote_name(name)
@@ -95,8 +91,6 @@ class SQLCompiler(object):
         having, h_params = self.query.having.as_sql(qn=qn, connection=self.connection)
         having_group_by = self.query.having.get_cols()
         params = []
-        for val in six.itervalues(self.query.extra_select):
-            params.extend(val[1])
 
         result = ['SELECT']
 
@@ -183,13 +177,17 @@ class SQLCompiler(object):
         """
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
-        result = ['(%s) AS %s' % (col[0], qn2(alias)) for alias, col in six.iteritems(self.query.extra_select)]
+        result = []
         params = []
-        for col in self.query.custom_select:
+        aliases = set()
+        for name, col in self.query.custom_select_clause.items():
             sql, col_params = col.as_sql(qn, self.connection)
+            label = getattr(col, 'label', None) or name
+            if label:
+                sql = '(%s) AS %s' % (sql, qn2(label))
             result.append(sql)
             params.extend(col_params)
-        aliases = set(self.query.extra_select.keys())
+            aliases.add(label)
         if with_aliases:
             col_aliases = aliases.copy()
         else:
@@ -218,15 +216,6 @@ class SQLCompiler(object):
                 result.append(sql)
                 params.extend(col_params)
             aliases.update(new_aliases)
-
-        max_name_length = self.connection.ops.max_name_length()
-        for alias, aggregate in self.query.aggregate_select.items():
-            agg_sql, agg_params = aggregate.as_sql(qn, self.connection)
-            if alias is None:
-                result.append(agg_sql)
-            else:
-                result.append('%s AS %s' % (agg_sql, qn(truncate_name(alias, max_name_length))))
-            params.extend(agg_params)
 
         for col in self.query.related_select_cols:
             r, col_params = col.as_sql(qn, self.connection)
@@ -356,7 +345,7 @@ class SQLCompiler(object):
                 continue
             col, order = get_order_dir(field, asc)
             if col in self.query.aggregate_select:
-                result.append('%s %s' % (qn(col), order))
+                result.append('%s %s' % (qn2(col), order))
                 continue
             if '.' in field:
                 # This came in through an extra(order_by=...) addition. Pass it
@@ -368,7 +357,7 @@ class SQLCompiler(object):
                     if not distinct or elt in select_aliases:
                         result.append('%s %s' % (elt, order))
                         group_by.append((elt, []))
-            elif not self.query._extra or get_order_dir(field)[0] not in self.query._extra:
+            elif col not in self.query.custom_select:
                 # 'col' is of the form 'field' or 'field1__field2' or
                 # '-field1__field2__field', etc.
                 for col, order in self.find_ordering_name(field,
@@ -383,17 +372,18 @@ class SQLCompiler(object):
                         params.extend(col_params)
                         group_by.append((sql, col_params))
             else:
-                elt = qn2(col)
-                if col not in self.query.extra_select:
-                    sql = "(%s) AS %s" % (self.query.extra[col][0], elt)
-                    ordering_aliases.append(sql)
-                    ordering_params.extend(self.query.extra[col][1])
+                if col not in self.query.custom_select_clause:
+                    elt, col_params = self.query.custom_select[col].as_sql(qn, self.connection)
+                    params.extend(col_params)
+                    ordering_aliases.append(elt)
+                    ordering_params.extend(col_params)
                 else:
+                    elt = qn2(col)
                     if distinct and col not in select_aliases:
                         ordering_aliases.append(elt)
                         ordering_params.extend(params)
                 result.append('%s %s' % (elt, order))
-                group_by.append(self.query.extra[col])
+                group_by.append(self.query.custom_select[col].as_sql(qn, self.connection))
         self.ordering_aliases = ordering_aliases
         self.ordering_params = ordering_params
         return result, params, group_by
@@ -563,8 +553,10 @@ class SQLCompiler(object):
                         seen.add(order)
 
             # Unconditionally add the extra_select items.
-            for extra_select, extra_params in self.query.extra_select.values():
-                sql = '(%s)' % str(extra_select)
+            for col in self.query.custom_select_clause.values():
+                if col.is_aggregate:
+                    continue
+                sql, extra_params = col.as_sql(qn, self.connection)
                 result.append(sql)
                 params.extend(extra_params)
 
@@ -656,54 +648,65 @@ class SQLCompiler(object):
         self.query.deferred_to_data(columns, self.query.deferred_to_columns_cb)
         return columns
 
+    def setup_converters(self, offset):
+        # TODO: do this as part of get_columns()
+        converters = []
+
+        def add_backend_converter(converters, offset, field):
+            backend_converter = self.connection.ops.get_field_converter(field)
+            if backend_converter:
+                converters.append(offset, backend_converter)
+        for i, field in enumerate(self.query.custom_select_clause.values()):
+            add_backend_converter(converters, offset + i, field)
+            if hasattr(field, 'convert_value'):
+                converters.append((offset + i, field.convert_value))
+        offset = offset + len(self.query.custom_select_clause)
+        only_load = self.deferred_to_columns()
+        if self.query.select:
+            for col in self.query.select:
+                table = col.field.model._meta.db_table
+                if table in only_load and col.field.column not in only_load[table]:
+                    continue
+                add_backend_converter(converters, offset, col.output_type)
+                if hasattr(col.output_type, 'convert_value'):
+                    converters.append((offset, col.output_type.convert_value))
+                offset += 1
+            for col in self.query.related_select_cols:
+                table = col.field.model._meta.db_table
+                if table in only_load and col.field.column not in only_load[table]:
+                    continue
+                add_backend_converter(converters, offset, col.output_type)
+                if hasattr(col.output_type, 'convert_value'):
+                    converters.append((offset, col.output_type.convert_value))
+                offset += 1
+        elif self.query.default_cols:
+            def_cols = self.get_default_columns()[0]
+            for i, col in enumerate(def_cols):
+                add_backend_converter(converters, offset + i, col.output_type)
+                if hasattr(col.output_type, 'convert_value'):
+                    converters.append((offset + i, col.output_type.convert_value))
+            offset += len(def_cols)
+        self.converters = converters
+
     def results_iter(self):
         """
         Returns an iterator over the results from executing this query.
         """
-        resolve_columns = hasattr(self, 'resolve_columns')
-        fields = None
-        has_aggregate_select = bool(self.query.aggregate_select)
-        for rows in self.execute_sql(MULTI):
+        row_batches = self.execute_sql(MULTI)
+        rn_offset = 0
+        if self.connection.vendor == 'oracle':
+            if self.query.high_mark is not None or self.query.low_mark:
+                rn_offset = 1
+        self.setup_converters(rn_offset)
+        for rows in row_batches:
             for row in rows:
-                if resolve_columns:
-                    if fields is None:
-                        # We only set this up here because
-                        # related_select_cols isn't populated until
-                        # execute_sql() has been called.
-
-                        # We also include types of fields of related models that
-                        # will be included via select_related() for the benefit
-                        # of MySQL/MySQLdb when boolean fields are involved
-                        # (#15040).
-
-                        # This code duplicates the logic for the order of fields
-                        # found in get_columns(). It would be nice to clean this up.
-                        if self.query.select:
-                            fields = [f.field for f in self.query.select]
-                        else:
-                            fields = self.query.get_meta().concrete_fields
-                        fields = fields + [f.field for f in self.query.related_select_cols]
-
-                        # If the field was deferred, exclude it from being passed
-                        # into `resolve_columns` because it wasn't selected.
-                        only_load = self.deferred_to_columns()
-                        if only_load:
-                            db_table = self.query.get_meta().db_table
-                            fields = [f for f in fields if db_table in only_load and
-                                      f.column in only_load[db_table]]
-                    row = self.resolve_columns(row, fields)
-
-                if has_aggregate_select:
-                    loaded_fields = self.query.get_loaded_field_names().get(self.query.model, set()) or self.query.select
-                    aggregate_start = len(self.query.extra_select) + len(loaded_fields)
-                    aggregate_end = aggregate_start + len(self.query.aggregate_select)
-                    row = tuple(row[:aggregate_start]) + tuple(
-                        self.query.resolve_aggregate(value, aggregate, self.connection)
-                        for (alias, aggregate), value
-                        in zip(self.query.aggregate_select.items(), row[aggregate_start:aggregate_end])
-                    ) + tuple(row[aggregate_end:])
-
-                yield row
+                if self.converters:
+                    row = list(row)
+                    for row_pos, converter in self.converters:
+                        row[row_pos] = converter(row[row_pos], self.connection)
+                    yield tuple(row)
+                else:
+                    yield row
 
     def has_results(self):
         """
@@ -712,7 +715,7 @@ class SQLCompiler(object):
         """
         # This is always executed on a query clone, so we can modify self.query
         self.query.add_extra({'a': 1}, None, None, None, None, None)
-        self.query.set_extra_mask(['a'])
+        self.query.set_custom_select_mask(['a'])
         return bool(self.execute_sql(SINGLE))
 
     def execute_sql(self, result_type=MULTI):
@@ -1007,7 +1010,11 @@ class SQLAggregateCompiler(SQLCompiler):
             qn = self.quote_name_unless_alias
 
         sql, params = [], []
-        for aggregate in self.query.aggregate_select.values():
+        if not self.query.custom_select_clause:
+            import ipdb; ipdb.set_trace()
+        for aggregate in self.query.custom_select_clause.values():
+            if not aggregate.is_aggregate:
+                continue
             agg_sql, agg_params = aggregate.as_sql(qn, self.connection)
             sql.append(agg_sql)
             params.extend(agg_params)
@@ -1017,66 +1024,6 @@ class SQLAggregateCompiler(SQLCompiler):
         sql = 'SELECT %s FROM (%s) subquery' % (sql, self.query.subquery)
         params = params + self.query.sub_params
         return sql, params
-
-
-class SQLDateCompiler(SQLCompiler):
-    def results_iter(self):
-        """
-        Returns an iterator over the results from executing this query.
-        """
-        resolve_columns = hasattr(self, 'resolve_columns')
-        if resolve_columns:
-            from django.db.models.fields import DateField
-            fields = [DateField()]
-        else:
-            from django.db.backends.utils import typecast_date
-            needs_string_cast = self.connection.features.needs_datetime_string_cast
-
-        offset = len(self.query.extra_select)
-        for rows in self.execute_sql(MULTI):
-            for row in rows:
-                date = row[offset]
-                if resolve_columns:
-                    date = self.resolve_columns(row, fields)[offset]
-                elif needs_string_cast:
-                    date = typecast_date(str(date))
-                if isinstance(date, datetime.datetime):
-                    date = date.date()
-                yield date
-
-
-class SQLDateTimeCompiler(SQLCompiler):
-    def results_iter(self):
-        """
-        Returns an iterator over the results from executing this query.
-        """
-        resolve_columns = hasattr(self, 'resolve_columns')
-        if resolve_columns:
-            from django.db.models.fields import DateTimeField
-            fields = [DateTimeField()]
-        else:
-            from django.db.backends.utils import typecast_timestamp
-            needs_string_cast = self.connection.features.needs_datetime_string_cast
-
-        offset = len(self.query.extra_select)
-        for rows in self.execute_sql(MULTI):
-            for row in rows:
-                datetime = row[offset]
-                if resolve_columns:
-                    datetime = self.resolve_columns(row, fields)[offset]
-                elif needs_string_cast:
-                    datetime = typecast_timestamp(str(datetime))
-                # Datetimes are artifically returned in UTC on databases that
-                # don't support time zone. Restore the zone used in the query.
-                if settings.USE_TZ:
-                    if datetime is None:
-                        raise ValueError("Database returned an invalid value "
-                                         "in QuerySet.dates(). Are time zone "
-                                         "definitions and pytz installed?")
-                    datetime = datetime.replace(tzinfo=None)
-                    datetime = timezone.make_aware(datetime, self.query.tzinfo)
-                yield datetime
-
 
 def order_modified_iter(cursor, trim, sentinel):
     """

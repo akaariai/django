@@ -13,6 +13,7 @@ from django.utils import six
 _srid_cache = {}
 
 class GeoCol(Col):
+
     def get_select_format(self, query, connection, fld):
         """
         Returns the selection format string, depending on the requirements
@@ -32,7 +33,7 @@ class GeoCol(Col):
             # transformed geometries have an SRID different than that of the
             # field -- this is only used by `transform` for Oracle and
             # SpatiaLite backends.
-            if self.query.transformed_srid and (self.connection.ops.oracle or
+            if query and query.transformed_srid and (self.connection.ops.oracle or
                                                 self.connection.ops.spatialite):
                 sel_fmt = "'SRID=%d;'||%s" % (query.transformed_srid, sel_fmt)
         else:
@@ -41,11 +42,16 @@ class GeoCol(Col):
 
     def as_sql(self, qn, connection):
         sql, params = super(GeoCol, self).as_sql(qn, connection)
-        query = qn.__self__.query
-        for f in query.custom_select:
-            if f.output_type == self.field:
-                return f.as_sql(qn, connection)
-        return self.get_select_format(qn.__self__.query, connection, self.field) % sql, params
+        # Ugly hack - need access to query, but that is only available from
+        # qn.__self__.query - assuming qn is quote_name_unless_alias...
+        try:
+            query = qn.__self__.query
+            for f in query.custom_select.values():
+                if f.output_type == self.field:
+                    return f.as_sql(qn, connection)
+        except AttributeError:
+            query = None
+        return self.get_select_format(query, connection, self.field) % sql, params
 
 def get_srid_info(srid, connection):
     """

@@ -220,8 +220,6 @@ class DateQuery(Query):
     back to Python objects, so we put it in a separate class.
     """
 
-    compiler = 'SQLDateCompiler'
-
     def add_select(self, field_name, lookup_type, order='ASC'):
         """
         Converts the query into an extraction query.
@@ -241,7 +239,8 @@ class DateQuery(Query):
         alias = result[3][-1]
         select = self._get_select(alias, field, lookup_type)
         self.clear_select_clause()
-        self.select = [select]
+        self.custom_select = {'_dateselect': select}
+        self.set_custom_select_mask(['_dateselect'])
         self.distinct = True
         self.order_by = [1] if order == 'ASC' else [-1]
 
@@ -266,8 +265,6 @@ class DateTimeQuery(DateQuery):
     converting the values before truncating them. Otherwise it's set to None.
     """
 
-    compiler = 'SQLDateTimeCompiler'
-
     def _check_field(self, field):
         assert isinstance(field, DateTimeField), \
                 "%r isn't a DateTimeField." % field.name
@@ -277,7 +274,7 @@ class DateTimeQuery(DateQuery):
             tzname = None
         else:
             tzname = timezone._get_timezone_name(self.tzinfo)
-        return DateTime(alias, field, lookup_type, tzname)
+        return DateTime(alias, field, lookup_type, self.tzinfo, tzname)
 
 
 class AggregateQuery(Query):

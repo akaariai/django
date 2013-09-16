@@ -46,6 +46,15 @@ class GeoAggregate(Aggregate):
 
         return sql_template % substitutions, params
 
+    def convert_value(self, value, connection):
+        if self.is_extent:
+            if self.is_extent == '3D':
+                return connection.ops.convert_extent3d(value)
+            else:
+                return connection.ops.convert_extent(value)
+        else:
+            return connection.ops.convert_geom(value, self.source)
+
 class Collect(GeoAggregate):
     pass
 

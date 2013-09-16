@@ -214,9 +214,7 @@ class QuerySet(object):
             requested = None
         max_depth = self.query.max_depth
 
-        custom_select = self.query.custom_select
-        extra_select = list(self.query.extra_select)
-        aggregate_select = list(self.query.aggregate_select)
+        custom_select = list(self.query.custom_select_clause)
 
         only_load = self.query.get_loaded_field_names()
         if not fill_cache:
@@ -238,8 +236,7 @@ class QuerySet(object):
                     # Therefore, we need to load all fields from this model
                     load_fields.append(field.name)
 
-        custom_start = len(extra_select)
-        index_start = len(extra_select) + len(custom_select)
+        index_start = len(custom_select)
         aggregate_start = index_start + len(load_fields or self.model._meta.concrete_fields)
 
         skip = None
@@ -265,10 +262,10 @@ class QuerySet(object):
         for row in compiler.results_iter():
             if fill_cache:
                 obj, _ = get_cached_row(row, index_start, db, klass_info,
-                                        offset=len(aggregate_select))
+                                        offset=0)
             else:
                 # Omit aggregates in object creation.
-                row_data = row[index_start:aggregate_start]
+                row_data = row[index_start:]
                 if skip:
                     obj = model_cls(**dict(zip(init_list, row_data)))
                 else:
@@ -279,18 +276,9 @@ class QuerySet(object):
                 # This object came from the database; it's not being added.
                 obj._state.adding = False
 
-            if extra_select:
-                for i, k in enumerate(extra_select):
-                    setattr(obj, k, row[i])
-
             if custom_select:
-                for i, f in enumerate(custom_select):
-                    setattr(obj, f.label, row[custom_start + i])
-
-            # Add the aggregates to the model
-            if aggregate_select:
-                for i, aggregate in enumerate(aggregate_select):
-                    setattr(obj, aggregate, row[i + aggregate_start])
+                for i, label in enumerate(custom_select):
+                    setattr(obj, label, row[i])
 
             # Add the known related objects to the model, if there are any
             if self._known_related_objects:
@@ -651,8 +639,10 @@ class QuerySet(object):
                 "'kind' must be one of 'year', 'month' or 'day'."
         assert order in ('ASC', 'DESC'), \
                 "'order' must be either 'ASC' or 'DESC'."
-        return self._clone(klass=DateQuerySet, setup=True,
-                _field_name=field_name, _kind=kind, _order=order)
+        return self._clone(
+            klass=DateQuerySet, setup=True,
+            _field_name=field_name, _kind=kind, _order=order
+        ).values_list('_dateselect', flat=True)
 
     def datetimes(self, field_name, kind, order='ASC', tzinfo=None):
         """
@@ -668,8 +658,10 @@ class QuerySet(object):
                 tzinfo = timezone.get_current_timezone()
         else:
             tzinfo = None
-        return self._clone(klass=DateTimeQuerySet, setup=True,
-                _field_name=field_name, _kind=kind, _order=order, _tzinfo=tzinfo)
+        return self._clone(
+            klass=DateTimeQuerySet, setup=True,
+            _field_name=field_name, _kind=kind, _order=order, _tzinfo=tzinfo
+        ).values_list('_dateselect', flat=True)
 
     def none(self):
         """
@@ -1058,11 +1050,10 @@ class ValuesQuerySet(QuerySet):
 
     def iterator(self):
         # Purge any extra columns that haven't been explicitly asked for
-        extra_names = list(self.query.extra_select)
+        custom_names = list(self.query.custom_select_clause)
         field_names = self.field_names
-        aggregate_names = list(self.query.aggregate_select)
 
-        names = extra_names + field_names + aggregate_names
+        names = custom_names + field_names
 
         for row in self.query.get_compiler(self.db).results_iter():
             yield dict(zip(names, row))
@@ -1085,9 +1076,8 @@ class ValuesQuerySet(QuerySet):
         self.query.clear_select_fields()
 
         if self._fields:
-            self.extra_names = []
-            self.aggregate_names = []
-            if not self.query.extra and not self.query.aggregates:
+            self.custom_names = []
+            if not self.query.custom_select:
                 # Short cut - if there are no extra or aggregates, then
                 # the values() clause must be just field names.
                 self.field_names = list(self._fields)
@@ -1098,24 +1088,19 @@ class ValuesQuerySet(QuerySet):
                     # we inspect the full extra_select list since we might
                     # be adding back an extra select item that we hadn't
                     # had selected previously.
-                    if f in self.query.extra:
-                        self.extra_names.append(f)
-                    elif f in self.query.aggregate_select:
-                        self.aggregate_names.append(f)
+                    if f in self.query.custom_select_clause:
+                        self.custom_names.append(f)
                     else:
                         self.field_names.append(f)
         else:
             # Default to all fields.
-            self.extra_names = None
+            self.custom_names = None
             self.field_names = [f.attname for f in self.model._meta.concrete_fields]
-            self.aggregate_names = None
 
         self.query.select = []
-        if self.extra_names is not None:
-            self.query.set_extra_mask(self.extra_names)
+        if self.custom_names is not None:
+            self.query.set_custom_select_mask(self.custom_names)
         self.query.add_fields(self.field_names, True)
-        if self.aggregate_names is not None:
-            self.query.set_aggregate_mask(self.aggregate_names)
 
     def _clone(self, klass=None, setup=False, **kwargs):
         """
@@ -1127,17 +1112,15 @@ class ValuesQuerySet(QuerySet):
             # call directly.
             c._fields = self._fields[:]
         c.field_names = self.field_names
-        c.extra_names = self.extra_names
-        c.aggregate_names = self.aggregate_names
+        c.custom_names = self.custom_names
         if setup and hasattr(c, '_setup_query'):
             c._setup_query()
         return c
 
     def _merge_sanity_check(self, other):
         super(ValuesQuerySet, self)._merge_sanity_check(other)
-        if (set(self.extra_names) != set(other.extra_names) or
-                set(self.field_names) != set(other.field_names) or
-                self.aggregate_names != other.aggregate_names):
+        if (set(self.custom_names) != set(other.custom_names) or
+                set(self.field_names) != set(other.field_names)):
             raise TypeError("Merging '%s' classes must involve the same values in each case."
                     % self.__class__.__name__)
 
@@ -1147,9 +1130,13 @@ class ValuesQuerySet(QuerySet):
         """
         self.query.set_group_by()
 
-        if self.aggregate_names is not None:
-            self.aggregate_names.extend(aggregates)
-            self.query.set_aggregate_mask(self.aggregate_names)
+        if self.custom_names is not None:
+            self.custom_names.extend(aggregates)
+            non_aggregate_select = [
+                n for n, col in self.query.custom_select_clause.items()
+                if not col.is_aggregate]
+            self.query.set_custom_select_mask(
+                non_aggregate_select + self.custom_names)
 
         super(ValuesQuerySet, self)._setup_aggregate_query(aggregates)
 
@@ -1188,23 +1175,21 @@ class ValuesListQuerySet(ValuesQuerySet):
         if self.flat and len(self._fields) == 1:
             for row in self.query.get_compiler(self.db).results_iter():
                 yield row[0]
-        elif not self.query.extra_select and not self.query.aggregate_select:
+        elif not self.query.custom_select_clause:
             for row in self.query.get_compiler(self.db).results_iter():
                 yield tuple(row)
         else:
             # When extra(select=...) or an annotation is involved, the extra
             # cols are always at the start of the row, and we need to reorder
             # the fields to match the order in self._fields.
-            extra_names = list(self.query.extra_select)
+            custom_names = list(self.query.custom_select_clause)
             field_names = self.field_names
-            aggregate_names = list(self.query.aggregate_select)
-
-            names = extra_names + field_names + aggregate_names
+            names = custom_names + field_names
 
             # If a field list has been specified, use it. Otherwise, use the
             # full list of fields, including extras and aggregates.
             if self._fields:
-                fields = list(self._fields) + [f for f in aggregate_names if f not in self._fields]
+                fields = list(self._fields) + [f for f in custom_names if f not in self._fields]
             else:
                 fields = names
 
@@ -1510,11 +1495,6 @@ class RawQuerySet(object):
 
         # Cache some things for performance reasons outside the loop.
         db = self.db
-        compiler = connections[db].ops.compiler('SQLCompiler')(
-            self.query, connections[db], db
-        )
-        need_resolv_columns = hasattr(compiler, 'resolve_columns')
-
         query = iter(self.query)
 
         # Find out which columns are model's fields, and which ones should be
@@ -1542,12 +1522,27 @@ class RawQuerySet(object):
             model_init_field_pos = []
             for field in self.model._meta.fields:
                 model_init_field_pos.append(model_init_field_names[field.attname])
-        if need_resolv_columns:
-            fields = [self.model_fields.get(c, None) for c in self.columns]
+        connection = connections[db]
+
+        def add_backend_converter(converters, offset, field):
+            backend_converter = connection.ops.get_field_converter(field)
+            if backend_converter:
+                converters.append(offset, backend_converter)
+        converters = []
+        for pos, col in enumerate(self.columns):
+            field = self.model_fields.get(col, None)
+            if field:
+                add_backend_converter(converters, pos, field)
+            if hasattr(field, 'convert_value'):
+                converters.append((pos, field.convert_value))
+
         # Begin looping through the query values.
         for values in query:
-            if need_resolv_columns:
-                values = compiler.resolve_columns(values, fields)
+            if converters:
+                values = list(values)
+                for pos, converter in converters:
+                    values[pos] = converter(values[pos], connection)
+                values = tuple(values)
             # Associate fields to values
             if skip:
                 model_init_kwargs = {}

@@ -16,6 +16,7 @@ class Aggregate(object):
     """
     is_ordinal = False
     is_computed = False
+    is_aggregate = True
     sql_template = '%(function)s(%(field)s)'
 
     def __init__(self, col, source=None, is_summary=False, **extra):
@@ -95,6 +96,21 @@ class Aggregate(object):
 
     def get_cols(self):
         return []
+
+    def convert_value(self, value, connection):
+        if value is None:
+            if self.is_ordinal:
+                return 0
+            # Return None as-is
+            return value
+        elif self.is_ordinal:
+            # Any ordinal aggregate (e.g., count) returns an int
+            return int(value)
+        elif self.is_computed:
+            # Any computed aggregate (e.g., avg) returns a float
+            return float(value)
+        else:
+            return connection.ops.convert_values(value, self.field)
 
 
 class Avg(Aggregate):

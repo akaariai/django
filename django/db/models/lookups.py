@@ -6,6 +6,8 @@ class UnsupportedLookup(Exception):
     pass
 
 class Col(object):
+    is_aggregate = False
+
     def __init__(self, alias, field, output_type=None):
         self.alias, self.field, self.output_type = alias, field, output_type or field
 
@@ -127,6 +129,9 @@ class SimpleLookup(Lookup):
 
     def process_lhs(self, qn, connection):
         lhs_sql, params = self.lhs.as_sql(qn, connection)
+        field_internal_type = self.lhs.output_type.get_internal_type()
+        db_type = self.lhs.output_type
+        lhs_sql = connection.ops.field_cast_sql(db_type, field_internal_type) % lhs_sql
         return connection.ops.lookup_cast(self.lookup_type) % lhs_sql, params
 
     def process_rhs(self, qn, connection):
@@ -171,7 +176,10 @@ class SimpleLookup(Lookup):
             self.field, value)
 
     def get_cols(self):
-        return self.lhs.get_cols()
+        cols = self.lhs.get_cols()
+        if hasattr(self.value, 'get_cols'):
+            cols.extend(self.value.get_cols())
+        return cols
 
     def get_lookup(self, lookup):
         if self.supports_nesting:
