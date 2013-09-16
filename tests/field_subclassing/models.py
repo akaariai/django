@@ -5,7 +5,7 @@ Tests for field subclassing.
 from django.db import models
 from django.utils.encoding import force_text
 
-from .fields import SmallField, SmallerField, JSONField
+from .fields import SmallField, SmallerField, JSONField, JSONConverterField
 from django.utils.encoding import python_2_unicode_compatible
 
 
@@ -22,3 +22,6 @@ class OtherModel(models.Model):
 
 class DataModel(models.Model):
     data = JSONField()
+
+class DataConverterModel(models.Model):
+    data = JSONConverterField()

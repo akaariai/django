@@ -1,7 +1,9 @@
 from __future__ import unicode_literals
 
+from django.db import connection
 from django.db.models import Sum
 from django.test import TestCase
+from unittest import skipUnless
 
 from .models import Author, NotEqual, FakeNotEqual, CustomIntegerField, SubCustomIntegerField
 
@@ -63,6 +65,8 @@ class CustomColumnsTests(TestCase):
             [self.a3, self.a1, self.a2],
             lambda x: x)
 
+    @skipUnless(connection.vendor == 'sqlite',
+                'Case insensitive order is database dependent')
     def test_order_by_lower(self):
         Author.objects.all().delete()
         a1 = Author.objects.create(name='A1', age=1)

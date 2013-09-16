@@ -6,7 +6,7 @@ from django.core import serializers
 from django.test import TestCase
 
 from .fields import Small
-from .models import DataModel, MyModel, OtherModel
+from .models import DataModel, MyModel, OtherModel, DataConverterModel
 
 
 class CustomField(TestCase):
@@ -104,3 +104,9 @@ class CustomField(TestCase):
         data = dict(inspect.getmembers(MyModel))
         self.assertIn('__module__', data)
         self.assertEqual(data['__module__'], 'field_subclassing.models')
+
+    def test_values_list(self):
+        data = {'asdf': ['asdf', 'bsdf']}
+        DataConverterModel.objects.create(data=data)
+        self.assertEqual(DataConverterModel.objects.get().data, data)
+        self.assertEqual(DataConverterModel.objects.values_list('data', flat=True).get(), data)

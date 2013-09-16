@@ -72,3 +72,7 @@ class JSONField(six.with_metaclass(models.SubfieldBase, models.TextField)):
         if value is None:
             return None
         return json.dumps(value)
+
+class JSONConverterField(JSONField):
+    def convert_value(self, value, connection):
+        return self.to_python(value)

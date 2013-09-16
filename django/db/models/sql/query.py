@@ -1166,8 +1166,6 @@ class Query(object):
         Returns whether or not all elements of this q_object need to be put
         together in the HAVING clause.
         """
-        if not self._aggregates:
-            return False
         if not isinstance(obj, Node):
             aggregates = dict((k, v) for k, v in self.custom_select.items() if v.is_aggregate)
             return (bool(referred_aggregate(obj[0].split(LOOKUP_SEP), aggregates)[0])
