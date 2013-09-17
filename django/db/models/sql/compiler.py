@@ -19,6 +19,7 @@ class SQLCompiler(object):
         self.connection = connection
         self.using = using
         self.quote_cache = {}
+        self.related_select_cols = []
         # When ordering a queryset with distinct on a column not part of the
         # select set, the ordering column needs to be added to the select
         # clause. This information is needed both in SQL construction and
@@ -36,10 +37,9 @@ class SQLCompiler(object):
         """
         if not self.query.tables:
             self.query.join((None, self.query.get_meta().db_table, None))
-        if (not self.query.select and self.query.default_cols and not
-                self.query.included_inherited_models):
+        if self.query.default_cols and not self.query.included_inherited_models:
             self.query.setup_inherited_models()
-        if self.query.select_related and not self.query.related_select_cols:
+        if self.query.select_related and not self.related_select_cols:
             self.fill_related_selections()
 
     def quote_name_unless_alias(self, name):
@@ -192,32 +192,16 @@ class SQLCompiler(object):
             col_aliases = aliases.copy()
         else:
             col_aliases = set()
-        if self.query.select:
-            only_load = self.deferred_to_columns()
-            for col in self.query.select:
-                if hasattr(col, 'alias') and hasattr(col, 'field'):
-                    alias, column = col.alias, col.field.column
-                    table = self.query.alias_map[alias].table_name
-                    if table in only_load and column not in only_load[table]:
-                        continue
-                col_sql, col_params = col.as_sql(qn, self.connection)
-                result.append(col_sql)
-                params.extend(col_params)
-
-                if hasattr(col, 'alias'):
-                    aliases.add(col.alias)
-                    col_aliases.add(col.alias)
-
-        elif self.query.default_cols:
-            cols, new_aliases = self.get_default_columns(with_aliases,
-                    col_aliases)
+        if self.query.default_cols:
+            cols, new_aliases = self.get_default_columns(
+                with_aliases, col_aliases)
             for col in cols:
                 sql, col_params = col.as_sql(qn, self.connection)
                 result.append(sql)
                 params.extend(col_params)
             aliases.update(new_aliases)
 
-        for col in self.query.related_select_cols:
+        for col in self.related_select_cols:
             r, col_params = col.as_sql(qn, self.connection)
             params.extend(col_params)
             if with_aliases and col.alias_label in col_aliases:
@@ -521,15 +505,18 @@ class SQLCompiler(object):
         qn = self.quote_name_unless_alias
         result, params = [], []
         if self.query.group_by is not None:
-            select_cols = self.query.select + self.query.related_select_cols
-            if (len(self.query.get_meta().concrete_fields) == len(self.query.select)
+            select_cols = self.related_select_cols
+            extra_selects = [col for col in self.query.custom_select_clause.values()
+                             if not col.is_aggregate]
+            if (self.query.default_cols and not self.related_select_cols
+                    and not extra_selects
                     and self.connection.features.allows_group_by_pk):
                 self.query.group_by = [
                     self.query.get_meta().pk.create_col(self.query.get_meta().db_table)
                 ]
                 select_cols = []
             seen = set()
-            cols = self.query.group_by + having_group_by + select_cols
+            cols = self.query.group_by + having_group_by + select_cols + extra_selects
             for col in cols:
                 col_params = ()
                 if hasattr(col, 'as_sql'):
@@ -551,15 +538,6 @@ class SQLCompiler(object):
                         result.append(order)
                         params.extend(order_params)
                         seen.add(order)
-
-            # Unconditionally add the extra_select items.
-            for col in self.query.custom_select_clause.values():
-                if col.is_aggregate:
-                    continue
-                sql, extra_params = col.as_sql(qn, self.connection)
-                result.append(sql)
-                params.extend(extra_params)
-
         return result, params
 
     def fill_related_selections(self, opts=None, root_alias=None, cur_depth=1,
@@ -577,7 +555,7 @@ class SQLCompiler(object):
         if not opts:
             opts = self.query.get_meta()
             root_alias = self.query.get_initial_alias()
-            self.query.related_select_cols = []
+            self.related_select_cols = []
         only_load = self.query.get_loaded_field_names()
 
         # Setup for the case when only particular related fields should be
@@ -603,7 +581,7 @@ class SQLCompiler(object):
             alias = joins[-1]
             columns, _ = self.get_default_columns(start_alias=alias,
                     opts=f.rel.to._meta, as_pairs=True)
-            self.query.related_select_cols.extend(columns)
+            self.related_select_cols.extend(columns)
             if restricted:
                 next = requested.get(f.name, {})
             else:
@@ -630,7 +608,7 @@ class SQLCompiler(object):
                                else None)
                 columns, _ = self.get_default_columns(start_alias=alias,
                     opts=model._meta, as_pairs=True, from_parent=from_parent)
-                self.query.related_select_cols.extend(columns)
+                self.related_select_cols.extend(columns)
                 next = requested.get(f.related_query_name(), {})
                 # Use True here because we are looking at the _reverse_ side of
                 # the relation, which is always nullable.
@@ -657,35 +635,31 @@ class SQLCompiler(object):
             if backend_converter:
                 converters.append(offset, backend_converter)
         for i, field in enumerate(self.query.custom_select_clause.values()):
-            add_backend_converter(converters, offset + i, field)
+            add_backend_converter(converters, offset + i, field.output_type)
+            # If the field itself has convert_value that overrides output_type's
+            # convert_value. Used by aggregates for example.
             if hasattr(field, 'convert_value'):
                 converters.append((offset + i, field.convert_value))
+            elif hasattr(field.output_type, 'convert_value'):
+                converters.append((offset + i, field.output_type.convert_value))
         offset = offset + len(self.query.custom_select_clause)
         only_load = self.deferred_to_columns()
-        if self.query.select:
-            for col in self.query.select:
-                table = col.field.model._meta.db_table
-                if table in only_load and col.field.column not in only_load[table]:
-                    continue
-                add_backend_converter(converters, offset, col.output_type)
-                if hasattr(col.output_type, 'convert_value'):
-                    converters.append((offset, col.output_type.convert_value))
-                offset += 1
-            for col in self.query.related_select_cols:
-                table = col.field.model._meta.db_table
-                if table in only_load and col.field.column not in only_load[table]:
-                    continue
-                add_backend_converter(converters, offset, col.output_type)
-                if hasattr(col.output_type, 'convert_value'):
-                    converters.append((offset, col.output_type.convert_value))
-                offset += 1
-        elif self.query.default_cols:
+        if self.query.default_cols:
             def_cols = self.get_default_columns()[0]
             for i, col in enumerate(def_cols):
                 add_backend_converter(converters, offset + i, col.output_type)
                 if hasattr(col.output_type, 'convert_value'):
                     converters.append((offset + i, col.output_type.convert_value))
             offset += len(def_cols)
+        else:
+            for col in self.related_select_cols:
+                table = col.field.model._meta.db_table
+                if table in only_load and col.field.column not in only_load[table]:
+                    continue
+                add_backend_converter(converters, offset, col.output_type)
+                if hasattr(col.output_type, 'convert_value'):
+                    converters.append((offset, col.output_type.convert_value))
+                offset += 1
         self.converters = converters
 
     def results_iter(self):
@@ -772,7 +746,7 @@ class SQLCompiler(object):
             sql, params = self.as_sql()
             return '%s.%s IN (%s)' % (qn(alias), qn2(columns[0]), sql), params
 
-        for index, select_col in enumerate(self.query.select):
+        for index, select_col in enumerate(self.query.custom_select_clause.values()):
             params = []
             lhs, params = select_col.as_sql(inner_qn, self.connection)
             rhs = '%s.%s' % (qn(alias), qn2(columns[index]))
@@ -970,8 +944,7 @@ class SQLUpdateCompiler(SQLCompiler):
         # We need to use a sub-select in the where clause to filter on things
         # from other tables.
         query = self.query.clone(klass=Query)
-        query._extra = {}
-        query.select = []
+        query.clear_select_clause()
         query.add_fields([query.get_meta().pk.name])
         # Recheck the count - it is possible that fiddling with the select
         # fields above removes tables from the query. Refs #18304.

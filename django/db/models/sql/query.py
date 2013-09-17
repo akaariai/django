@@ -10,9 +10,8 @@ all about the internals of models in order to get the information it needs.
 class RawSQL(object):
     is_aggregate = False
 
-    def __init__(self, sql, params, output_type, to_label):
+    def __init__(self, sql, params, output_type):
         self.sql, self.params, self.output_type, self.field = sql, params, output_type, output_type
-        self.label = to_label
 
     def as_sql(self, qn, connection):
         return '(' + self.sql + ')', self.params
@@ -129,11 +128,7 @@ class Query(object):
         # The select is used for cases where we want to set up the select
         # clause to contain other than default fields (values(), annotate(),
         # subqueries...). The select clauses should respond to Col API.
-        self.select = []
         self.custom_select = OrderedDict()
-        # The related_select_cols is used for columns needed for
-        # select_related - this is populated in compile stage.
-        self.related_select_cols = []
         self.tables = []    # Aliases in the order they are created.
         self.where = where()
         self.where_class = where
@@ -242,9 +237,7 @@ class Query(object):
         obj.default_ordering = self.default_ordering
         obj.standard_ordering = self.standard_ordering
         obj.included_inherited_models = self.included_inherited_models.copy()
-        obj.select = self.select[:]
         obj.custom_select = self.custom_select.copy()
-        obj.related_select_cols = []
         obj.tables = self.tables[:]
         obj.where = self.where.clone()
         obj.where_class = self.where_class
@@ -260,7 +253,6 @@ class Query(object):
         obj.select_for_update = self.select_for_update
         obj.select_for_update_nowait = self.select_for_update_nowait
         obj.select_related = self.select_related
-        obj.related_select_cols = []
         if self.aggregate_select_mask is None:
             obj.aggregate_select_mask = None
         else:
@@ -326,7 +318,6 @@ class Query(object):
                 obj.clear_limits()
             obj.select_for_update = False
             obj.select_related = False
-            obj.related_select_cols = []
 
             relabels = dict((t, 'subquery') for t in self.tables)
             # Remove any aggregates marked for reduction from the subquery
@@ -345,7 +336,6 @@ class Query(object):
                 )
         else:
             query = self
-            self.select = []
             self.default_cols = False
             self.set_custom_select_mask(k for k in self.aggregate_select)
             self.remove_inherited_models()
@@ -354,7 +344,6 @@ class Query(object):
         query.clear_limits()
         query.select_for_update = False
         query.select_related = False
-        query.related_select_cols = []
 
         result = query.get_compiler(using).execute_sql(SINGLE)
         if result is None:
@@ -371,8 +360,7 @@ class Query(object):
         Performs a COUNT() query using the current filter constraints.
         """
         obj = self.clone()
-        if len(self.select) > 1 or self.custom_select_clause or self.aggregate_select or (
-                self.distinct and self.distinct_fields):
+        if self.custom_select_clause or (self.distinct and self.distinct_fields):
             # If a select clause exists, then the query has already started to
             # specify the columns that are to be returned.
             # In this case, we need to use a subquery to evaluate the count.
@@ -502,9 +490,6 @@ class Query(object):
         else:
             w = self.where_class()
         self.where.add(w, connector)
-
-        # Selection columns and extra extensions are those provided by 'rhs'.
-        self.select = [col.relabeled_clone(change_map) for col in rhs.select]
 
         if connector == OR:
             # It would be nice to be able to handle this, but the queries don't
@@ -731,7 +716,6 @@ class Query(object):
         self.having.relabel_aliases(change_map)
         if self.group_by:
             self.group_by = [col.relabeled_clone(change_map) for col in self.group_by]
-        self.select = [s.relabeled_clone(change_map) for s in self.select]
         self.custom_select = OrderedDict(
             (key, col.relabeled_clone(change_map))
             for key, col in self.custom_select.items())
@@ -1436,6 +1420,7 @@ class Query(object):
         query = Query(self.model)
         query.where.add(query.build_filter(filter_expr), AND)
         query.clear_ordering(True)
+        query.clear_select_clause()
         # Try to have as simple as possible subquery -> trim leading joins from
         # the subquery.
         trimmed_prefix, contains_louter = query.trim_start(names_with_path)
@@ -1445,12 +1430,12 @@ class Query(object):
         # since we are adding a IN <subquery> clause. This prevents the
         # database from tripping over IN (...,NULL,...) selects and returning
         # nothing
-        if self.is_nullable(query.select[0].field):
-            column = query.select[0]
+        first_custom_select = list(query.custom_select_clause.values())[0]
+        if self.is_nullable(list(query.custom_select_clause.values())[0].field):
             query.where.add(
-                query.select[0].field.get_lookup('isnull').build_lookup(
-                    self.no_op_rewriter, [column],
-                    query.select[0].output_type, self.where_class, False),
+                first_custom_select.field.get_lookup('isnull').build_lookup(
+                    self.no_op_rewriter, [first_custom_select],
+                    first_custom_select.output_type, self.where_class, False),
                 AND)
 
         condition = self.build_filter(
@@ -1515,18 +1500,9 @@ class Query(object):
         """
         Removes all fields from SELECT clause.
         """
-        self.select = []
         self.default_cols = False
         self.select_related = False
         self.set_custom_select_mask(())
-
-    def clear_select_fields(self):
-        """
-        Clears the list of fields to select (but not extra_select columns).
-        Some queryset types completely replace any existing list of select
-        columns.
-        """
-        self.select = []
 
     def add_distinct_fields(self, *field_names):
         """
@@ -1552,14 +1528,14 @@ class Query(object):
                 targets, final_alias, joins = self.trim_joins(targets, joins, path)
                 assert len(targets) == 1
                 if lookups:
-                    extracts = [self.build_lookup(
+                    extract = self.build_lookup(
                         lookups, field, targets[0].create_col(final_alias, field),
-                        NoValueMarker, set())[0]]
+                        NoValueMarker, set())[0]
                 else:
-                    extracts = [targets[0].create_col(final_alias, field)]
-
+                    extract = targets[0].create_col(final_alias, field)
                 self.promote_joins(joins)
-                self.select.extend(extracts)
+                self.custom_select[name] = extract
+                self.append_custom_select_mask([name])
         except MultiJoin:
             raise FieldError("Invalid field name: '%s'" % name)
         except FieldError:
@@ -1614,7 +1590,9 @@ class Query(object):
         """
         self.group_by = []
 
-        for col in self.select:
+        for col in self.custom_select_clause.values():
+            if col.is_aggregate:
+                continue
             self.group_by.append(col)
 
     def add_count_column(self):
@@ -1623,25 +1601,25 @@ class Query(object):
         get its size.
         """
         if not self.distinct:
-            if not self.select:
+            if not self.custom_select_clause:
                 count = self.aggregates_module.Count('*', is_summary=True)
             else:
-                assert len(self.select) == 1, \
+                assert len(self.custom_select_clause) == 1, \
                         "Cannot add count col with multiple cols in 'select': %r" % self.select
-                count = self.aggregates_module.Count(self.select[0])
+                count = self.aggregates_module.Count(self.custom_select_clause[0])
         else:
             opts = self.get_meta()
-            if not self.select:
+            if not self.custom_select_clause:
                 count = self.aggregates_module.Count(
                     (self.join((None, opts.db_table, None)), opts.pk.column),
                     is_summary=True, distinct=True)
             else:
                 # Because of SQL portability issues, multi-column, distinct
                 # counts need a sub-query -- see get_count() for details.
-                assert len(self.select) == 1, \
+                assert len(self.custom_select_clause) == 1, \
                         "Cannot add count col with multiple cols in 'select'."
 
-                count = self.aggregates_module.Count(self.select[0], distinct=True)
+                count = self.aggregates_module.Count(self.custom_select_clause[0], distinct=True)
             # Distinct handling is done in Count(), so don't do it at this
             # level.
             self.distinct = False
@@ -1664,7 +1642,6 @@ class Query(object):
             for part in field.split(LOOKUP_SEP):
                 d = d.setdefault(part, {})
         self.select_related = field_dict
-        self.related_select_cols = []
 
     def add_extra(self, select, select_params, where, params, tables, order_by):
         """
@@ -1688,7 +1665,7 @@ class Query(object):
                 while pos != -1:
                     entry_params.append(next(param_iter))
                     pos = entry.find("%s", pos + 2)
-                select_pairs[name] = RawSQL(entry, entry_params, Field(), name)
+                select_pairs[name] = RawSQL(entry, entry_params, Field())
             # This is order preserving, since self.extra_select is an OrderedDict.
             self.custom_select.update(select_pairs)
         if where or params:
@@ -1789,6 +1766,17 @@ class Query(object):
             self.custom_select_mask = set(names)
         self._custom_select_cache = None
 
+    def reorder_custom_select(self, names):
+        """
+        Push names to front of custom_select. The names must exists in
+        self.custom_select. Rest of custom_select is appended in order to
+        the new custom_select.
+        """
+        new_custom_select = [(name, self.custom_select.pop(name)) for name in names]
+        new_custom_select.extend((k, v) for k, v in self.custom_select.items())
+        self.custom_select = OrderedDict(new_custom_select)
+        self._custom_select_cache = None
+
     @property
     def aggregate_select(self):
         """The OrderedDict of aggregate columns that are not masked, and should
@@ -1810,6 +1798,10 @@ class Query(object):
                 if v.is_aggregate
             )
             return self._aggregate_select_cache
+
+    @property
+    def select(self):
+        raise AttributeError("I do not exist")
 
     @property
     def custom_select_clause(self):
@@ -1877,7 +1869,10 @@ class Query(object):
             # values in select_fields. Lets punt this one for now.
             select_fields = [r[1] for r in join_field.related_fields]
             select_alias = self.tables[pos]
-        self.select = [f.create_col(select_alias) for f in select_fields]
+        self.custom_select = OrderedDict(
+            (select_alias, f.create_col(select_alias)) for f in select_fields)
+        self.set_custom_select_mask(None)
+        self.default_cols = False
         return trimmed_prefix, contains_louter
 
     def is_nullable(self, field):

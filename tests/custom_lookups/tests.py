@@ -49,6 +49,17 @@ class CustomColumnsTests(TestCase):
             Author.objects.values_list('age__div3', flat=True),
             [1, 2, 0], lambda x: x)
 
+    def test_values(self):
+        self.assertQuerysetEqual(
+            Author.objects.values('age__div3', 'age'),
+            [
+                {'age__div3': 1, 'age': 1},
+                {'age__div3': 2, 'age': 2},
+                {'age__div3': 0, 'age': 3}
+            ],
+            lambda x: x
+        )
+
     def test_annotate(self):
         self.assertQuerysetEqual(
             Author.objects.annotate(div3_sum=Sum('age__div3')),

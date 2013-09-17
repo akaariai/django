@@ -408,33 +408,29 @@ class GeoQuerySet(QuerySet):
         tmp, geo_field = self._spatial_setup('transform', field_name=field_name)
 
         # Getting the selection SQL for the given geographic field.
-        field_col = GeoRawSQL(self._geocol_select(geo_field, field_name), [], geo_field,
-                           geo_field.attname)
+        field_col = GeoRawSQL(self._geocol_select(geo_field, field_name), [], geo_field)
+        label = geo_field.attname
 
         # Why cascading substitutions? Because spatial backends like
         # Oracle and MySQL already require a function call to convert to text, thus
         # when there's also a transformation we need to cascade the substitutions.
         # For example, 'SDO_UTIL.TO_WKTGEOMETRY(SDO_CS.TRANSFORM( ... )'
-        key = None
         for key, field in self.query.custom_select.items():
             if key == geo_field:
                 field_col = field
+                label = key
                 break
 
         # Setting the key for the field's column with the custom SELECT SQL to
         # override the geometry column returned from the database.
         sql, params = field_col.as_sql(connections[self.db].ops.quote_name, connections[self.db])
         custom_sel = '%s(%s, %s)' % (connections[self.db].ops.transform, sql, srid)
-        # TODO: Should we have this as an alias?
-        # custom_sel = '(%s(%s, %s)) AS %s' % (SpatialBackend.transform, geo_col, srid, qn(geo_field.name))
-        self.query.transformed_srid = srid # So other GeoQuerySet methods
+        self.query.transformed_srid = srid  # So other GeoQuerySet methods
         if key:
-            self.query.custom_select[key] = GeoRawSQL(custom_sel, params, field_col.output_type,
-                                                      field_col.label)
+            self.query.custom_select[label] = GeoRawSQL(custom_sel, params, field_col.output_type)
         else:
-            self.query.custom_select[field_col.label] = (
-                GeoRawSQL(custom_sel, params, field_col.output_type,
-                       field_col.label))
+            self.query.custom_select[label] = (
+                GeoRawSQL(custom_sel, params, field_col.output_type))
         return self._clone()
 
     def union(self, geom, **kwargs):
@@ -595,7 +591,7 @@ class GeoQuerySet(QuerySet):
         # arguments.
         clone.query.custom_select[model_att] = (
             GeoRawSQL(fmt % settings['procedure_args'], settings['select_params'],
-                      sel_fld, model_att))
+                      sel_fld))
         return clone
 
     def _distance_attribute(self, func, geom=None, tolerance=0.05, spheroid=False, **kwargs):
@@ -786,10 +782,10 @@ class GeoQuerySet(QuerySet):
             compiler = self.query.get_compiler(self.db)
             # How beautiful...
             compiler.pre_sql_setup()
-            for col in self.query.related_select_cols:
+            for col in compiler.related_select_cols:
                 if col.field == geo_field:
                     return col.as_sql(compiler.quote_name_unless_alias, compiler.connection)[0]
-            raise ValueError("%r not in self.query.related_select_cols" % geo_field)
+            raise ValueError("%r not in compiler's related_select_cols" % geo_field)
         elif not geo_field in opts.local_fields:
             # This geographic field is inherited from another model, so we have to
             # use the db table for the _parent_ model instead.

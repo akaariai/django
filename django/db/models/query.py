@@ -214,7 +214,7 @@ class QuerySet(object):
             requested = None
         max_depth = self.query.max_depth
 
-        custom_select = list(self.query.custom_select_clause)
+        custom_select = list(enumerate(self.query.custom_select_clause))
 
         only_load = self.query.get_loaded_field_names()
         if not fill_cache:
@@ -237,8 +237,6 @@ class QuerySet(object):
                     load_fields.append(field.name)
 
         index_start = len(custom_select)
-        aggregate_start = index_start + len(load_fields or self.model._meta.concrete_fields)
-
         skip = None
         if load_fields and not fill_cache:
             # Some fields have been deferred, so we have to initialise
@@ -277,7 +275,7 @@ class QuerySet(object):
                 obj._state.adding = False
 
             if custom_select:
-                for i, label in enumerate(custom_select):
+                for i, label in custom_select:
                     setattr(obj, label, row[i])
 
             # Add the known related objects to the model, if there are any
@@ -1042,19 +1040,17 @@ class EmptyQuerySet(six.with_metaclass(InstanceCheckMeta)):
 class ValuesQuerySet(QuerySet):
     def __init__(self, *args, **kwargs):
         super(ValuesQuerySet, self).__init__(*args, **kwargs)
-        # select_related isn't supported in values(). (FIXME -#3358)
+        # select_related doesn't make sense with .values()
         self.query.select_related = False
 
         # QuerySet.clone() will also set up the _fields attribute with the
         # names of the model fields to select.
 
     def iterator(self):
-        # Purge any extra columns that haven't been explicitly asked for
-        custom_names = list(self.query.custom_select_clause)
-        field_names = self.field_names
-
-        names = custom_names + field_names
-
+        # If there isn't defined fields, then add all fields in custom_select
+        if not self._fields:
+            self.query.set_custom_select_mask(None)
+        names = list(self.query.custom_select_clause) + self.field_names
         for row in self.query.get_compiler(self.db).results_iter():
             yield dict(zip(names, row))
 
@@ -1073,7 +1069,7 @@ class ValuesQuerySet(QuerySet):
         instance.
         """
         self.query.clear_deferred_loading()
-        self.query.clear_select_fields()
+        self.query.clear_select_clause()
 
         if self._fields:
             self.custom_names = []
@@ -1082,25 +1078,33 @@ class ValuesQuerySet(QuerySet):
                 # the values() clause must be just field names.
                 self.field_names = list(self._fields)
             else:
-                self.query.default_cols = False
                 self.field_names = []
                 for f in self._fields:
                     # we inspect the full extra_select list since we might
                     # be adding back an extra select item that we hadn't
                     # had selected previously.
-                    if f in self.query.custom_select_clause:
+                    if f in self.query.custom_select:
                         self.custom_names.append(f)
                     else:
                         self.field_names.append(f)
         else:
             # Default to all fields.
-            self.custom_names = None
-            self.field_names = [f.attname for f in self.model._meta.concrete_fields]
+            self.custom_names = list(self.query.custom_select)
+            # Hilariously enough primary_key is historically last field in select.
+            # Reason unknown.
+            self.field_names = [f.attname for f in self.model._meta.concrete_fields
+                                if not f.primary_key and f.attname not in self.query.custom_select]
+            pk_attname = self.model._meta.pk.attname
+            if pk_attname not in self.query.custom_select:
+                self.field_names.append(pk_attname)
 
-        self.query.select = []
         if self.custom_names is not None:
             self.query.set_custom_select_mask(self.custom_names)
         self.query.add_fields(self.field_names, True)
+        if self._fields:
+            self.query.reorder_custom_select(self._fields)
+        else:
+            self.query.reorder_custom_select(self.field_names + self.custom_names)
 
     def _clone(self, klass=None, setup=False, **kwargs):
         """
@@ -1172,30 +1176,18 @@ class ValuesQuerySet(QuerySet):
 
 class ValuesListQuerySet(ValuesQuerySet):
     def iterator(self):
+        # Again, no defined fields - add everything in query to select.
+        if not self._fields:
+            self.query.set_custom_select_mask(None)
         if self.flat and len(self._fields) == 1:
             for row in self.query.get_compiler(self.db).results_iter():
                 yield row[0]
-        elif not self.query.custom_select_clause:
+        else:
+            # Note that for this case we must be extra careful to have
+            # the fields in correct order. ValuesQuerySet has all the
+            # dirty details.
             for row in self.query.get_compiler(self.db).results_iter():
                 yield tuple(row)
-        else:
-            # When extra(select=...) or an annotation is involved, the extra
-            # cols are always at the start of the row, and we need to reorder
-            # the fields to match the order in self._fields.
-            custom_names = list(self.query.custom_select_clause)
-            field_names = self.field_names
-            names = custom_names + field_names
-
-            # If a field list has been specified, use it. Otherwise, use the
-            # full list of fields, including extras and aggregates.
-            if self._fields:
-                fields = list(self._fields) + [f for f in custom_names if f not in self._fields]
-            else:
-                fields = names
-
-            for row in self.query.get_compiler(self.db).results_iter():
-                data = dict(zip(names, row))
-                yield tuple(data[f] for f in fields)
 
     def _clone(self, *args, **kwargs):
         clone = super(ValuesListQuerySet, self)._clone(*args, **kwargs)
@@ -1218,7 +1210,7 @@ class DateQuerySet(QuerySet):
         """
         self.query.clear_deferred_loading()
         self.query = self.query.clone(klass=sql.DateQuery, setup=True)
-        self.query.select = []
+        self.query.clear_select_clause()
         self.query.add_select(self._field_name, self._kind, self._order)
 
     def _clone(self, klass=None, setup=False, **kwargs):
@@ -1243,7 +1235,7 @@ class DateTimeQuerySet(QuerySet):
         """
         self.query.clear_deferred_loading()
         self.query = self.query.clone(klass=sql.DateTimeQuery, setup=True, tzinfo=self._tzinfo)
-        self.query.select = []
+        self.query.clear_select_clause()
         self.query.add_select(self._field_name, self._kind, self._order)
 
     def _clone(self, klass=None, setup=False, **kwargs):

@@ -81,9 +81,8 @@ class DeleteQuery(Query):
                 return
             else:
                 innerq.clear_select_clause()
-                innerq.select = [
-                    Col(self.get_initial_alias(), pk)
-                ]
+                innerq.custom_select = {None: Col(self.get_initial_alias(), pk)}
+                innerq.set_custom_select_mask(None)
                 values = innerq
             where = self.where_class()
             where.add(pk.get_lookup('in').build_lookup(
