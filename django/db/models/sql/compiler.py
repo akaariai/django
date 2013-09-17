@@ -51,7 +51,7 @@ class SQLCompiler(object):
         if name in self.quote_cache:
             return self.quote_cache[name]
         if ((name in self.query.alias_map and name not in self.query.table_map) or
-                name in self.query.custom_select):
+                name in self.query.custom_select_clause):
             self.quote_cache[name] = name
             return name
         r = self.connection.ops.quote_name(name)
@@ -341,7 +341,7 @@ class SQLCompiler(object):
                     if not distinct or elt in select_aliases:
                         result.append('%s %s' % (elt, order))
                         group_by.append((elt, []))
-            elif col not in self.query.custom_select:
+            elif not self.query._custom_select or col not in self.query._custom_select:
                 # 'col' is of the form 'field' or 'field1__field2' or
                 # '-field1__field2__field', etc.
                 for col, order in self.find_ordering_name(field,

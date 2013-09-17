@@ -1075,7 +1075,7 @@ class ValuesQuerySet(QuerySet):
 
         if self._fields:
             self.custom_names = []
-            if not self.query.custom_select:
+            if not self.query._custom_select:
                 # Short cut - if there are no extra or aggregates, then
                 # the values() clause must be just field names.
                 self.field_names = list(self._fields)
@@ -1091,7 +1091,7 @@ class ValuesQuerySet(QuerySet):
                         self.field_names.append(f)
         else:
             # Default to all fields.
-            self.custom_names = list(self.query.custom_select)
+            self.custom_names = list(self.query._custom_select or [])
             self.field_names = [f.attname for f in self.model._meta.concrete_fields
                                 if f.attname not in self.query.custom_select]
 

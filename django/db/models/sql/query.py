@@ -128,7 +128,7 @@ class Query(object):
         # The select is used for cases where we want to set up the select
         # clause to contain other than default fields (values(), annotate(),
         # subqueries...). The select clauses should respond to Col API.
-        self.custom_select = OrderedDict()
+        self._custom_select = None
         self.tables = []    # Aliases in the order they are created.
         self.where = where()
         self.where_class = where
@@ -237,7 +237,10 @@ class Query(object):
         obj.default_ordering = self.default_ordering
         obj.standard_ordering = self.standard_ordering
         obj.included_inherited_models = self.included_inherited_models.copy()
-        obj.custom_select = self.custom_select.copy()
+        if self._custom_select:
+            obj._custom_select = self._custom_select.copy()
+        else:
+            obj._custom_select = None
         obj.tables = self.tables[:]
         obj.where = self.where.clone()
         obj.where_class = self.where_class
@@ -495,11 +498,16 @@ class Query(object):
             # It would be nice to be able to handle this, but the queries don't
             # really make sense (or return consistent value sets). Not worth
             # the extra complexity when you can write a real query instead.
-            if self.custom_select and rhs.custom_select:
+            if self._custom_select and rhs._custom_select:
                 raise ValueError(
                     "When merging querysets using 'or', you "
                     "cannot have extra selects on both sides.")
-        self.custom_select.update(rhs.custom_select)
+        if self._custom_select:
+            if rhs._custom_select:
+                self._custom_select.update(rhs._custom_select)
+        elif rhs._custom_select:
+            # Note - property will create a custom_select for us.
+            self.custom_select.update(rhs._custom_select)
         custom_select_mask = set()
         if self.custom_select_mask is not None:
             custom_select_mask.update(self.custom_select_mask)
@@ -716,9 +724,10 @@ class Query(object):
         self.having.relabel_aliases(change_map)
         if self.group_by:
             self.group_by = [col.relabeled_clone(change_map) for col in self.group_by]
-        self.custom_select = OrderedDict(
-            (key, col.relabeled_clone(change_map))
-            for key, col in self.custom_select.items())
+        if self._custom_select:
+            self._custom_select = OrderedDict(
+                (key, col.relabeled_clone(change_map))
+                for key, col in self._custom_select.items())
 
         # 2. Rename the alias in the internal table/alias datastructures.
         for ident, aliases in self.join_map.items():
@@ -928,7 +937,10 @@ class Query(object):
         """
         opts = model._meta
         field_list = aggregate.lookup.split(LOOKUP_SEP)
-        aggregates = dict((k, v) for k, v in self.custom_select.items() if v.is_aggregate)
+        if self._custom_select:
+            aggregates = dict((k, v) for k, v in self.custom_select.items() if v.is_aggregate)
+        else:
+            aggregates = {}
         if len(field_list) == 1 and aggregate.lookup in aggregates:
             # Aggregate is over an annotation
             field_name = field_list[0]
@@ -1080,7 +1092,7 @@ class Query(object):
 
         clause = self.where_class()
         # Check if this is a reference to an existing select clause.
-        reffed_clause, lookups = referred_aggregate(parts, self.custom_select)
+        reffed_clause, lookups = referred_aggregate(parts, self._custom_select or {})
         if reffed_clause:
             lookup, _ = self.build_lookup(lookups, reffed_clause, reffed_clause, value,
                                           can_reuse)
@@ -1151,7 +1163,10 @@ class Query(object):
         together in the HAVING clause.
         """
         if not isinstance(obj, Node):
-            aggregates = dict((k, v) for k, v in self.custom_select.items() if v.is_aggregate)
+            if self._custom_select:
+                aggregates = dict((k, v) for k, v in self.custom_select.items() if v.is_aggregate)
+            else:
+                aggregates = {}
             return (bool(referred_aggregate(obj[0].split(LOOKUP_SEP), aggregates)[0])
                     or (hasattr(obj[1], 'contains_aggregate')
                         and obj[1].contains_aggregate(aggregates)))
@@ -1320,7 +1335,7 @@ class Query(object):
             else:
                 raise FieldError("Join on field %r not permitted." % names[0])
 
-        available = opts.get_all_field_names() + list(self.custom_select)
+        available = opts.get_all_field_names() + list(self._custom_select or [])
         raise FieldError("Cannot resolve keyword %r into field. "
                          "Choices are: %s" % (names[0], ", ".join(available)))
 
@@ -1590,10 +1605,11 @@ class Query(object):
         """
         self.group_by = []
 
-        for col in self.custom_select_clause.values():
-            if col.is_aggregate:
-                continue
-            self.group_by.append(col)
+        if self._custom_select:
+            for col in self.custom_select_clause.values():
+                if col.is_aggregate:
+                    continue
+                self.group_by.append(col)
 
     def add_count_column(self):
         """
@@ -1626,7 +1642,7 @@ class Query(object):
 
         # Set only aggregate to be the count column.
         # Clear out the select cache to reflect the new unmasked aggregates.
-        self.custom_select = {None: count}
+        self._custom_select = {None: count}
         self.set_custom_select_mask(None)
         self.group_by = None
 
@@ -1772,9 +1788,11 @@ class Query(object):
         self.custom_select. Rest of custom_select is appended in order to
         the new custom_select.
         """
+        if not self._custom_select and names:
+            raise ValueError("Trying to reorder nonexistent custom_select")
         new_custom_select = [(name, self.custom_select.pop(name)) for name in names]
         new_custom_select.extend((k, v) for k, v in self.custom_select.items())
-        self.custom_select = OrderedDict(new_custom_select)
+        self._custom_select = OrderedDict(new_custom_select)
         self._custom_select_cache = None
 
     @property
@@ -1786,6 +1804,8 @@ class Query(object):
         """
         if self._aggregate_select_cache is not None:
             return self._aggregate_select_cache
+        if not self._custom_select or not any(v.is_aggregate for v in self._custom_select.values()):
+            return {}
         elif self.custom_select_mask is not None:
             self._aggregate_select_cache = OrderedDict(
                 (k, v) for k, v in self.custom_select.items()
@@ -1793,10 +1813,13 @@ class Query(object):
             )
             return self._aggregate_select_cache
         else:
-            self._aggregate_select_cache = OrderedDict(
-                (k, v) for k, v in self.custom_select.items()
-                if v.is_aggregate
-            )
+            if all(v.is_aggregate for v in self._custom_select.values()):
+                self._aggregate_select_cache = self._custom_select
+            else:
+                self._aggregate_select_cache = OrderedDict(
+                    (k, v) for k, v in self.custom_select.items()
+                    if v.is_aggregate
+                )
             return self._aggregate_select_cache
 
     @property
@@ -1804,9 +1827,17 @@ class Query(object):
         raise AttributeError("I do not exist")
 
     @property
+    def custom_select(self):
+        if not self._custom_select:
+            self._custom_select = OrderedDict()
+        return self._custom_select
+
+    @property
     def custom_select_clause(self):
         if self._custom_select_cache is not None:
             return self._custom_select_cache
+        if not self._custom_select:
+            return {}
         elif self.custom_select_mask is not None:
             self._custom_select_cache = OrderedDict(
                 (k, v) for k, v in self.custom_select.items()
@@ -1869,7 +1900,7 @@ class Query(object):
             # values in select_fields. Lets punt this one for now.
             select_fields = [r[1] for r in join_field.related_fields]
             select_alias = self.tables[pos]
-        self.custom_select = OrderedDict(
+        self._custom_select = OrderedDict(
             (select_alias, f.create_col(select_alias)) for f in select_fields)
         self.set_custom_select_mask(None)
         self.default_cols = False
