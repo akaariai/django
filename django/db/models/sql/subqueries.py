@@ -81,8 +81,7 @@ class DeleteQuery(Query):
                 return
             else:
                 innerq.clear_select_clause()
-                innerq._custom_select = {None: Col(self.get_initial_alias(), pk)}
-                innerq.set_custom_select_mask(None)
+                innerq.set_custom_select([(None, Col(self.get_initial_alias(), pk))])
                 values = innerq
             where = self.where_class()
             where.add(pk.get_lookup('in').build_lookup(
@@ -238,8 +237,7 @@ class DateQuery(Query):
         alias = result[3][-1]
         select = self._get_select(alias, field, lookup_type)
         self.clear_select_clause()
-        self._custom_select = {'_dateselect': select}
-        self.set_custom_select_mask(['_dateselect'])
+        self.set_custom_select([('_dateselect', select)])
         self.distinct = True
         self.order_by = [1] if order == 'ASC' else [-1]
 

@@ -60,7 +60,7 @@ class Aggregate(object):
         """
         klass = getattr(query.aggregates_module, self.name)
         aggregate = klass(col, source=source, is_summary=is_summary, **self.extra)
-        query.custom_select[alias] = aggregate
+        query.add_custom_select(alias, aggregate)
 
 
 class Avg(Aggregate):

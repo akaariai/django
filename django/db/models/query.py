@@ -214,7 +214,7 @@ class QuerySet(object):
             requested = None
         max_depth = self.query.max_depth
 
-        custom_select = list(enumerate(self.query.custom_select_clause))
+        custom_select = list(enumerate(k for k, _ in self.query.custom_select_clause))
 
         only_load = self.query.get_loaded_field_names()
         if not fill_cache:
@@ -1049,10 +1049,11 @@ class ValuesQuerySet(QuerySet):
     def iterator(self):
         # If there isn't defined fields, then add all fields in custom_select
         if not self._fields:
-            new_fields = [f for f in self.query.custom_select if f not in self.query.custom_select_clause]
-            self.query.set_custom_select_mask(None)
-            self.query.reorder_custom_select(new_fields)
-        names = list(self.query.custom_select_clause)
+            self.query.reorder_for_no_fields_values()
+        else:
+            self.query.set_custom_select_mask(self._fields)
+            self.query.reorder_custom_select(self._fields)
+        names = list(f for f, _ in self.query.custom_select_clause)
         for row in self.query.get_compiler(self.db).results_iter():
             yield dict(zip(names, row))
 
@@ -1075,7 +1076,7 @@ class ValuesQuerySet(QuerySet):
 
         if self._fields:
             self.custom_names = []
-            if not self.query._custom_select:
+            if not self.query.custom_select:
                 # Short cut - if there are no extra or aggregates, then
                 # the values() clause must be just field names.
                 self.field_names = list(self._fields)
@@ -1091,17 +1092,13 @@ class ValuesQuerySet(QuerySet):
                         self.field_names.append(f)
         else:
             # Default to all fields.
-            self.custom_names = list(self.query._custom_select or [])
+            self.custom_names = self.query.custom_select_ordering
             self.field_names = [f.attname for f in self.model._meta.concrete_fields
-                                if f.attname not in self.query.custom_select]
+                                if f.attname not in self.custom_names]
 
         if self.custom_names is not None:
             self.query.set_custom_select_mask(self.custom_names)
         self.query.add_fields(self.field_names, True)
-        if self._fields:
-            self.query.reorder_custom_select(self._fields)
-        else:
-            self.query.reorder_custom_select(self.custom_names + self.field_names)
 
     def _clone(self, klass=None, setup=False, **kwargs):
         """
@@ -1131,14 +1128,8 @@ class ValuesQuerySet(QuerySet):
         """
         self.query.set_group_by()
 
-        if self.custom_names is not None:
-            self.custom_names.extend(aggregates)
-            non_aggregate_select = [
-                n for n, col in self.query.custom_select_clause.items()
-                if not col.is_aggregate]
-            self.query.set_custom_select_mask(
-                non_aggregate_select + self.custom_names)
-
+        if self._fields:
+            self._fields += tuple(aggregates)
         super(ValuesQuerySet, self)._setup_aggregate_query(aggregates)
 
     def _as_sql(self, connection):
@@ -1155,6 +1146,8 @@ class ValuesQuerySet(QuerySet):
                     % self.__class__.__name__)
 
         obj = self._clone()
+        if self._fields:
+            obj.query.set_custom_select_mask(self._fields)
         if obj._db is None or connection == connections[obj._db]:
             return obj.query.get_compiler(connection=connection).as_nested_sql()
         raise ValueError("Can't do subqueries with queries on different DBs.")
@@ -1175,9 +1168,10 @@ class ValuesListQuerySet(ValuesQuerySet):
     def iterator(self):
         # Again, no defined fields - add everything in query to select.
         if not self._fields:
-            new_fields = [f for f in self.query.custom_select if f not in self.query.custom_select_clause]
-            self.query.set_custom_select_mask(None)
-            self.query.reorder_custom_select(new_fields)
+            self.query.reorder_for_no_fields_values()
+        else:
+            self.query.set_custom_select_mask(self._fields)
+            self.query.reorder_custom_select(self._fields)
         if self.flat and len(self._fields) == 1:
             for row in self.query.get_compiler(self.db).results_iter():
                 yield row[0]
