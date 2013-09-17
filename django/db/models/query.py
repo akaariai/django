@@ -1049,8 +1049,10 @@ class ValuesQuerySet(QuerySet):
     def iterator(self):
         # If there isn't defined fields, then add all fields in custom_select
         if not self._fields:
+            new_fields = [f for f in self.query.custom_select if f not in self.query.custom_select_clause]
             self.query.set_custom_select_mask(None)
-        names = list(self.query.custom_select_clause) + self.field_names
+            self.query.reorder_custom_select(new_fields)
+        names = list(self.query.custom_select_clause)
         for row in self.query.get_compiler(self.db).results_iter():
             yield dict(zip(names, row))
 
@@ -1090,13 +1092,8 @@ class ValuesQuerySet(QuerySet):
         else:
             # Default to all fields.
             self.custom_names = list(self.query.custom_select)
-            # Hilariously enough primary_key is historically last field in select.
-            # Reason unknown.
             self.field_names = [f.attname for f in self.model._meta.concrete_fields
-                                if not f.primary_key and f.attname not in self.query.custom_select]
-            pk_attname = self.model._meta.pk.attname
-            if pk_attname not in self.query.custom_select:
-                self.field_names.append(pk_attname)
+                                if f.attname not in self.query.custom_select]
 
         if self.custom_names is not None:
             self.query.set_custom_select_mask(self.custom_names)
@@ -1104,7 +1101,7 @@ class ValuesQuerySet(QuerySet):
         if self._fields:
             self.query.reorder_custom_select(self._fields)
         else:
-            self.query.reorder_custom_select(self.field_names + self.custom_names)
+            self.query.reorder_custom_select(self.custom_names + self.field_names)
 
     def _clone(self, klass=None, setup=False, **kwargs):
         """
@@ -1178,7 +1175,9 @@ class ValuesListQuerySet(ValuesQuerySet):
     def iterator(self):
         # Again, no defined fields - add everything in query to select.
         if not self._fields:
+            new_fields = [f for f in self.query.custom_select if f not in self.query.custom_select_clause]
             self.query.set_custom_select_mask(None)
+            self.query.reorder_custom_select(new_fields)
         if self.flat and len(self._fields) == 1:
             for row in self.query.get_compiler(self.db).results_iter():
                 yield row[0]

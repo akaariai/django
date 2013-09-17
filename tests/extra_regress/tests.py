@@ -217,14 +217,14 @@ class ExtraRegressTests(TestCase):
         # Values list works the same way
         # All columns are returned for an empty values_list()
         self.assertEqual(
-            list(TestObject.objects.extra(select=OrderedDict((('foo','first'), ('bar','second'), ('whiz','third')))).values_list()),
-            [('first', 'second', 'third', obj.pk, 'first', 'second', 'third')]
+            list(TestObject.objects.extra(select=OrderedDict((('foo',"'first_extra'"), ('bar',"'second_extra'"), ('whiz', "'third_extra'")))).values_list()),
+            [('first_extra', 'second_extra', 'third_extra', obj.pk, 'first', 'second', 'third')]
         )
 
         # Extra columns after an empty values_list() are still included
         self.assertEqual(
-            list(TestObject.objects.values_list().extra(select=OrderedDict((('foo','first'), ('bar','second'), ('whiz','third'))))),
-            [('first', 'second', 'third', obj.pk, 'first', 'second', 'third')]
+            list(TestObject.objects.values_list().extra(select=OrderedDict((('foo', "'first_extra'"), ('bar', "'second_extra'"), ('whiz', "'third_extra'"))))),
+            [('first_extra', 'second_extra', 'third_extra', obj.pk, 'first', 'second', 'third')]
         )
 
         # Extra columns ignored completely if not mentioned in values_list()

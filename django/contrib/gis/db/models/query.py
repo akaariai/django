@@ -426,11 +426,8 @@ class GeoQuerySet(QuerySet):
         sql, params = field_col.as_sql(connections[self.db].ops.quote_name, connections[self.db])
         custom_sel = '%s(%s, %s)' % (connections[self.db].ops.transform, sql, srid)
         self.query.transformed_srid = srid  # So other GeoQuerySet methods
-        if key:
-            self.query.custom_select[label] = GeoRawSQL(custom_sel, params, field_col.output_type)
-        else:
-            self.query.custom_select[label] = (
-                GeoRawSQL(custom_sel, params, field_col.output_type))
+        self.query.custom_select[label] = (
+            GeoRawSQL(custom_sel, params, field_col.output_type))
         return self._clone()
 
     def union(self, geom, **kwargs):

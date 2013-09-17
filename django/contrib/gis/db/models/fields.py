@@ -47,7 +47,7 @@ class GeoCol(Col):
         try:
             query = qn.__self__.query
             for f in query.custom_select.values():
-                if f.output_type == self.field:
+                if f.output_type == self.field and f is not self:
                     return f.as_sql(qn, connection)
         except AttributeError:
             query = None
