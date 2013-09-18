@@ -1,7 +1,8 @@
 from __future__ import unicode_literals
 
 from django.db import models
-from django.utils.encoding import python_2_unicode_compatible, force_text
+from django.utils.encoding import python_2_unicode_compatible
+from django.utils import six
 
 
 @python_2_unicode_compatible
@@ -71,7 +72,10 @@ class EvenMoreFields(MostFieldTypes):
     extra_field = models.IntegerField()
 
     def __str__(self):
-        super_text = force_text(super(EvenMoreFields, self))
+        if six.PY2:
+            super_text = super(EvenMoreFields, self).__unicode__()
+        else:
+            super_text = super(EvenMoreFields, self).__str__()
         return '%s; extra: %d' % (super_text, self.extra_field)
 
 
