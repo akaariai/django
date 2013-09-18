@@ -14,15 +14,18 @@ def referred_aggregate(lookup_parts, aggregates):
     Returns the referred aggregate and the rest of lookups.
     """
     for i in range(len(lookup_parts) + 1):
-        if LOOKUP_SEP.join(lookup_parts[0:i]) in aggregates:
-            return aggregates[LOOKUP_SEP.join(lookup_parts[0:i])], lookup_parts[i:]
-    return None, []
+        current = LOOKUP_SEP.join(lookup_parts[0:i])
+        if current in aggregates:
+            return aggregates[current], current, lookup_parts[i:]
+    return None, '', []
 
 
 class Aggregate(object):
     """
     Default Aggregate definition.
     """
+    is_aggregate = True
+
     def __init__(self, lookup, **extra):
         """Instantiate a new aggregate.
 
@@ -60,8 +63,7 @@ class Aggregate(object):
         """
         klass = getattr(query.aggregates_module, self.name)
         aggregate = klass(col, source=source, is_summary=is_summary, **self.extra)
-        query.add_custom_select(alias, aggregate)
-
+        return aggregate
 
 class Avg(Aggregate):
     name = 'Avg'

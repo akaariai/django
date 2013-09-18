@@ -54,6 +54,8 @@ class SQLEvaluator(object):
 
         field_list = node.name.split(LOOKUP_SEP)
         if node.name in query.custom_select:
+            query.custom_select_refcounts[node.name] = query.custom_select_refcounts.get(
+                node.name, 0) + 1
             self.cols.append((node, query.custom_select[node.name]))
         else:
             try:

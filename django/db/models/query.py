@@ -771,18 +771,13 @@ class QuerySet(object):
             clone._prefetch_related_lookups.extend(lookups)
         return clone
 
-    def annotate(self, *args, **kwargs):
-        """
-        Return a query set in which the returned objects have been annotated
-        with data aggregated from related fields.
-        """
+    def _add_columns(self, _add_to_select, *args, **kwargs):
         for arg in args:
             if arg.default_alias in kwargs:
                 raise ValueError("The named annotation '%s' conflicts with the "
                                  "default name for another annotation."
                                  % arg.default_alias)
             kwargs[arg.default_alias] = arg
-
         names = getattr(self, '_fields', None)
         if names is None:
             names = set(self.model._meta.get_all_field_names())
@@ -793,14 +788,35 @@ class QuerySet(object):
 
         obj = self._clone()
 
-        obj._setup_aggregate_query(list(kwargs))
+        aggregates = [k for k, v in kwargs.items()
+                      if v.is_aggregate]
+        obj._setup_aggregate_query(aggregates)
 
         # Add the aggregates to the query
-        for (alias, aggregate_expr) in kwargs.items():
-            obj.query.add_aggregate(aggregate_expr, self.model, alias,
-                is_summary=False)
+        for alias in aggregates:
+            obj.query.add_aggregate(kwargs[alias], self.model, alias,
+                                    is_summary=False, add_to_select=_add_to_select)
+        for alias in kwargs:
+            if alias in aggregates:
+                continue
+            obj.query.add_column(kwargs[alias], self.model, alias,
+                                 add_to_select=_add_to_select)
 
         return obj
+
+    def annotate(self, *args, **kwargs):
+        """
+        Return a query set in which the returned objects have been annotated
+        with the given objects.
+        """
+        return self._add_columns(True, *args, **kwargs)
+
+    def alias(self, *args, **kwargs):
+        """
+        Return a query set in which the returned objects have been added
+        as targets for future lookups.
+        """
+        return self._add_columns(False, *args, **kwargs)
 
     def order_by(self, *field_names):
         """
@@ -999,11 +1015,8 @@ class QuerySet(object):
         """
         Prepare the query for computing a result that contains aggregate annotations.
         """
-        opts = self.model._meta
         if self.query.group_by is None:
-            field_names = [f.attname for f in opts.concrete_fields]
-            self.query.add_fields(field_names, False)
-            self.query.set_group_by()
+            self.query.group_by = 'DEFAULT_COLS'
 
     def _prepare(self):
         return self
@@ -1127,7 +1140,6 @@ class ValuesQuerySet(QuerySet):
         Prepare the query for computing a result that contains aggregate annotations.
         """
         self.query.set_group_by()
-
         if self._fields:
             self._fields += tuple(aggregates)
         super(ValuesQuerySet, self)._setup_aggregate_query(aggregates)

@@ -480,7 +480,9 @@ class AggregationTests(TestCase):
         # Regression for #15709 - Ensure each group_by field only exists once
         # per query
         qs = Book.objects.values('publisher').annotate(max_pages=Max('pages')).order_by()
-        grouping, gb_params = qs.query.get_compiler(qs.db).get_grouping([], [])
+        compiler = qs.query.get_compiler(qs.db)
+        compiler.pre_sql_setup()
+        grouping, gb_params = compiler.get_grouping([], [])
         self.assertEqual(len(grouping), 1)
 
     def test_duplicate_alias(self):

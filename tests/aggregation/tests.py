@@ -207,6 +207,10 @@ class BaseAggregateTestCase(TestCase):
                 }
             ]
         )
+        # There aren't any joins or grouping by - the annotation is really removed.
+        qstr = str(books.query)
+        self.assertNotIn(' GROUP BY ', qstr)
+        self.assertNotIn(' JOIN ', qstr)
 
         books = Book.objects.filter(pk=1).values().annotate(mean_age=Avg('authors__age'))
         self.assertEqual(

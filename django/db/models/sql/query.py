@@ -130,6 +130,7 @@ class Query(object):
         # subqueries...). The select clauses should respond to Col API.
         self.custom_select = {}
         self.custom_select_mask = set()
+        self.custom_select_refcounts = {}
         self.custom_select_ordering = []
         self._custom_select_cache = None
         self._aggregate_select_cache = None
@@ -241,6 +242,7 @@ class Query(object):
         obj.select_related = self.select_related
         obj.custom_select_ordering = self.custom_select_ordering[:]
         obj.custom_select_mask = self.custom_select_mask.copy()
+        obj.custom_select_refcounts = self.custom_select_refcounts.copy()
         # _aggregate_select_cache cannot be copied, as doing so breaks the
         # (necessary) state in which both aggregates and
         # _aggregate_select_cache point to the same underlying objects.
@@ -286,7 +288,12 @@ class Query(object):
         # If there is a group by clause, aggregating does not add useful
         # information but retrieves only the first row. Aggregate
         # over the subquery instead.
-        if self.group_by is not None or force_subq:
+        summary_aggregates = [(k, v) for k, v in self.aggregate_select_clause
+                              if v.is_summary]
+
+        # If there are both summary aggregates and non-summary aggregates, that is
+        # .annotate().aggregate() has been called, we need to do a subquery.
+        if len(summary_aggregates) != len(self.aggregate_select_clause) or force_subq:
 
             from django.db.models.sql.subqueries import AggregateQuery
             query = AggregateQuery(self.model)
@@ -302,10 +309,9 @@ class Query(object):
             relabels = dict((t, 'subquery') for t in self.tables)
             # Remove any aggregates marked for reduction from the subquery
             # and move them to the outer AggregateQuery.
-            for alias, aggregate in self.aggregate_select_clause:
-                if aggregate.is_summary:
-                    query.add_custom_select(alias, aggregate.relabeled_clone(relabels))
-                    obj.del_custom_select(alias)
+            for alias, aggregate in summary_aggregates:
+                query.add_custom_select(alias, aggregate.relabeled_clone(relabels))
+                obj.del_custom_select(alias)
             try:
                 query.add_subquery(obj, using)
             except EmptyResultSet:
@@ -611,9 +617,17 @@ class Query(object):
         """ Increases the reference count for this alias. """
         self.alias_refcount[alias] += 1
 
-    def unref_alias(self, alias, amount=1):
-        """ Decreases the reference count for this alias. """
-        self.alias_refcount[alias] -= amount
+    def unref_alias(self, alias, amount=1, cascade=False):
+        """
+        Decreases the reference count for this alias. If cascade is set, then
+        the alias chain up to parent model will be unreffed.
+        """
+        if cascade:
+            while alias in self.alias_map:
+                self.alias_refcount[alias] -= amount
+                alias = self.alias_map[alias].lhs_alias
+        else:
+            self.alias_refcount[alias] -= amount
 
     def promote_joins(self, aliases):
         """
@@ -688,7 +702,7 @@ class Query(object):
         # "group by", "where" and "having".
         self.where.relabel_aliases(change_map)
         self.having.relabel_aliases(change_map)
-        if self.group_by:
+        if isinstance(self.group_by, list):
             self.group_by = [col.relabeled_clone(change_map) for col in self.group_by]
         self.custom_select = dict(
             (key, col.relabeled_clone(change_map))
@@ -896,7 +910,7 @@ class Query(object):
                 self.unref_alias(alias)
         self.included_inherited_models = {}
 
-    def add_aggregate(self, aggregate, model, alias, is_summary):
+    def add_aggregate(self, aggregate, model, alias, is_summary, add_to_select=True):
         """
         Adds a single aggregate expression to the Query
         """
@@ -913,7 +927,7 @@ class Query(object):
                     aggregate.name, field_name, field_name))
         elif ((len(field_list) > 1) or
             (field_list[0] not in [i.name for i in opts.fields]) or
-            self.group_by is None or
+            not self.aggregate_select_clause or
             not is_summary):
             # If:
             #   - the field descriptor has more than one part (foo__bar), or
@@ -950,9 +964,13 @@ class Query(object):
             col = field_name
 
         # Add the aggregate to the query
-        aggregate.add_to_query(self, alias, col=col, source=source, is_summary=is_summary)
-        # We want to have the alias in SELECT clause even if mask is set.
-        self.append_custom_select_mask([alias])
+        aggregate = aggregate.add_to_query(
+            self, alias, col=col, source=source, is_summary=is_summary)
+        self.add_custom_select(alias, aggregate, add_to_select)
+
+    def add_column(self, col, model, alias, add_to_select=True):
+        col = col.add_to_query(self, alias)
+        self.add_custom_select(alias, col, add_to_select)
 
     def build_lookup(self, lookups, field, lhs, value, can_reuse):
         lookups = lookups or ['exact']
@@ -1054,8 +1072,9 @@ class Query(object):
 
         clause = self.where_class()
         # Check if this is a reference to an existing select clause.
-        reffed_clause, lookups = referred_aggregate(parts, self.custom_select)
+        reffed_clause, name, lookups = referred_aggregate(parts, self.custom_select)
         if reffed_clause:
+            self.custom_select_refcounts[name] = self.custom_select_refcounts.get(name, 0) + 1
             lookup, _ = self.build_lookup(lookups, reffed_clause, reffed_clause, value,
                                           can_reuse)
             clause.add(lookup, AND)
@@ -1721,14 +1740,15 @@ class Query(object):
     def append_custom_select_mask(self, names):
         self.set_custom_select_mask(set(names).union(self.custom_select_mask))
 
-    def add_custom_select(self, name, col, overwrite=True):
+    def add_custom_select(self, name, col, overwrite=True, add_to_select=True):
         if name in self.custom_select:
             if overwrite:
                 self.custom_select[name] = col
         else:
             self.custom_select[name] = col
             self.custom_select_ordering.append(name)
-        self.append_custom_select_mask((name,))
+        if add_to_select:
+            self.append_custom_select_mask((name,))
 
     def del_custom_select(self, name):
         del self.custom_select[name]

@@ -1129,7 +1129,6 @@ class Queries1Tests(BaseQuerysetTest):
         # A negated Q along with an annotated queryset failed in Django 1.4
         qs = Author.objects.annotate(Count('item'))
         qs = qs.filter(~Q(extra__value=0))
-
         self.assertTrue('SELECT' in str(qs.query))
         self.assertQuerysetEqual(
             qs,

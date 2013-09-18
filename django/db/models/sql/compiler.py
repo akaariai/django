@@ -34,7 +34,17 @@ class SQLCompiler(object):
         # TODO: after the query has been executed, the altered state should be
         # cleaned. We are not using a clone() of the query here.
         """
-        if not self.query.tables:
+        select_refcounts = self.query.custom_select_refcounts
+        for select in self.query.custom_select_mask:
+            select_refcounts[select] = select_refcounts.get(select, 0) + 1
+        if len(self.query.custom_select) != len(self.query.custom_select_clause):
+            to_remove = [v for k, v in self.query.custom_select.items()
+                         if select_refcounts.get(k, 0) == 0]
+            for col in to_remove:
+                if hasattr(col, 'remove_from_query'):
+                    col.remove_from_query(self.query)
+        # Ensure there is at least one table in the query
+        if self.query.count_active_tables() == 0:
             self.query.join((None, self.query.get_meta().db_table, None))
         if self.query.default_cols and not self.query.included_inherited_models:
             self.query.setup_inherited_models()
@@ -67,13 +77,13 @@ class SQLCompiler(object):
         if with_limits and self.query.low_mark == self.query.high_mark:
             return '', ()
 
+        self.refcounts_before = self.query.alias_refcount.copy()
         self.pre_sql_setup()
         # After executing the query, we must get rid of any joins the query
         # setup created. So, take note of alias counts before the query ran.
         # However we do not want to get rid of stuff done in pre_sql_setup(),
         # as the pre_sql_setup will modify query state in a way that forbids
         # another run of it.
-        self.refcounts_before = self.query.alias_refcount.copy()
         out_cols, s_params = self.get_columns(with_col_aliases)
         ordering, o_params, ordering_group_by = self.get_ordering()
 
@@ -503,19 +513,29 @@ class SQLCompiler(object):
         """
         qn = self.quote_name_unless_alias
         result, params = [], []
-        if self.query.group_by is not None:
+        has_aggregate_refs = any(
+            self.query.custom_select_refcounts.get(k, 0) > 0
+            for k, v in self.query.custom_select.items() if v.is_aggregate)
+        if has_aggregate_refs:
             select_cols = self.related_select_cols
+            if self.query.group_by == 'DEFAULT_COLS' or self.query.default_cols:
+                default_cols, _ = list(self.get_default_columns())
+            else:
+                default_cols = []
+            if isinstance(self.query.group_by, list):
+                forced_group_by = self.query.group_by
+            else:
+                forced_group_by = []
             extra_selects = [col for _, col in self.query.custom_select_clause
                              if not col.is_aggregate]
             if (self.query.default_cols and not self.related_select_cols
                     and not extra_selects
                     and self.connection.features.allows_group_by_pk):
-                self.query.group_by = [
-                    self.query.get_meta().pk.create_col(self.query.get_meta().db_table)
-                ]
-                select_cols = []
+                cols = having_group_by + extra_selects + [
+                    self.query.get_meta().pk.create_col(self.query.get_meta().db_table)]
+            else:
+                cols = having_group_by + select_cols + extra_selects + default_cols + forced_group_by
             seen = set()
-            cols = self.query.group_by + having_group_by + select_cols + extra_selects
             for col in cols:
                 col_params = ()
                 if hasattr(col, 'as_sql'):

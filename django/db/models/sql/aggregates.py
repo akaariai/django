@@ -94,6 +94,12 @@ class Aggregate(object):
 
         return self.sql_template % substitutions, params
 
+    def remove_from_query(self, query):
+        if isinstance(self.col, (list, tuple)):
+            query.unref_alias(self.col[0], cascade=True)
+        else:
+            self.col.unref_alias(query)
+
     def get_cols(self):
         return []
 
