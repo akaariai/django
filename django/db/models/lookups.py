@@ -5,29 +5,6 @@ from django.utils.functional import cached_property
 class UnsupportedLookup(Exception):
     pass
 
-class Col(object):
-    is_aggregate = False
-
-    def __init__(self, alias, field, output_type=None):
-        self.alias, self.field, self.output_type = alias, field, output_type or field
-
-    def as_sql(self, qn, connection):
-        return "%s.%s" % (qn(self.alias), qn(self.field.column)), []
-
-    def relabeled_clone(self, change_map):
-        return self.__class__(change_map.get(self.alias, self.alias),
-                              self.field, self.output_type)
-
-    def get_lookup(self, lookup):
-        return self.field.get_lookup(lookup)
-
-    def get_cols(self):
-        return [self]
-
-    @property
-    def alias_label(self):
-        return self.field.column
-
 default_lookups = {}
 NoValueMarker = object()
 
@@ -130,10 +107,7 @@ class SimpleLookup(Lookup):
 
     def process_lhs(self, qn, connection):
         lhs_sql, params = self.lhs.as_sql(qn, connection)
-        field_internal_type = self.lhs.output_type.get_internal_type()
-        db_type = self.lhs.output_type
-        lhs_sql = connection.ops.field_cast_sql(db_type, field_internal_type) % lhs_sql
-        return connection.ops.lookup_cast(self.lookup_type) % lhs_sql, params
+        return lhs_sql, params
 
     def process_rhs(self, qn, connection):
         value = self.value
@@ -194,10 +168,22 @@ class SimpleLookup(Lookup):
         # datetime.
         return self.lhs.output_type
 
+    def remove_from_query(self, query):
+        self.lhs.remove_from_query(query)
+        if hasattr(self.value, 'remove_from_query'):
+            self.value.remove_from_query(query)
+
 class DjangoLookup(SimpleLookup):
 
     def get_rhs_op(self, qn, connection, rhs):
         return connection.operators[self.lookup_type] % rhs
+
+    def process_lhs(self, qn, connection):
+        lhs_sql, params = super(DjangoLookup, self).process_lhs(qn, connection)
+        field_internal_type = self.lhs.output_type.get_internal_type()
+        db_type = self.lhs.output_type
+        lhs_sql = connection.ops.field_cast_sql(db_type, field_internal_type) % lhs_sql
+        return connection.ops.lookup_cast(self.lookup_type) % lhs_sql, params
 
 
 class Exact(DjangoLookup):
@@ -286,7 +272,7 @@ default_lookups['range'] = Range
 class DateLookup(DjangoLookup):
 
     def process_lhs(self, qn, connection):
-        lhs, params = self.lhs.as_sql(qn, connection)
+        lhs, params = super(DateLookup, self).process_lhs(qn, connection)
         tzname = timezone.get_current_timezone_name() if settings.USE_TZ else None
         sql, tz_params = connection.ops.datetime_extract_sql(self.extract_type, lhs, tzname)
         return connection.ops.lookup_cast(self.lookup_type) % sql, tz_params

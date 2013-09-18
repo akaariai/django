@@ -7,8 +7,9 @@ import datetime
 from itertools import repeat
 
 from django.conf import settings
+from django.db.models.datastructures import Empty
 from django.db.models.fields import DateTimeField, Field
-from django.db.models.sql.datastructures import EmptyResultSet, Empty
+from django.db.models.sql.datastructures import EmptyResultSet
 from django.db.models.sql.aggregates import Aggregate
 from django.utils.six.moves import xrange
 from django.utils import timezone

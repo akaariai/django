@@ -10,11 +10,11 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection
 from django.db import models, router, DEFAULT_DB_ALIAS
 from django.db.models import signals
+from django.db.models.datastructures import Col
 from django.db.models.fields.related import ForeignObject, ForeignObjectRel
-from django.db.models.lookups import Col, Exact
 from django.db.models.related import PathInfo
 from django.forms import ModelForm, ALL_FIELDS
-from django.forms.models import (BaseModelFormSet, modelformset_factory, save_instance,
+from django.forms.models import (BaseModelFormSet, modelformset_factory,
     modelform_defines_fields)
 from django.contrib.admin.options import InlineModelAdmin, flatten_fieldsets
 from django.contrib.contenttypes.models import ContentType

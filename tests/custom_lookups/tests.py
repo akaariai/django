@@ -1,11 +1,13 @@
 from __future__ import unicode_literals
 
+import re
+
 from django.db import connection
-from django.db.models import Sum
+from django.db.models import Sum, SimpleLookup, RefCol, Field, MultiRefCol, CharField, IntegerField
 from django.test import TestCase
 from unittest import skipUnless
 
-from .models import Author, NotEqual, FakeNotEqual, CustomIntegerField, SubCustomIntegerField
+from .models import Author, NotEqual, FakeNotEqual, CustomIntegerField, SubCustomIntegerField, Book
 
 
 class CustomColumnsTests(TestCase):
@@ -92,3 +94,173 @@ class CustomColumnsTests(TestCase):
             Author.objects.order_by('name'),
             [a1, a3, a2, a4],
             lambda x: x)
+
+    @skipUnless(connection.vendor == 'postgresql',
+                'Uses PostgreSQL specific SQL')
+    def test_array_agg(self):
+        # It is possible to create completely custom aggregate.
+        class ArrayAgg(RefCol):
+            is_aggregate = True
+            output_type = Field()
+
+            def convert_value(self, value, connection):
+                inner_converter = getattr(self.col.output_type, 'convert_value', None)
+                if inner_converter and value:
+                    return [inner_converter(v, connection) for v in value]
+                return value
+
+            def as_sql(self, qn, connection):
+                inner_sql, params = self.col.as_sql(qn, connection)
+                params.extend(params)
+                return 'ARRAY_AGG(%s ORDER BY %s)' % (inner_sql, inner_sql), params
+
+            class ArrayContainsLookup(SimpleLookup):
+                lookup_type = 'contains_val'
+
+                def as_sql(self, qn, connection):
+                    if not isinstance(self.value, list):
+                        self.value = [self.value]
+                    lhs_sql, params = self.process_lhs(qn, connection)
+                    rhs_sql, rhs_params = self.process_rhs(qn, connection)
+                    params.extend(rhs_params)
+                    return '%s @> %s' % (lhs_sql, rhs_sql), params
+
+            class ArrayOverlapsLookup(SimpleLookup):
+                lookup_type = 'overlaps'
+
+                def as_sql(self, qn, connection):
+                    if not isinstance(self.value, list):
+                        self.value = [self.value]
+                    lhs_sql, params = self.process_lhs(qn, connection)
+                    rhs_sql, rhs_params = self.process_rhs(qn, connection)
+                    params.extend(rhs_params)
+                    return '%s && %s' % (lhs_sql, rhs_sql), params
+
+            def get_lookup(self, lookup):
+                if lookup == 'contains':
+                    return self.ArrayContainsLookup
+                if lookup == 'overlaps':
+                    return self.ArrayOverlapsLookup
+                raise LookupError("Lookup %s isn't supported by %s." %
+                                  (lookup, self.__class__.__name__))
+
+        self.a4 = Author.objects.create(age=4, name='a4')
+
+        qs = Author.objects.values_list('age__div3').annotate(
+            name_arr=ArrayAgg('name')
+        ).order_by('age__div3')
+        self.assertQuerysetEqual(
+            qs,
+            [
+                (0, ['a3']),
+                (1, ['a1', 'a4']),
+                (2, ['a2']),
+            ], lambda x: x)
+        qs = Author.objects.values('age__div3').annotate(
+            id_arr=ArrayAgg('id')
+        ).order_by('age__div3')
+        self.assertQuerysetEqual(
+            qs,
+            [
+                {'age__div3': 0, 'id_arr': [self.a3.id]},
+                {'age__div3': 1, 'id_arr': [self.a1.id, self.a4.id]},
+                {'age__div3': 2, 'id_arr': [self.a2.id]},
+            ], lambda x: x)
+        res_qs = qs.filter(id_arr__contains=self.a1.id)
+        self.assertQuerysetEqual(
+            res_qs,
+            [
+                {'age__div3': 1, 'id_arr': [self.a1.id, self.a4.id]},
+            ], lambda x: x)
+        res_qs = qs.filter(id_arr__contains=[self.a1.id, self.a4.id])
+        self.assertQuerysetEqual(
+            res_qs,
+            [
+                {'age__div3': 1, 'id_arr': [self.a1.id, self.a4.id]},
+            ], lambda x: x)
+        res_qs = qs.filter(id_arr__contains=[self.a1.id, self.a2.id])
+        self.assertQuerysetEqual(
+            res_qs,
+            [], lambda x: x)
+        res_qs = qs.filter(id_arr__overlaps=[self.a2.id, self.a4.id])
+        self.assertQuerysetEqual(
+            res_qs,
+            [
+                {'age__div3': 1, 'id_arr': [self.a1.id, self.a4.id]},
+                {'age__div3': 2, 'id_arr': [self.a2.id]},
+            ], lambda x: x)
+
+    def test_case_when_node(self):
+        class RefSQL(MultiRefCol):
+            EXTEND_PARAMS_MARKER = object()
+
+            def __init__(self, sql, params, output_type):
+                self.sql, self.params = sql, params
+                results = re.findall('(%s)|({{\s*[\w_]+\s*}})', self.sql)
+                self.param_groups = []
+                self.lookups = []
+                self.output_type = output_type
+                params = list(reversed(params))
+                for result in results:
+                    if result[0]:
+                        self.param_groups.append(params.pop())
+                    else:
+                        self.param_groups.append(self.EXTEND_PARAMS_MARKER)
+                        self.lookups.append(result[1][2:-2].strip())
+                self.sql = re.sub('%s', '%%s', self.sql)
+                self.sql = re.sub('{{\s*[\w_]+\s*}}', '%s', self.sql)
+
+            def as_sql(self, qn, connection):
+                sql_parts = []
+                params = []
+                cols = list(reversed(self.cols))
+                for param in self.param_groups:
+                    if param is self.EXTEND_PARAMS_MARKER:
+                        sql, sql_params = cols.pop().as_sql(qn, connection)
+                        params.extend(sql_params)
+                        sql_parts.append(sql)
+                    else:
+                        params.append(param)
+                return self.sql % tuple(sql_parts), params
+        casewhenagediv3 = RefSQL(
+            """
+            case when {{age__div3}} = 1 then %s /* 1 and 4 */
+            when {{age}} = 2 then %s /* 2 */
+            else %s end
+            """, ['was1', 'was2', 'wasother'],
+            output_type=CharField())
+        qs = Author.objects.annotate(my_ref=casewhenagediv3).filter(my_ref__exact='wasother')
+        self.assertEqual(len(qs), 1)
+        self.assertEqual(qs[0].my_ref, 'wasother')
+        self.assertEqual(qs[0].age, 3)
+        qs = Author.objects.alias(my_ref=casewhenagediv3).filter(my_ref__exact='wasother')
+        self.assertEqual(len(qs), 1)
+        self.assertFalse(hasattr(qs[0], 'my_ref'))
+        self.assertEqual(qs[0].age, 3)
+        if_age_gte2 = RefSQL(
+            """
+            case when {{age}} >= 2 then %s
+            else %s end
+            """, [1, 0],
+            output_type=IntegerField())
+        qs = Author.objects.alias(if_age_gte2=if_age_gte2).aggregate(
+            count_age_gte2=Sum('if_age_gte2'))
+        self.assertEqual(qs['count_age_gte2'], 2)
+        if_pages_gte_100 = RefSQL(
+            """
+            case when {{book__pages}} >= 100 then %s
+            else %s end
+            """, [1, 0],
+            output_type=IntegerField())
+        qs = Author.objects.alias(if_pages_gte_100=if_pages_gte_100).alias(
+            count_pages_gte_100=Sum('if_pages_gte_100')
+        ).filter(
+            count_pages_gte_100__gte=1).order_by('count_pages_gte_100')
+        self.assertEqual(len(qs), 0)
+        Book.objects.create(pages=100, author=self.a1)
+        Book.objects.create(pages=99, author=self.a2)
+        Book.objects.create(pages=101, author=self.a3)
+        Book.objects.create(pages=100, author=self.a3)
+        new_qs = qs.all()
+        self.assertQuerysetEqual(
+            new_qs, [self.a1, self.a3], lambda x: x)

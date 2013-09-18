@@ -3,9 +3,9 @@ from operator import attrgetter
 from django.db import connection, connections, router
 from django.db.backends import utils
 from django.db.models import signals
+from django.db.models.datastructures import Col
 from django.db.models.fields import (AutoField, Field, IntegerField,
     PositiveIntegerField, PositiveSmallIntegerField, FieldDoesNotExist)
-from django.db.models.lookups import Col
 from django.db.models.related import RelatedObject, PathInfo
 from django.db.models.query import QuerySet
 from django.db.models.deletion import CASCADE

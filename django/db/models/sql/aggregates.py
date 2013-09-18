@@ -73,6 +73,8 @@ class Aggregate(object):
         clone = copy.copy(self)
         if isinstance(self.col, (list, tuple)):
             clone.col = (change_map.get(self.col[0], self.col[0]), self.col[1])
+        elif hasattr(self.col, 'relabeled_clone'):
+            clone.col = clone.col.relabeled_clone(change_map)
         return clone
 
     def as_sql(self, qn, connection):
@@ -97,8 +99,8 @@ class Aggregate(object):
     def remove_from_query(self, query):
         if isinstance(self.col, (list, tuple)):
             query.unref_alias(self.col[0], cascade=True)
-        else:
-            self.col.unref_alias(query)
+        elif hasattr(self.col, 'remove_from_query'):
+            self.col.remove_from_query(query)
 
     def get_cols(self):
         return []

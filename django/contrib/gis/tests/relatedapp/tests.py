@@ -58,7 +58,7 @@ class RelatedGeoModelTest(TestCase):
         for name, srid, wkt in transformed:
             # Doing this implicitly sets `select_related` select the location.
             # TODO: Fix why this breaks on Oracle.
-            qs = list(City.objects.filter(name=name).transform(srid, field_name='location__point'))
+            qs = City.objects.filter(name=name).transform(srid, field_name='location__point')
             check_pnt(GEOSGeometry(wkt, srid), qs[0].location.point)
 
     @no_mysql

@@ -37,6 +37,10 @@ class Author(models.Model):
     class Meta:
         ordering = ('name',)
 
+class Book(models.Model):
+    author = models.ForeignKey(Author)
+    pages = models.IntegerField()
+
 class Div2Lookup(models.SimpleLookup):
     lookup_type = 'div2'
 

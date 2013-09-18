@@ -2,14 +2,14 @@
 Useful auxilliary data structures for query construction. Not useful outside
 the SQL domain.
 """
-# TODO: move Col here.
+
 from datetime import datetime
 
 from django.conf import settings
-from django.db.models.lookups import Col
 from django.db.backends.util import typecast_timestamp, typecast_date
+from django.db.models.datastructures import RefCol
+from django.db.models.fields import DateField, DateTimeField
 from django.utils import timezone
-
 
 class EmptyResultSet(Exception):
     pass
@@ -27,25 +27,19 @@ class MultiJoin(Exception):
         self.names_with_path = path_with_names
 
 
-class Empty(object):
-    pass
-
-
-class Date(Col):
+class Date(RefCol):
     """
     Add a date selection column.
     """
-    def __init__(self, alias, field, lookup_type):
-        super(Date, self).__init__(alias, field)
-        self.lookup_type = lookup_type
+    allow_nulls = False
 
-    def relabeled_clone(self, change_map):
-        return self.__class__(change_map.get(self.alias, self.alias), self.field,
-                              self.lookup_type)
+    def __init__(self, lookup, kind):
+        super(Date, self).__init__(lookup)
+        self.kind = kind
 
     def as_sql(self, qn, connection):
-        sql, params = super(Date, self).as_sql(qn, connection)
-        return connection.ops.date_trunc_sql(self.lookup_type, sql), params
+        sql, params = self.col.as_sql(qn, connection)
+        return connection.ops.date_trunc_sql(self.kind, sql), params
 
     def convert_value(self, value, connection):
         if connection.features.needs_datetime_string_cast:
@@ -54,26 +48,47 @@ class Date(Col):
             value = value.date()
         return value
 
-class DateTime(Col):
+    def add_to_query(self, *args, **kwargs):
+        ret = super(Date, self).add_to_query(*args, **kwargs)
+        self._check_field()
+        return ret
+
+    def _check_field(self):
+        assert isinstance(self.col.field, DateField), \
+            "%r isn't a DateField." % self.col.field.name
+        if settings.USE_TZ:
+            assert not isinstance(self.col.field, DateTimeField), \
+                "%r is a DateTimeField, not a DateField." % self.col.field.name
+
+
+class DateTime(RefCol):
     """
     Add a datetime selection column.
     """
-    def __init__(self, alias, field, lookup_type, tzinfo, tzname):
-        super(DateTime, self).__init__(alias, field)
-        self.lookup_type = lookup_type
-        self.tzname = tzname
-        self.tzinfo = tzinfo
+    allow_nulls = False
 
-    def relabeled_clone(self, change_map):
-        return self.__class__(
-            change_map.get(self.alias, self.alias), self.field,
-            self.lookup_type, self.tzinfo, self.tzname
-        )
+    def __init__(self, lookup, kind, tzinfo):
+        super(DateTime, self).__init__(lookup)
+        self.kind = kind
+        self.tzinfo = tzinfo
+        if self.tzinfo is None:
+            self.tzname = None
+        else:
+            self.tzname = timezone._get_timezone_name(self.tzinfo)
 
     def as_sql(self, qn, connection):
-        col, params = super(DateTime, self).as_sql(qn, connection)
+        sql, params = self.col.as_sql(qn, connection)
         assert not params, "Params not supported"
-        return connection.ops.datetime_trunc_sql(self.lookup_type, col, self.tzname)
+        return connection.ops.datetime_trunc_sql(self.kind, sql, self.tzname)
+
+    def add_to_query(self, *args, **kwargs):
+        ret = super(DateTime, self).add_to_query(*args, **kwargs)
+        self._check_field()
+        return ret
+
+    def _check_field(self):
+        assert isinstance(self.col.field, DateTimeField), \
+            "%r isn't a DateTimeField." % self.col.field.name
 
     def convert_value(self, value, connection):
         if connection.features.needs_datetime_string_cast:

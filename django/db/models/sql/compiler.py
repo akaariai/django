@@ -104,7 +104,6 @@ class SQLCompiler(object):
 
         if self.query.distinct:
             result.append(self.connection.ops.distinct_sql(distinct_fields))
-        params.extend(o_params)
         result.append(', '.join(out_cols + self.ordering_aliases))
         params.extend(s_params)
         params.extend(self.ordering_params)
@@ -133,6 +132,7 @@ class SQLCompiler(object):
 
         if ordering:
             result.append('ORDER BY %s' % ', '.join(ordering))
+            params.extend(o_params)
 
         if with_limits:
             if self.query.high_mark is not None:
@@ -322,7 +322,6 @@ class SQLCompiler(object):
 
         params = []
         ordering_params = []
-        aggregate_select = dict(self.query.aggregate_select_clause)
         for pos, field in enumerate(ordering):
             if field == '?':
                 result.append(self.connection.ops.random_function_sql())
@@ -337,8 +336,16 @@ class SQLCompiler(object):
                 group_by.append((str(field), []))
                 continue
             col, order = get_order_dir(field, asc)
-            if col in aggregate_select:
-                result.append('%s %s' % (qn2(col), order))
+            if col in self.query.custom_select and self.query.custom_select[col].is_aggregate:
+                # It is an aggregate
+                if col not in self.query.custom_select_mask:
+                    # not in select clause
+                    sql, inner_params = self.query.custom_select[col].as_sql(qn, self.connection)
+                    result.append('%s %s' % (sql, order))
+                    params.extend(inner_params)
+                else:
+                    # in select clause -> just alias is enough
+                    result.append('%s %s' % (qn2(col), order))
                 continue
             if '.' in field:
                 # This came in through an extra(order_by=...) addition. Pass it

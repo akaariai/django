@@ -27,6 +27,7 @@ from django.utils.encoding import force_text
 from django.utils.tree import Node
 from django.utils import six
 from django.db import connections, DEFAULT_DB_ALIAS
+from django.db.models.datastructures import Empty
 from django.db.models.lookups import NoValueMarker
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.aggregates import referred_aggregate
@@ -36,7 +37,7 @@ from django.db.models.related import PathInfo
 from django.db.models.sql import aggregates as base_aggregates_module
 from django.db.models.sql.constants import (QUERY_TERMS, ORDER_DIR, SINGLE,
         ORDER_PATTERN, JoinInfo)
-from django.db.models.sql.datastructures import EmptyResultSet, Empty, MultiJoin
+from django.db.models.sql.datastructures import EmptyResultSet, MultiJoin
 from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.where import (WhereNode, Constraint, EverythingNode,
     ExtraWhere, AND, OR, EmptyWhere)
@@ -914,7 +915,6 @@ class Query(object):
         """
         Adds a single aggregate expression to the Query
         """
-        opts = model._meta
         field_list = aggregate.lookup.split(LOOKUP_SEP)
         aggregates = dict((k, v) for k, v in self.custom_select.items() if v.is_aggregate)
         if len(field_list) == 1 and aggregate.lookup in aggregates:
@@ -925,52 +925,18 @@ class Query(object):
             if not is_summary:
                 raise FieldError("Cannot compute %s('%s'): '%s' is an aggregate" % (
                     aggregate.name, field_name, field_name))
-        elif ((len(field_list) > 1) or
-            (field_list[0] not in [i.name for i in opts.fields]) or
-            not self.aggregate_select_clause or
-            not is_summary):
-            # If:
-            #   - the field descriptor has more than one part (foo__bar), or
-            #   - the field descriptor is referencing an m2m/m2o field, or
-            #   - this is a reference to a model field (possibly inherited), or
-            #   - this is an annotation over a model field
-            # then we need to explore the joins that are required.
-
-            field, sources, opts, join_list, path, lookups = self.setup_joins(
-                field_list, opts, self.get_initial_alias())
-
-            # Process the join chain to see if it can be trimmed
-            targets, final_alias, join_list = self.trim_joins(sources, join_list, path)
-            assert len(targets) == 1
-            if lookups:
-                col = self.build_lookup(
-                    lookups, field, targets[0].create_col(final_alias, field),
-                    NoValueMarker, set())[0]
-                source = col.output_type
-            else:
-                col = targets[0].column
-                source = sources[0]
-                col = (final_alias, col)
-
-            # If the aggregate references a model or field that requires a join,
-            # those joins must be LEFT OUTER - empty join rows must be returned
-            # in order for zeros to be returned for those aggregates.
-            self.promote_joins(join_list)
         else:
-            # The simplest cases. No joins required -
-            # just reference the provided column alias.
-            field_name = field_list[0]
-            source = opts.get_field(field_name)
-            col = field_name
+            col = self.get_ref(aggregate.lookup)
+            source = col.output_type
 
         # Add the aggregate to the query
         aggregate = aggregate.add_to_query(
             self, alias, col=col, source=source, is_summary=is_summary)
-        self.add_custom_select(alias, aggregate, add_to_select)
+        self.add_custom_select(alias, aggregate, add_to_select=add_to_select)
 
     def add_column(self, col, model, alias, add_to_select=True):
         col = col.add_to_query(self, alias)
-        self.add_custom_select(alias, col, add_to_select)
+        self.add_custom_select(alias, col, add_to_select=add_to_select)
 
     def build_lookup(self, lookups, field, lhs, value, can_reuse):
         lookups = lookups or ['exact']
@@ -998,7 +964,10 @@ class Query(object):
             isnull_lookup = 'isnull'
         else:
             lookup_type = lookup.lookup_type
-            isnull_lookup = nest_to.get_lookup('isnull')
+            try:
+                isnull_lookup = nest_to.get_lookup('isnull')
+            except LookupError:
+                isnull_lookup = Field().get_lookup('isnull')
         if value is None:
             if lookup_type != 'exact':
                 raise ValueError("Cannot use None as a query value")
@@ -1103,7 +1072,7 @@ class Query(object):
             constraint = field.get_lookup_constraint(self.no_op_rewriter, self.where_class, alias,
                                                      targets, sources, lookup, value)
         else:
-            if isinstance(lookup, basestring):
+            if isinstance(lookup, six.string_types):
                 constraint = (Constraint(alias, targets[0].column, field), lookup, value)
             else:
                 constraint = lookup
@@ -1504,30 +1473,31 @@ class Query(object):
         self.distinct_fields = field_names
         self.distinct = True
 
-    def add_fields(self, field_names, allow_m2m=True):
-        """
-        Adds the given (model) fields to the select set. The field names are
-        added in the order specified.
-        """
+    def get_ref(self, name, allow_m2m=True, allow_nulls=True):
         alias = self.get_initial_alias()
         opts = self.get_meta()
-
+        if name in self.custom_select:
+            self.ref_custom_select(name)
+            return self.custom_select[name]
         try:
-            for name in field_names:
-                field, targets, sources, joins, path, lookups = self.setup_joins(
-                        name.split(LOOKUP_SEP), opts, alias, None, allow_m2m,
-                        True)
+            field, targets, sources, joins, path, lookups = self.setup_joins(
+                name.split(LOOKUP_SEP), opts, alias, None, allow_m2m,
+                True)
 
-                targets, final_alias, joins = self.trim_joins(targets, joins, path)
-                assert len(targets) == 1
-                if lookups:
-                    extract = self.build_lookup(
-                        lookups, field, targets[0].create_col(final_alias, field),
-                        NoValueMarker, set())[0]
-                else:
-                    extract = targets[0].create_col(final_alias, field)
+            targets, final_alias, joins = self.trim_joins(targets, joins, path)
+            assert len(targets) == 1
+            if lookups:
+                extract = self.build_lookup(
+                    lookups, field, targets[0].create_col(final_alias, field),
+                    NoValueMarker, set())[0]
+            else:
+                extract = targets[0].create_col(final_alias, field)
+            if allow_nulls:
                 self.promote_joins(joins)
-                self.add_custom_select(name, extract)
+            else:
+                if self.is_nullable(targets[0]) or self.alias_map[final_alias].join_type == self.LOUTER:
+                    self.add_filter((name + LOOKUP_SEP + 'isnull', False))
+            return extract
         except MultiJoin:
             raise FieldError("Invalid field name: '%s'" % name)
         except FieldError:
@@ -1539,6 +1509,15 @@ class Query(object):
                 names = sorted(opts.get_all_field_names() + list(self.custom_select))
                 raise FieldError("Cannot resolve keyword %r into field. "
                                  "Choices are: %s" % (name, ", ".join(names)))
+
+    def add_fields(self, field_names, allow_m2m=True):
+        """
+        Adds the given (model) fields to the select set. The field names are
+        added in the order specified.
+        """
+        for name in field_names:
+            extract = self.get_ref(name)
+            self.add_custom_select(name, extract)
         self.remove_inherited_models()
 
     def add_ordering(self, *ordering):
@@ -1739,6 +1718,9 @@ class Query(object):
 
     def append_custom_select_mask(self, names):
         self.set_custom_select_mask(set(names).union(self.custom_select_mask))
+
+    def ref_custom_select(self, name):
+        self.custom_select_refcounts[name] = self.custom_select_refcounts.get(name, 0) + 1
 
     def add_custom_select(self, name, col, overwrite=True, add_to_select=True):
         if name in self.custom_select:

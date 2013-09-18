@@ -3,10 +3,10 @@ from __future__ import unicode_literals
 from datetime import datetime
 import threading
 
-from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned, FieldError
 from django.db import connections, DEFAULT_DB_ALIAS
 from django.db import DatabaseError
-from django.db.models.fields import Field, FieldDoesNotExist
+from django.db.models.fields import Field
 from django.db.models.manager import BaseManager
 from django.db.models.query import QuerySet, EmptyQuerySet, ValuesListQuerySet, MAX_GET_RESULTS
 from django.test import TestCase, TransactionTestCase, skipIfDBFeature, skipUnlessDBFeature
@@ -316,8 +316,8 @@ class ModelTest(TestCase):
         )
 
         six.assertRaisesRegex(self,
-            FieldDoesNotExist,
-            "Article has no field named 'invalid_field'",
+            FieldError,
+            "Cannot resolve keyword u?'invalid_field' into field. Choices are: headline, id, pub_date",
             Article.objects.dates,
             "invalid_field",
             "year",

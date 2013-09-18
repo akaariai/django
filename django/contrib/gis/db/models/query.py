@@ -426,8 +426,7 @@ class GeoQuerySet(QuerySet):
         sql, params = field_col.as_sql(connections[self.db].ops.quote_name, connections[self.db])
         custom_sel = '%s(%s, %s)' % (connections[self.db].ops.transform, sql, srid)
         self.query.transformed_srid = srid  # So other GeoQuerySet methods
-        self.query.custom_select[label] = (
-            GeoRawSQL(custom_sel, params, field_col.output_type))
+        self.query.add_custom_select(label, GeoRawSQL(custom_sel, params, field_col.output_type))
         return self._clone()
 
     def union(self, geom, **kwargs):
@@ -578,7 +577,7 @@ class GeoQuerySet(QuerySet):
         if settings.get('select_field', False):
             sel_fld = settings['select_field']
             if isinstance(sel_fld, GeomField) and backend.select:
-                clone.query.custom_select[model_att] = backend.select
+                clone.query.add_custom_select(model_att, backend.select)
             if connection.ops.oracle:
                 sel_fld.empty_strings_allowed = False
         else:
@@ -586,9 +585,9 @@ class GeoQuerySet(QuerySet):
         # Finally, setting the extra selection attribute with
         # the format string expanded with the stored procedure
         # arguments.
-        clone.query.custom_select[model_att] = (
-            GeoRawSQL(fmt % settings['procedure_args'], settings['select_params'],
-                      sel_fld))
+        clone.query.add_custom_select(
+            model_att, GeoRawSQL(fmt % settings['procedure_args'], settings['select_params'],
+                                 sel_fld))
         return clone
 
     def _distance_attribute(self, func, geom=None, tolerance=0.05, spheroid=False, **kwargs):

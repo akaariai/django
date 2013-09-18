@@ -9,12 +9,14 @@ import sys
 from django.conf import settings
 from django.core import exceptions
 from django.db import connections, router, transaction, DatabaseError, IntegrityError
+from django.db.models.datastructures import Empty
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.fields import AutoField, Empty
+from django.db.models.fields import AutoField
 from django.db.models.query_utils import (Q, select_related_descend,
     deferred_class_factory, InvalidQuery)
 from django.db.models.deletion import Collector
 from django.db.models import sql
+from django.db.models.aggregates import Aggregate
 from django.utils.functional import partition
 from django.utils import six
 from django.utils import timezone
@@ -637,10 +639,11 @@ class QuerySet(object):
                 "'kind' must be one of 'year', 'month' or 'day'."
         assert order in ('ASC', 'DESC'), \
                 "'order' must be either 'ASC' or 'DESC'."
-        return self._clone(
-            klass=DateQuerySet, setup=True,
-            _field_name=field_name, _kind=kind, _order=order
-        ).values_list('_dateselect', flat=True)
+        return self.alias(
+            _dateselect=sql.datastructures.Date(field_name, kind)
+        ).values_list(
+            '_dateselect', flat=True
+        ).order_by(('-' if order == 'DESC' else '') + '_dateselect').distinct()
 
     def datetimes(self, field_name, kind, order='ASC', tzinfo=None):
         """
@@ -656,10 +659,11 @@ class QuerySet(object):
                 tzinfo = timezone.get_current_timezone()
         else:
             tzinfo = None
-        return self._clone(
-            klass=DateTimeQuerySet, setup=True,
-            _field_name=field_name, _kind=kind, _order=order, _tzinfo=tzinfo
-        ).values_list('_dateselect', flat=True)
+        return self.alias(
+            _dateselect=sql.datastructures.DateTime(field_name, kind, tzinfo)
+        ).values_list(
+            '_dateselect', flat=True
+        ).order_by(('-' if order == 'DESC' else '') + '_dateselect').distinct()
 
     def none(self):
         """
@@ -790,12 +794,17 @@ class QuerySet(object):
 
         aggregates = [k for k, v in kwargs.items()
                       if v.is_aggregate]
-        obj._setup_aggregate_query(aggregates)
+        if aggregates:
+            obj._setup_aggregate_query(aggregates)
 
         # Add the aggregates to the query
         for alias in aggregates:
-            obj.query.add_aggregate(kwargs[alias], self.model, alias,
-                                    is_summary=False, add_to_select=_add_to_select)
+            if not isinstance(kwargs[alias], Aggregate):
+                obj.query.add_column(kwargs[alias], self.model, alias,
+                                     add_to_select=_add_to_select)
+            else:
+                obj.query.add_aggregate(kwargs[alias], self.model, alias,
+                                        is_summary=False, add_to_select=_add_to_select)
         for alias in kwargs:
             if alias in aggregates:
                 continue

@@ -11,8 +11,9 @@ import inspect
 from itertools import tee
 
 from django.db import connection
+from django.db.models.datastructures import Col, Empty
 from django.db.models.loading import get_model
-from django.db.models.lookups import default_lookups, Col
+from django.db.models.lookups import default_lookups
 from django.db.models.query_utils import QueryWrapper
 from django.conf import settings
 from django import forms
@@ -26,10 +27,6 @@ from django.utils.translation import ugettext_lazy as _
 from django.utils.encoding import smart_text, force_text, force_bytes
 from django.utils.ipv6 import clean_ipv6_address
 from django.utils import six
-
-
-class Empty(object):
-    pass
 
 
 class NOT_PROVIDED:
