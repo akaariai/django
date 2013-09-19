@@ -947,32 +947,33 @@ class Query(object):
             raise FieldError(
                 "Join on field '%s' not permitted. Did you misspell '%s' for the lookup type?" %
                 (field.name, lookups[0]))
-        if lookup:
+        if lookup and len(lookups) > 1:
             for next_lookup in lookups[1:]:
                 nest_to = lookup.build_lookup(self.no_op_rewriter, [nest_to], nest_to.output_type,
-                                            self.where_class)
+                                              self.where_class)
                 lookup = nest_to.get_lookup(next_lookup)
                 if not lookup:
                     raise FieldError("'%s' doesn't support nesting lookup '%s'" %
                                     (nest_to.__class__.__name__, next_lookup))
-        else:
+        elif not lookup:
             lookup = lookups[0]
         # Interpret '__exact=None' as the sql 'is NULL'; otherwise, reject all
         # uses of None as a query value.
         if not hasattr(lookup, 'lookup_type'):
             # backwards compat
             lookup_type = lookup
-            isnull_lookup = 'isnull'
         else:
             lookup_type = lookup.lookup_type
-            try:
-                isnull_lookup = nest_to.get_lookup('isnull')
-            except LookupError:
-                isnull_lookup = Field().get_lookup('isnull')
         if value is None:
             if lookup_type != 'exact':
                 raise ValueError("Cannot use None as a query value")
-            lookup = isnull_lookup
+            if not hasattr(lookup, 'lookup_type'):
+                lookup = 'isnull'
+            else:
+                try:
+                    lookup = nest_to.get_lookup('isnull')
+                except LookupError:
+                    lookup = Field().get_lookup('isnull')
             value = True
         elif callable(value):
             value = value()
@@ -982,7 +983,8 @@ class Query(object):
         if hasattr(value, 'query') and hasattr(value.query, 'bump_prefix'):
             value = value._clone()
             value.query.bump_prefix(self)
-        if hasattr(value, 'bump_prefix'):
+            value = value._prepare()
+        elif hasattr(value, 'bump_prefix'):
             value = value.clone()
             value.bump_prefix(self)
         # For Oracle '' is equivalent to null. The check needs to be done
@@ -992,7 +994,13 @@ class Query(object):
         if (connections[DEFAULT_DB_ALIAS].features.interprets_empty_strings_as_nulls and
                 lookup_type == 'exact' and value == ''):
             value = True
-            lookup = isnull_lookup
+            if not hasattr(lookup, 'lookup_type'):
+                lookup = 'isnull'
+            else:
+                try:
+                    lookup = nest_to.get_lookup('isnull')
+                except LookupError:
+                    lookup = Field().get_lookup('isnull')
         if not hasattr(lookup, 'lookup_type'):
             if value is NoValueMarker:
                 raise FieldError(
@@ -1000,6 +1008,7 @@ class Query(object):
                     (lookup, field.__class__.__name__)
                 )
             return lookup, value
+        # TODO - ForeignKey field
         if hasattr(field, 'get_lookup_constraint'):
             return lookup, value
         return lookup.build_lookup(self.no_op_rewriter, [nest_to], nest_to.output_type,
@@ -1108,17 +1117,20 @@ class Query(object):
     def add_filter(self, filter_clause):
         self.where.add(self.build_filter(filter_clause), 'AND')
 
-    def need_having(self, obj):
+    def need_having(self, obj, aggregates=None):
         """
         Returns whether or not all elements of this q_object need to be put
         together in the HAVING clause.
         """
-        if not isinstance(obj, Node):
+        if aggregates is None:
             aggregates = dict((k, v) for k, v in self.custom_select.items() if v.is_aggregate)
+        if not aggregates:
+            return False
+        if not isinstance(obj, Node):
             return (bool(referred_aggregate(obj[0].split(LOOKUP_SEP), aggregates)[0])
                     or (hasattr(obj[1], 'contains_aggregate')
                         and obj[1].contains_aggregate(aggregates)))
-        return any(self.need_having(c) for c in obj.children)
+        return any(self.need_having(c, aggregates) for c in obj.children)
 
     def split_having_parts(self, q_object, negated=False):
         """

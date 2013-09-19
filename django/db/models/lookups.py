@@ -84,7 +84,10 @@ class SimpleLookup(Lookup):
         # lookup_rewriter can be used to provide alternate implementations
         # (for example if some "NoSQL" database needs that).
         lhs = target_cols[0]
-        lookup_implementation = lookup_rewriter(lhs.field, cls.lookup_type) or cls
+        if lookup_rewriter:
+            lookup_implementation = lookup_rewriter(lhs.field, cls.lookup_type) or cls
+        else:
+            lookup_implementation = cls
         return lookup_implementation(
             constraint_class, lhs, source_field or lhs.field, value)
 

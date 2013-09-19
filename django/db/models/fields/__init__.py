@@ -504,6 +504,12 @@ class Field(object):
         return self.get_db_prep_value(value, connection=connection,
                                       prepared=False)
 
+    PLAIN_VALUE_LOOKUPS = set([
+        'iexact', 'contains', 'icontains',
+        'startswith', 'istartswith', 'endswith', 'iendswith',
+        'month', 'day', 'week_day', 'hour', 'minute', 'second',
+        'isnull', 'search', 'regex', 'iregex'])
+    PREP_VALUE_LOOKUPS = set(['exact', 'gt', 'gte', 'lt', 'lte'])
     def get_prep_lookup(self, lookup_type, value):
         """
         Perform preliminary non-db specific lookup checks and conversions
@@ -513,14 +519,9 @@ class Field(object):
         if hasattr(value, '_prepare'):
             return value._prepare()
 
-        if lookup_type in {
-            'iexact', 'contains', 'icontains',
-            'startswith', 'istartswith', 'endswith', 'iendswith',
-            'month', 'day', 'week_day', 'hour', 'minute', 'second',
-            'isnull', 'search', 'regex', 'iregex',
-        }:
+        if lookup_type in self.PLAIN_VALUE_LOOKUPS:
             return value
-        elif lookup_type in ('exact', 'gt', 'gte', 'lt', 'lte'):
+        elif lookup_type in self.PREP_VALUE_LOOKUPS:
             return self.get_prep_value(value)
         elif lookup_type in ('range', 'in'):
             return [self.get_prep_value(v) for v in value]
