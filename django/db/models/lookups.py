@@ -23,6 +23,7 @@ class Lookup(object):
     The lookup will be constructed by classmethod build_lookup(...).
     """
     is_aggregate = False
+    convert_value = None
 
     def as_sql(self, qn, connection):
         raise NotImplementedError

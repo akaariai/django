@@ -41,7 +41,7 @@ class Date(RefCol):
         sql, params = self.col.as_sql(qn, connection)
         return connection.ops.date_trunc_sql(self.kind, sql), params
 
-    def convert_value(self, value, connection):
+    def convert_value(self, value, field, connection):
         if connection.features.needs_datetime_string_cast:
             value = typecast_date(str(value))
         if isinstance(value, datetime):
@@ -90,7 +90,7 @@ class DateTime(RefCol):
         assert isinstance(self.col.field, DateTimeField), \
             "%r isn't a DateTimeField." % self.col.field.name
 
-    def convert_value(self, value, connection):
+    def convert_value(self, value, field, connection):
         if connection.features.needs_datetime_string_cast:
             value = typecast_timestamp(str(value))
         if settings.USE_TZ:

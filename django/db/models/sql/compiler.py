@@ -2,7 +2,7 @@
 from django.core.exceptions import FieldError
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.lookups import NoValueMarker
-from django.db.models.query_utils import select_related_descend, QueryWrapper
+from django.db.models.query_utils import select_related_descend, QueryWrapper, get_converters
 from django.db.models.sql.constants import (
     SINGLE, MULTI, ORDER_DIR, GET_ITERATOR_CHUNK_SIZE)
 from django.db.models.sql.datastructures import EmptyResultSet
@@ -661,40 +661,19 @@ class SQLCompiler(object):
         return columns
 
     def setup_converters(self):
-        offset = 0
         converters = []
 
-        def add_backend_converter(converters, offset, field):
-            backend_converter = self.connection.ops.get_field_converter(field)
-            if backend_converter:
-                converters.append((offset, backend_converter))
-
-        for i, (_, field) in enumerate(self.query.custom_select_clause):
-            add_backend_converter(converters, offset + i, field.output_type)
-            # If the field itself has convert_value that overrides output_type's
-            # convert_value. Used by aggregates for example.
-            if hasattr(field, 'convert_value'):
-                converters.append((offset + i, field.convert_value))
-            elif hasattr(field.output_type, 'convert_value'):
-                converters.append((offset + i, field.output_type.convert_value))
-        offset = offset + len(self.query.custom_select_clause)
         only_load = self.deferred_to_columns()
+        all_select_cols = [f for _, f in self.query.custom_select_clause]
         if self.query.default_cols:
-            def_cols = self.get_default_columns()[0]
-            for i, col in enumerate(def_cols):
-                add_backend_converter(converters, offset + i, col.output_type)
-                if hasattr(col.output_type, 'convert_value'):
-                    converters.append((offset + i, col.output_type.convert_value))
-            offset += len(def_cols)
+            all_select_cols.extend(self.get_default_columns()[0])
         for col in self.related_select_cols:
             table = col.field.model._meta.db_table
             if table in only_load and col.field.column not in only_load[table]:
                 continue
-            add_backend_converter(converters, offset, col.output_type)
-            if hasattr(col.output_type, 'convert_value'):
-                converters.append((offset, col.output_type.convert_value))
-            offset += 1
-        return converters, offset
+            all_select_cols.append(col)
+        converters = get_converters(self.connection, all_select_cols)
+        return converters, len(all_select_cols)
 
     def results_iter(self):
         """
@@ -708,11 +687,11 @@ class SQLCompiler(object):
                 if row_length is None:
                     row_length = len(row)
                 if row_length != real_fields_amount:
-                    row = row[0:real_fields_amount]
+                    row = row[:real_fields_amount]
                 if converters:
                     row = list(row)
-                    for row_pos, converter in converters:
-                        row[row_pos] = converter(row[row_pos], self.connection)
+                    for row_pos, converter, field in converters:
+                        row[row_pos] = converter(row[row_pos], field, self.connection)
                     yield tuple(row)
                 else:
                     yield row

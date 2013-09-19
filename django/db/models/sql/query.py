@@ -9,6 +9,7 @@ all about the internals of models in order to get the information it needs.
 
 class RawSQL(object):
     is_aggregate = False
+    convert_value = None
 
     def __init__(self, sql, params, output_type):
         self.sql, self.params, self.output_type, self.field = sql, params, output_type, output_type
@@ -336,7 +337,7 @@ class Query(object):
             result = [None for q in query.aggregate_select_clause]
 
         return dict(
-            (alias, aggregate.convert_value(val, connections[using]))
+            (alias, aggregate.convert_value(val, aggregate, connections[using]))
             for (alias, aggregate), val
             in zip(query.aggregate_select_clause, result)
         )

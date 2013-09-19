@@ -13,7 +13,7 @@ from django.db.models.datastructures import Empty
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import AutoField
 from django.db.models.query_utils import (Q, select_related_descend,
-    deferred_class_factory, InvalidQuery)
+    deferred_class_factory, InvalidQuery, get_converters)
 from django.db.models.deletion import Collector
 from django.db.models import sql
 from django.db.models.aggregates import Aggregate
@@ -1529,25 +1529,14 @@ class RawQuerySet(object):
             for field in self.model._meta.fields:
                 model_init_field_pos.append(model_init_field_names[field.attname])
         connection = connections[db]
-
-        def add_backend_converter(converters, offset, field):
-            backend_converter = connection.ops.get_field_converter(field)
-            if backend_converter:
-                converters.append((offset, backend_converter))
-        converters = []
-        for pos, col in enumerate(self.columns):
-            field = self.model_fields.get(col, None)
-            if field:
-                add_backend_converter(converters, pos, field)
-            if hasattr(field, 'convert_value'):
-                converters.append((pos, field.convert_value))
-
+        converters = get_converters(
+            connection, [self.model_fields.get(c) for c in self.columns])
         # Begin looping through the query values.
         for values in query:
             if converters:
                 values = list(values)
-                for pos, converter in converters:
-                    values[pos] = converter(values[pos], connection)
+                for pos, converter, field in converters:
+                    values[pos] = converter(values[pos], field, connection)
                 values = tuple(values)
             # Associate fields to values
             if skip:

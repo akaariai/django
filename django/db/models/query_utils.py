@@ -205,3 +205,25 @@ def deferred_class_factory(model, attrs):
 # The above function is also used to unpickle model instances with deferred
 # fields.
 deferred_class_factory.__safe_for_unpickling__ = True
+
+def get_converters(connection, cols):
+    converters = []
+    if connection.ops.get_field_converter:
+        def add_backend_converter(converters, offset, field):
+            backend_converter = connection.ops.get_field_converter(field)
+            if backend_converter:
+                converters.append((offset, backend_converter, field))
+    else:
+        add_backend_converter = None
+    for i, col in enumerate(cols):
+        if col is None:
+            continue
+        if add_backend_converter:
+            add_backend_converter(converters, i, col.output_type)
+        # If the field itself has convert_value that overrides output_type's
+        # convert_value. Used by aggregates for example.
+        if col.convert_value:
+            converters.append((i, col.convert_value, col))
+        elif col.output_type.convert_value:
+            converters.append((i, col.output_type.convert_value, col))
+    return converters

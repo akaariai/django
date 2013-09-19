@@ -105,11 +105,15 @@ class CustomColumnsTests(TestCase):
             is_aggregate = True
             output_type = Field()
 
-            def convert_value(self, value, connection):
-                inner_converter = getattr(self.col.output_type, 'convert_value', None)
-                if inner_converter and value:
-                    return [inner_converter(v, connection) for v in value]
-                return value
+            # If wanted, the converter can be created dynamically.
+            @property
+            def convert_value(self):
+                inner_converter = self.col.output_type.convert_value
+                if inner_converter:
+                    def myconverter(value, field, connection):
+                        return [inner_converter(v, connection) for v in value]
+                    return myconverter
+                return None
 
             def as_sql(self, qn, connection):
                 inner_sql, params = self.col.as_sql(qn, connection)

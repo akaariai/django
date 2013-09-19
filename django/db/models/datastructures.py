@@ -1,5 +1,6 @@
 class Col(object):
     is_aggregate = False
+    convert_value = None
 
     def __init__(self, alias, field, output_type=None):
         self.alias, self.field, self.output_type = alias, field, output_type or field
@@ -24,6 +25,7 @@ class Col(object):
     def remove_from_query(self, query):
         query.unref_alias(self.alias, cascade=True)
 
+
 class Empty(object):
     pass
 
@@ -31,6 +33,7 @@ class RefCol(object):
     is_aggregate = False
     output_type = None
     allow_nulls = True
+    convert_value = None
 
     def __init__(self, lookup):
         self.lookup = lookup
@@ -62,6 +65,7 @@ class RefCol(object):
 class MultiRefCol(object):
     is_aggregate = False
     output_type = None
+    convert_value = None
 
     def __init__(self, lookups):
         self.lookups = lookups

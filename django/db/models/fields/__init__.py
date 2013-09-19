@@ -90,6 +90,7 @@ class Field(object):
     }
 
     col_class = Col
+    convert_value = None
 
     # Generic field type description, usually overridden by subclasses
     def _description(self):
@@ -147,6 +148,7 @@ class Field(object):
         self.error_messages = messages
         # Per instance lookups
         self.lookups = {}
+        self.output_type = self
 
     class_lookups = default_lookups.copy()
 

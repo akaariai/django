@@ -105,7 +105,7 @@ class Aggregate(object):
     def get_cols(self):
         return []
 
-    def convert_value(self, value, connection):
+    def convert_value(self, value, field, connection):
         if value is None:
             if self.is_ordinal:
                 return 0

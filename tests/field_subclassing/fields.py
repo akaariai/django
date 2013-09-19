@@ -74,5 +74,5 @@ class JSONField(six.with_metaclass(models.SubfieldBase, models.TextField)):
         return json.dumps(value)
 
 class JSONConverterField(JSONField):
-    def convert_value(self, value, connection):
+    def convert_value(self, value, field, connection):
         return self.to_python(value)
