@@ -154,7 +154,7 @@ class GeometryField(Field):
         # Get attributes from `get_srid_info`.
         self._units, self._units_name, self._spheroid = get_srid_info(self.srid, connection)
 
-    def convert_value(self, value, connection):
+    def convert_value(self, value, field, connection):
         return value and Geometry(value) or value
 
     def spheroid(self, connection):

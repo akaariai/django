@@ -220,7 +220,10 @@ WHEN (new.%(col_name)s IS NULL)
             sql = field_name    # Cast to DATE removes sub-second precision.
         return sql, []
 
-    def convert_values(self, value, field):
+    def get_field_converter(self, field):
+        return self.convert_values
+
+    def convert_values(self, value, field, connection=None):
         if isinstance(value, Database.LOB):
             value = value.read()
             if field and field.get_internal_type() == 'TextField':

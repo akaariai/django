@@ -14,7 +14,7 @@ from django.utils import six
 class GeoRawSQL(RawSQL):
     is_aggregate = False
 
-    def convert_value(self, value, connection):
+    def convert_value(self, value, field, connection):
         if value is None:
             # Output from spatial function is NULL (e.g., called
             # function on a geometry field with NULL value).

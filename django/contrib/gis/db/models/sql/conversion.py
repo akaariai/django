@@ -17,7 +17,7 @@ class AreaField(BaseField):
     def __init__(self, area_att):
         self.area_att = area_att
 
-    def convert_value(self, value, connection):
+    def convert_value(self, value, field, connection):
         return Area(**{self.area_att: value})
 
 class DistanceField(BaseField):
@@ -25,7 +25,7 @@ class DistanceField(BaseField):
     def __init__(self, distance_att):
         self.distance_att = distance_att
 
-    def convert_value(self, value, connection):
+    def convert_value(self, value, field, connection):
         return Distance(**{self.distance_att: value})
 
 class GeomField(BaseField):
@@ -33,5 +33,5 @@ class GeomField(BaseField):
     Wrapper for Geometry values.  It is a lightweight alternative to
     using GeometryField (which requires a SQL query upon instantiation).
     """
-    def convert_value(self, value, connection):
+    def convert_value(self, value, field, connection):
         return Geometry(value) if value else value
