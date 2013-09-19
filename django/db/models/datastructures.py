@@ -1,11 +1,25 @@
 class Col(object):
     is_aggregate = False
     convert_value = None
+    use_caching = False
 
     def __init__(self, alias, field, output_type=None):
         self.alias, self.field, self.output_type = alias, field, output_type or field
+        if self.use_caching:
+            self.col_cache = {}
+
+    def set_use_caching(self):
+        self.use_caching = True
+        self.col_cache = {}
 
     def as_sql(self, qn, connection):
+        if self.use_caching:
+            try:
+                return self.col_cache[connection.vendor], []
+            except KeyError:
+                col = "%s.%s" % (qn(self.alias), qn(self.field.column))
+                self.col_cache[connection.vendor] = col
+                return col, []
         return "%s.%s" % (qn(self.alias), qn(self.field.column)), []
 
     def relabeled_clone(self, change_map):

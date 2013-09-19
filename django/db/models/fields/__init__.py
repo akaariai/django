@@ -149,6 +149,7 @@ class Field(object):
         # Per instance lookups
         self.lookups = {}
         self.output_type = self
+        self.col_cache = {}
 
     class_lookups = default_lookups.copy()
 
@@ -172,6 +173,14 @@ class Field(object):
         cls.class_lookups[lookup.lookup_type] = lookup
 
     def create_col(self, alias, field=None):
+        if alias == self.model._meta.db_table:
+            try:
+                return self.col_cache[alias]
+            except KeyError:
+                new_col = self.col_class(alias, self, field)
+                new_col.set_use_caching()
+                self.col_cache[alias] = new_col
+                return new_col
         return self.col_class(alias, self, field)
 
     def deconstruct(self):
