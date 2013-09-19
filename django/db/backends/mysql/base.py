@@ -45,8 +45,6 @@ from django.db.backends.mysql.introspection import DatabaseIntrospection
 from django.db.backends.mysql.validation import DatabaseValidation
 from django.utils.encoding import force_str, force_text
 from django.db.backends.mysql.schema import DatabaseSchemaEditor
-from django.utils.encoding import force_str
-from django.utils.functional import cached_property
 from django.utils.safestring import SafeBytes, SafeText
 from django.utils import six
 from django.utils import timezone
@@ -216,6 +214,13 @@ class DatabaseFeatures(BaseDatabaseFeatures):
 
 class DatabaseOperations(BaseDatabaseOperations):
     compiler_module = "django.db.backends.mysql.compiler"
+
+    def _convert_boolean(self, value, connection):
+        return bool(value) if value in (0, 1) else value
+
+    def get_field_converter(self, field):
+        if field.get_internal_type() in ('BooleanField', 'NullBooleanField'):
+            return self._convert_boolean
 
     def date_extract_sql(self, lookup_type, field_name):
         # http://dev.mysql.com/doc/mysql/en/date-and-time-functions.html

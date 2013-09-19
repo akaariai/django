@@ -535,15 +535,18 @@ class SQLCompiler(object):
                 forced_group_by = self.query.group_by
             else:
                 forced_group_by = []
-            extra_selects = [col for _, col in self.query.custom_select_clause
-                             if not col.is_aggregate]
-            if (self.query.default_cols and not self.related_select_cols
-                    and not extra_selects
-                    and self.connection.features.allows_group_by_pk):
+            custom_selects = [col for _, col in self.query.custom_select_clause
+                              if not col.is_aggregate]
+            extra_selects = [col for _, col
+                             in self.query.custom_select_clause
+                             if getattr(col, 'is_extra_clause', False)]
+            # Actually, it would be enough to check that self.pk is selected somewhere,
+            # if so, then we are fine.
+            if self.query.default_cols and self.connection.features.allows_group_by_pk:
                 cols = having_group_by + extra_selects + [
                     self.query.get_meta().pk.create_col(self.query.get_meta().db_table)]
             else:
-                cols = having_group_by + select_cols + extra_selects + default_cols + forced_group_by
+                cols = having_group_by + select_cols + custom_selects + default_cols + forced_group_by
             seen = set()
             for col in cols:
                 col_params = ()
@@ -657,14 +660,15 @@ class SQLCompiler(object):
         self.query.deferred_to_data(columns, self.query.deferred_to_columns_cb)
         return columns
 
-    def setup_converters(self, offset):
-        # TODO: do this as part of get_columns()
+    def setup_converters(self):
+        offset = 0
         converters = []
 
         def add_backend_converter(converters, offset, field):
             backend_converter = self.connection.ops.get_field_converter(field)
             if backend_converter:
-                converters.append(offset, backend_converter)
+                converters.append((offset, backend_converter))
+
         for i, (_, field) in enumerate(self.query.custom_select_clause):
             add_backend_converter(converters, offset + i, field.output_type)
             # If the field itself has convert_value that overrides output_type's
@@ -682,32 +686,32 @@ class SQLCompiler(object):
                 if hasattr(col.output_type, 'convert_value'):
                     converters.append((offset + i, col.output_type.convert_value))
             offset += len(def_cols)
-        else:
-            for col in self.related_select_cols:
-                table = col.field.model._meta.db_table
-                if table in only_load and col.field.column not in only_load[table]:
-                    continue
-                add_backend_converter(converters, offset, col.output_type)
-                if hasattr(col.output_type, 'convert_value'):
-                    converters.append((offset, col.output_type.convert_value))
-                offset += 1
-        self.converters = converters
+        for col in self.related_select_cols:
+            table = col.field.model._meta.db_table
+            if table in only_load and col.field.column not in only_load[table]:
+                continue
+            add_backend_converter(converters, offset, col.output_type)
+            if hasattr(col.output_type, 'convert_value'):
+                converters.append((offset, col.output_type.convert_value))
+            offset += 1
+        return converters, offset
 
     def results_iter(self):
         """
         Returns an iterator over the results from executing this query.
         """
         row_batches = self.execute_sql(MULTI)
-        rn_offset = 0
-        if self.connection.vendor == 'oracle':
-            if self.query.high_mark is not None or self.query.low_mark:
-                rn_offset = 1
-        self.setup_converters(rn_offset)
+        converters, real_fields_amount = self.setup_converters()
+        row_length = None
         for rows in row_batches:
             for row in rows:
-                if self.converters:
+                if row_length is None:
+                    row_length = len(row)
+                if row_length != real_fields_amount:
+                    row = row[0:real_fields_amount]
+                if converters:
                     row = list(row)
-                    for row_pos, converter in self.converters:
+                    for row_pos, converter in converters:
                         row[row_pos] = converter(row[row_pos], self.connection)
                     yield tuple(row)
                 else:
@@ -756,15 +760,9 @@ class SQLCompiler(object):
                 return cursor.fetchone()[:-len(self.ordering_aliases)]
             return cursor.fetchone()
 
-        # The MULTI case.
-        if self.ordering_aliases:
-            result = order_modified_iter(
-                cursor, len(self.ordering_aliases),
-                self.connection.features.empty_fetchmany_value)
-        else:
-            result = iter(
-                lambda: cursor.fetchmany(GET_ITERATOR_CHUNK_SIZE),
-                self.connection.features.empty_fetchmany_value)
+        result = iter(
+            lambda: cursor.fetchmany(GET_ITERATOR_CHUNK_SIZE),
+            self.connection.features.empty_fetchmany_value)
         if not self.connection.features.can_use_chunked_reads:
             # If we are using non-chunked reads, we return the same data
             # structure as normally, but ensure it is all read into memory
@@ -1029,14 +1027,3 @@ class SQLAggregateCompiler(SQLCompiler):
         sql = 'SELECT %s FROM (%s) subquery' % (sql, self.query.subquery)
         params = params + self.query.sub_params
         return sql, params
-
-def order_modified_iter(cursor, trim, sentinel):
-    """
-    Yields blocks of rows from a cursor. We use this iterator in the special
-    case when extra output columns have been added to support ordering
-    requirements. We must trim those extra columns before anything else can use
-    the results, since they're only needed to make the SQL valid.
-    """
-    for rows in iter((lambda: cursor.fetchmany(GET_ITERATOR_CHUNK_SIZE)),
-                     sentinel):
-        yield [r[:-trim] for r in rows]

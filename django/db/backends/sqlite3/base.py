@@ -107,6 +107,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     autocommits_when_autocommit_is_off = True
     supports_paramstyle_pyformat = False
     supports_sequence_reset = False
+    needs_datetime_string_cast = True
 
     @cached_property
     def uses_savepoints(self):

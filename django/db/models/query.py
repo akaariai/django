@@ -1533,7 +1533,7 @@ class RawQuerySet(object):
         def add_backend_converter(converters, offset, field):
             backend_converter = connection.ops.get_field_converter(field)
             if backend_converter:
-                converters.append(offset, backend_converter)
+                converters.append((offset, backend_converter))
         converters = []
         for pos, col in enumerate(self.columns):
             field = self.model_fields.get(col, None)

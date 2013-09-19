@@ -921,14 +921,13 @@ class AggregationTests(TestCase):
 
         # There should only be one GROUP BY clause, for the `id` column.
         # `name` and `age` should not be grouped on.
-        grouping, gb_params = results.query.get_compiler(using='default').get_grouping([], [])
+        compiler = results.query.get_compiler(using='default')
+        compiler.pre_sql_setup()
+        grouping, gb_params = compiler.get_grouping([], [])
         self.assertEqual(len(grouping), 1)
         assert 'id' in grouping[0]
         assert 'name' not in grouping[0]
         assert 'age' not in grouping[0]
-
-        # The query group_by property should also only show the `id`.
-        self.assertEqual(results.query.group_by, [('aggregation_regress_author', 'id')])
 
         # Ensure that we get correct results.
         self.assertEqual(
@@ -950,14 +949,12 @@ class AggregationTests(TestCase):
     def test_aggregate_duplicate_columns_only(self):
         # Works with only() too.
         results = Author.objects.only('id', 'name').annotate(num_contacts=Count('book_contact_set'))
-        grouping, gb_params = results.query.get_compiler(using='default').get_grouping([], [])
-        self.assertEqual(len(grouping), 1)
+        compiler = results.query.get_compiler(using='default')
+        compiler.pre_sql_setup()
+        grouping, gb_params = compiler.get_grouping([], [])
         assert 'id' in grouping[0]
         assert 'name' not in grouping[0]
         assert 'age' not in grouping[0]
-
-        # The query group_by property should also only show the `id`.
-        self.assertEqual(results.query.group_by, [('aggregation_regress_author', 'id')])
 
         # Ensure that we get correct results.
         self.assertEqual(
@@ -980,14 +977,13 @@ class AggregationTests(TestCase):
         # And select_related()
         results = Book.objects.select_related('contact').annotate(
             num_authors=Count('authors'))
-        grouping, gb_params = results.query.get_compiler(using='default').get_grouping([], [])
+        compiler = results.query.get_compiler(using='default')
+        compiler.pre_sql_setup()
+        grouping, gb_params = compiler.get_grouping([], [])
         self.assertEqual(len(grouping), 1)
         assert 'id' in grouping[0]
         assert 'name' not in grouping[0]
         assert 'contact' not in grouping[0]
-
-        # The query group_by property should also only show the `id`.
-        self.assertEqual(results.query.group_by, [('aggregation_regress_book', 'id')])
 
         # Ensure that we get correct results.
         self.assertEqual(
