@@ -176,6 +176,7 @@ class BaseDatabaseWrapper(object):
         """
         self.validate_thread_sharing()
         self.validate_no_atomic_block()
+        self.needs_rollback = False
         self._rollback()
         self.set_clean()
 
@@ -238,6 +239,7 @@ class BaseDatabaseWrapper(object):
             return
 
         self.validate_thread_sharing()
+        self.needs_rollback = False
         self._savepoint_rollback(sid)
 
     def savepoint_commit(self, sid):
@@ -360,6 +362,12 @@ class BaseDatabaseWrapper(object):
         if self.in_atomic_block:
             raise TransactionManagementError(
                 "This is forbidden when an 'atomic' block is active.")
+
+    def validate_no_broken_transaction(self):
+        if self.needs_rollback:
+            raise TransactionManagementError(
+                "An error occurred in the current transaction. You can't "
+                "execute queries until the end of the 'atomic' block.")
 
     def abort(self):
         """

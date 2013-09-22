@@ -195,9 +195,6 @@ class AtomicTests(TransactionTestCase):
                 connection.cursor().execute(
                         "SELECT no_such_col FROM transactions_reporter")
             transaction.savepoint_rollback(sid)
-            # atomic block should rollback, but prevent it, as we just did it.
-            self.assertTrue(transaction.get_rollback())
-            transaction.set_rollback(False)
         self.assertQuerysetEqual(Reporter.objects.all(), ['<Reporter: Tintin>'])
 
 
@@ -257,27 +254,35 @@ class AtomicMergeTests(TransactionTestCase):
                         transaction.atomic(savepoint=False):
                     Reporter.objects.create(first_name="Tournesol")
                     raise Exception("Oops, that's his last name")
-                # It wasn't possible to roll back
-                self.assertEqual(Reporter.objects.count(), 3)
-            # It wasn't possible to roll back
-            self.assertEqual(Reporter.objects.count(), 3)
+                # No queries as tx marked for rollback
+                with self.assertRaises(transaction.TransactionManagementError):
+                    Reporter.objects.count()
+            # Still impossible to query
+            with self.assertRaises(transaction.TransactionManagementError):
+                Reporter.objects.count()
         # The outer block must roll back
         self.assertQuerysetEqual(Reporter.objects.all(), [])
 
     def test_merged_inner_savepoint_rollback(self):
         with transaction.atomic():
-            Reporter.objects.create(first_name="Tintin")
+            r1 = Reporter.objects.create(first_name="Tintin")
             with transaction.atomic():
-                Reporter.objects.create(first_name="Archibald", last_name="Haddock")
+                r2 = Reporter.objects.create(first_name="Archibald", last_name="Haddock")
                 with six.assertRaisesRegex(self, Exception, "Oops"), \
                         transaction.atomic(savepoint=False):
-                    Reporter.objects.create(first_name="Tournesol")
+                    r3 = Reporter.objects.create(first_name="Tournesol")
                     raise Exception("Oops, that's his last name")
-                # It wasn't possible to roll back
+                # No queries - tx marked for rollback.
+                with self.assertRaises(transaction.TransactionManagementError):
+                    Reporter.objects.count()
+                # But, it is possible to continue the tx if explicitly asked
+                transaction.set_rollback(False)
                 self.assertEqual(Reporter.objects.count(), 3)
-            # The first block with a savepoint must roll back
-            self.assertEqual(Reporter.objects.count(), 1)
-        self.assertQuerysetEqual(Reporter.objects.all(), ['<Reporter: Tintin>'])
+            # The block isn't rolled back
+            self.assertEqual(Reporter.objects.count(), 3)
+        self.assertQuerysetEqual(
+            Reporter.objects.order_by('first_name'),
+            [r2, r1, r3], lambda x: x)
 
     def test_merged_outer_rollback_after_inner_failure_and_inner_success(self):
         with transaction.atomic():
@@ -287,13 +292,9 @@ class AtomicMergeTests(TransactionTestCase):
                     transaction.atomic(savepoint=False):
                 Reporter.objects.create(first_name="Haddock")
                 raise Exception("Oops, that's his last name")
-            # It wasn't possible to roll back
-            self.assertEqual(Reporter.objects.count(), 2)
-            # Inner block with a savepoint succeeds
-            with transaction.atomic(savepoint=False):
-                Reporter.objects.create(first_name="Archibald", last_name="Haddock")
-            # It still wasn't possible to roll back
-            self.assertEqual(Reporter.objects.count(), 3)
+            # It isn't possible to use the connection until rollback
+            with self.assertRaises(transaction.TransactionManagementError):
+                Reporter.objects.count()
         # The outer block must rollback
         self.assertQuerysetEqual(Reporter.objects.all(), [])
 
@@ -326,6 +327,42 @@ class AtomicErrorsTests(TransactionTestCase):
             with self.assertRaises(transaction.TransactionManagementError):
                 transaction.leave_transaction_management()
 
+    def test_atomic_prevents_running_more_queries_after_an_error(self):
+        cursor = connection.cursor()
+        with transaction.atomic():
+            with self.assertRaises(DatabaseError):
+                with transaction.atomic(savepoint=False):
+                    cursor.execute("INSERT INTO transactions_no_such_table (id) VALUES (0)")
+            with self.assertRaises(transaction.TransactionManagementError):
+                cursor.execute("INSERT INTO transactions_no_such_table (id) VALUES (0)")
+
+class SaveInAtomicTests(TransactionTestCase):
+    available_apps = ['transactions']
+
+    def test_failed_save_prevents_queries(self):
+        r1 = Reporter.objects.create(first_name='foo', last_name='bar')
+        with transaction.atomic():
+            r2 = Reporter(first_name='foo', last_name='bar2', id=r1.id)
+            try:
+                r2.save(force_insert=True)
+            except IntegrityError:
+                # queries aren't possible, as r2.save marked the transaction
+                # as needing rollback
+                with self.assertRaises(transaction.TransactionManagementError):
+                    r2.save(force_update=True)
+        self.assertEqual(Reporter.objects.get(pk=r1.pk).last_name, 'bar')
+
+    def test_failed_save_set_rollback(self):
+        r1 = Reporter.objects.create(first_name='foo', last_name='bar')
+        with transaction.atomic():
+            r2 = Reporter(first_name='foo', last_name='bar2', id=r1.id)
+            try:
+                r2.save(force_insert=True)
+            except IntegrityError:
+                # Explicit clear of rollback state
+                transaction.set_rollback(False)
+                r2.save(force_update=True)
+        self.assertEqual(Reporter.objects.get(pk=r1.pk).last_name, 'bar2')
 
 class AtomicMiscTests(TransactionTestCase):
 
