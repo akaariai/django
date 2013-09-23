@@ -3,7 +3,9 @@ from __future__ import unicode_literals
 import sys
 from unittest import skipIf, skipUnless
 
+from django.db.models import FieldDoesNotExist
 from django.db import connection, transaction, DatabaseError, IntegrityError
+from django.db.models.signals import pre_delete
 from django.test import TransactionTestCase, skipUnlessDBFeature
 from django.test.utils import IgnoreDeprecationWarningsMixin
 from django.utils import six
@@ -363,6 +365,36 @@ class SaveInAtomicTests(TransactionTestCase):
                 transaction.set_rollback(False)
                 r2.save(force_update=True)
         self.assertEqual(Reporter.objects.get(pk=r1.pk).last_name, 'bar2')
+
+    def test_delete_signal_preventing_save(self):
+        class PreventDeletionException(Exception):
+            pass
+
+        def pre_reporter_delete(*args, **kwargs):
+            raise PreventDeletionException("Not allowed to delete!")
+        try:
+            with transaction.atomic():
+                pre_delete.connect(pre_reporter_delete, Reporter)
+                r1 = Reporter.objects.create(first_name='foo', last_name='bar')
+                try:
+                    r1.delete()
+                    self.fail("Delete should raise Exception from pre_delete")
+                except PreventDeletionException:
+                    transaction.set_rollback(False)
+                    r1.last_name = 'bar2'
+                    r1.save()
+            self.assertEqual(Reporter.objects.get(pk=r1.pk).last_name, 'bar2')
+        finally:
+            pre_delete.disconnect(pre_reporter_delete, Reporter)
+
+    def test_update_invalid_field(self):
+        with transaction.atomic():
+            try:
+                Reporter.objects.update(foobar=1)
+            except FieldDoesNotExist:
+                Reporter.objects.create(first_name='foo', last_name='bar')
+        self.assertEqual(Reporter.objects.count(), 1)
+
 
 class AtomicMiscTests(TransactionTestCase):
 
