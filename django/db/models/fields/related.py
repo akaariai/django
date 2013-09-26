@@ -612,11 +612,27 @@ def create_many_related_manager(superclass, rel):
             remove.alters_data = True
 
         def clear(self):
-            self._clear_items(self.source_field_name)
+            db = router.db_for_write(self.through, instance=self.instance)
 
-            # If this is a symmetrical m2m relation to self, clear the mirror entry in the m2m table
+            signals.m2m_changed.send(sender=self.through, action="pre_clear",
+                instance=self.instance, reverse=self.reverse,
+                model=self.model, pk_set=None, using=db)
+
+            manager = self.through._default_manager.using(db)
+            queryset = manager.filter(**{
+                self.source_field_name: self.related_val,
+                '%s__in' % self.target_field_name: self.using(db).all()
+            })
             if self.symmetrical:
-                self._clear_items(self.target_field_name)
+                queryset |= manager.filter(**{
+                    self.target_field_name: self.related_val,
+                    '%s__in' % self.source_field_name: self.using(db).all()
+                })
+            queryset.delete()
+
+            signals.m2m_changed.send(sender=self.through, action="post_clear",
+                instance=self.instance, reverse=self.reverse,
+                model=self.model, pk_set=None, using=db)
         clear.alters_data = True
 
         def create(self, **kwargs):
@@ -732,25 +748,6 @@ def create_many_related_manager(superclass, rel):
                     signals.m2m_changed.send(sender=self.through, action="post_remove",
                         instance=self.instance, reverse=self.reverse,
                         model=self.model, pk_set=old_ids, using=db)
-
-        def _clear_items(self, source_field_name):
-            db = router.db_for_write(self.through, instance=self.instance)
-            # source_field_name: the PK colname in join table for the source object
-            if self.reverse or source_field_name == self.source_field_name:
-                # Don't send the signal when we are clearing the
-                # duplicate data rows for symmetrical reverse entries.
-                signals.m2m_changed.send(sender=self.through, action="pre_clear",
-                    instance=self.instance, reverse=self.reverse,
-                    model=self.model, pk_set=None, using=db)
-            self.through._default_manager.using(db).filter(**{
-                source_field_name: self.related_val
-            }).delete()
-            if self.reverse or source_field_name == self.source_field_name:
-                # Don't send the signal when we are clearing the
-                # duplicate data rows for symmetrical reverse entries.
-                signals.m2m_changed.send(sender=self.through, action="post_clear",
-                    instance=self.instance, reverse=self.reverse,
-                    model=self.model, pk_set=None, using=db)
 
     return ManyRelatedManager
 

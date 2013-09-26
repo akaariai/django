@@ -13,7 +13,9 @@ class CustomManagerTests(TestCase):
         self.b2 = Book.published_objects.create(
             title="How to be smart", author="Albert Einstein", is_published=False)
         self.p1 = Person.objects.create(first_name="Bugs", last_name="Bunny", fun=True)
+        self.fun = self.p1
         self.p2 = Person.objects.create(first_name="Droopy", last_name="Dog", fun=False)
+        self.boring = self.p2
 
     def test_manager(self):
         # Test a custom `Manager` method.
@@ -186,6 +188,64 @@ class CustomManagerTests(TestCase):
         self.assertQuerysetEqual(
             self.b1.authors(manager='fun_people').all(), [
                 "Bugs",
+            ],
+            lambda c: c.first_name
+        )
+
+    def test_related_manager_fk_removal(self):
+        self.fun.favorite_book = self.b1
+        self.fun.save()
+        self.boring.favorite_book = self.b1
+        self.boring.save()
+
+        # Check that the fun manager ONLY clears fun people.
+        self.b1.favorite_books(manager='fun_people').clear()
+        self.assertQuerysetEqual(
+            self.b1.favorite_books(manager='boring_people').all(), [
+                self.boring.first_name,
+            ],
+            lambda c: c.first_name
+        )
+        self.assertQuerysetEqual(
+            self.b1.favorite_books(manager='fun_people').all(), [
+            ],
+            lambda c: c.first_name
+        )
+
+    def test_related_manager_gfk_removal(self):
+        self.fun.favorite_thing = self.b1
+        self.fun.save()
+        self.boring.favorite_thing = self.b1
+        self.boring.save()
+
+        # Check that the fun manager ONLY clears fun people.
+        self.b1.favorite_things(manager='fun_people').clear()
+        self.assertQuerysetEqual(
+            self.b1.favorite_things(manager='boring_people').all(), [
+                self.boring.first_name,
+            ],
+            lambda c: c.first_name
+        )
+        self.assertQuerysetEqual(
+            self.b1.favorite_things(manager='fun_people').all(), [
+            ],
+            lambda c: c.first_name
+        )
+
+    def test_related_manager_m2m_removal(self):
+        self.b1.authors.add(self.fun)
+        self.b1.authors.add(self.boring)
+
+        # Check that the fun manager ONLY clears fun people.
+        self.b1.authors(manager='fun_people').clear()
+        self.assertQuerysetEqual(
+            self.b1.authors(manager='boring_people').all(), [
+                self.boring.first_name,
+            ],
+            lambda c: c.first_name
+        )
+        self.assertQuerysetEqual(
+            self.b1.authors(manager='fun_people').all(), [
             ],
             lambda c: c.first_name
         )
