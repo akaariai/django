@@ -574,6 +574,30 @@ a :exc:`~exceptions.ValueError` when encountering them, you will have to
 install pytz_. You may be affected by this problem if you use Django's time
 zone-related date formats or :mod:`django.contrib.syndication`.
 
+``remove()`` and ``clear()`` methods of related managers.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``remove()`` and ``clear()`` methods of the related managers created by
+``ForeignKey``, ``GenericForeignKey``, and ``ManyToManyField`` suffered from a
+number of issues, notably, they caused multiple consecutive database operations
+run without transaction handling, and they didn't respect default filtering when
+present (i.e. the default manager on the related model implements a custom
+``get_queryset``) which could lead to unexpected data loss.
+
+Besides the expected new behavior, fixing these issues induced some backward
+incompatible changes:
+
+- The implementation of ``remove()`` for ``ForeignKey`` related managers changed
+  from a series of ``Model.save()`` to a single ``QuerySet.update()``, which
+  means ``pre_save`` and ``post_save`` signals aren't called anymore.
+
+- The ``remove()`` and ``clear()`` methods for ``GenericForeignKey`` related
+  managers now perform bulk delete so ``Model.delete()`` isn't called anymore.
+
+- The ``remove()`` and ``clear()`` methods for ``ManyToManyField`` related
+  managers perform subqueries when filtering is involved, which may or may not
+  be an issue depending on your database and your data itself.
+
 .. _pytz: https://pypi.python.org/pypi/pytz/
 
 Miscellaneous
