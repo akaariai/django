@@ -373,6 +373,8 @@ class SQLCompiler(object):
                         group_by.append((sql, col_params))
             else:
                 if col not in self.query.custom_select_mask:
+                    if hasattr(self.query.custom_select[col], 'add_to_query'):
+                        self.query.custom_select[col].add_to_query(self.query, col)
                     elt, col_params = self.query.custom_select[col].as_sql(qn, self.connection)
                     params.extend(col_params)
                     ordering_aliases.append(elt)
