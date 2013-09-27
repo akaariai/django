@@ -1,3 +1,4 @@
+# -*- encoding: utf-8 -*-
 from __future__ import unicode_literals
 
 import re
@@ -8,6 +9,7 @@ from django.test import TestCase
 from unittest import skipUnless
 
 from .models import Author, NotEqual, FakeNotEqual, CustomIntegerField, SubCustomIntegerField, Book
+from .collate import Collate
 
 
 class CustomColumnsTests(TestCase):
@@ -264,3 +266,40 @@ class CustomColumnsTests(TestCase):
         new_qs = qs.all()
         self.assertQuerysetEqual(
             new_qs, [self.a1, self.a3], lambda x: x)
+
+    @skipUnless(connection.vendor == 'postgresql',
+                'Uses PostgreSQL specific SQL')
+    @skipUnless(connection.pg_version >= 90100,
+                'PostgreSQL 9.1+ feature needed')
+    def test_collate(self):
+        # Needs collations fi_FI, POSIX, en_GB
+        from django.db import connection
+        cur = connection.cursor()
+        cur.execute("select 1 from pg_collation where collname in %s",
+                    (('fi_FI', 'POSIX', 'en_GB'),))
+        if len(cur.fetchall()) < 3:
+            return
+        a1 = Author.objects.create(name='äxx', age=12)
+        a2 = Author.objects.create(name='axx', age=12)
+        a3 = Author.objects.create(name='bxx', age=12)
+        b1 = Book.objects.create(author=a1, pages=123)
+        b2 = Book.objects.create(author=a2, pages=123)
+        b3 = Book.objects.create(author=a3, pages=123)
+        base_qs = Book.objects.alias(
+            author_name_fi=Collate('author__name', 'fi_FI'),
+            author_name_en=Collate('author__name', 'en_GB'),
+            author_name_posix=Collate('author__name', 'POSIX'),
+        )
+        self.assertQuerysetEqual(
+            base_qs.order_by('author_name_fi'),
+            [b2, b3, b1],  # a > b > ä in finnish collation
+            lambda x: x)
+        self.assertQuerysetEqual(
+            base_qs.order_by('author_name_en'),
+            [b2, b1, b3],  # a > ä > b in english collation
+            lambda x: x)
+        # Filters work, too
+        # lower(Ä) != ä in POSIX collate
+        self.assertEqual(base_qs.filter(author_name_posix__icontains='ä').count(), 0)
+        # lower(Ä) == ä in fi collate
+        self.assertEqual(base_qs.filter(author_name_fi__icontains='ä').count(), 1)
