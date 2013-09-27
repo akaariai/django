@@ -236,6 +236,23 @@ class CustomManagerTests(TestCase):
         self.b1.authors.add(self.fun)
         self.b1.authors.add(self.boring)
 
+        self.b1.authors(manager='fun_people').remove(self.boring)
+        self.assertQuerysetEqual(
+            self.b1.authors(manager='boring_people').all(), [
+                self.boring.first_name,
+            ],
+            lambda c: c.first_name
+        )
+
+        self.b1.authors(manager='boring_people').remove(self.boring)
+        self.assertQuerysetEqual(
+            self.b1.authors(manager='boring_people').all(), [
+            ],
+            lambda c: c.first_name
+        )
+        self.b1.authors.add(self.boring)
+
+
         # Check that the fun manager ONLY clears fun people.
         self.b1.authors(manager='fun_people').clear()
         self.assertQuerysetEqual(
