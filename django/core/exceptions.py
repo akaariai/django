@@ -6,6 +6,13 @@ import operator
 
 from django.utils.encoding import force_text
 
+class RemovedInDjango19Warning(PendingDeprecationWarning):
+    pass
+
+
+class RemovedInDjango18Warning(DeprecationWarning):
+    pass
+
 
 class DjangoRuntimeWarning(RuntimeWarning):
     pass

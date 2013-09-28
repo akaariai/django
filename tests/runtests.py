@@ -9,6 +9,11 @@ import sys
 import tempfile
 import warnings
 
+from django.core.exceptions import RemovedInDjango19Warning, RemovedInDjango18Warning
+warnings.simplefilter("default", RemovedInDjango19Warning)
+warnings.simplefilter("default", RemovedInDjango18Warning)
+
+
 def upath(path):
     """
     Separate version of django.utils._os.upath. The django.utils version isn't
