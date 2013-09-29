@@ -271,10 +271,8 @@ class CustomColumnsTests(TestCase):
         self.assertQuerysetEqual(
             new_qs, [self.a1, self.a3], lambda x: x)
 
-    @skipUnless(connection.vendor == 'postgresql',
-                'Uses PostgreSQL specific SQL')
-    @skipUnless(connection.pg_version >= 90100,
-                'PostgreSQL 9.1+ feature needed')
+    @skipUnless(connection.vendor == 'postgresql' and connection.pg_version >= 90100,
+                'Uses PostgreSQL 9.1+ specific SQL')
     def test_collate(self):
         # Needs collations fi_FI, POSIX, en_GB
         from django.db import connection

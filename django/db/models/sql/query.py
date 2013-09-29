@@ -940,6 +940,7 @@ class Query(object):
         self.add_custom_select(alias, col, add_to_select=add_to_select)
 
     def build_lookup(self, lookups, field, lhs, value, can_reuse):
+        # This needs rewrite badly.
         lookups = lookups or ['exact']
         nest_to = lhs
         lookup = field.get_lookup(lookups[0])
@@ -1008,10 +1009,14 @@ class Query(object):
                     (lookup, field.__class__.__name__)
                 )
             return lookup, value
-        # TODO - ForeignKey field
         if hasattr(field, 'get_lookup_constraint'):
             return lookup, value
-        return lookup.build_lookup(self.no_op_rewriter, [nest_to], nest_to.output_type,
+        if hasattr(field, 'output_type'):
+            output_type = field.output_type
+        else:
+            output_type = field
+
+        return lookup.build_lookup(self.no_op_rewriter, [nest_to], output_type,
                                    self.where_class, value), value
 
     def no_op_rewriter(self, field, lookup_type):
