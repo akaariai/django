@@ -2,7 +2,7 @@ from operator import attrgetter
 
 from django.db import connection, connections, router, transaction
 from django.db.backends import utils
-from django.db.models import signals
+from django.db.models import signals, Q
 from django.db.models.fields import (AutoField, Field, IntegerField,
     PositiveIntegerField, PositiveSmallIntegerField, FieldDoesNotExist)
 from django.db.models.related import RelatedObject, PathInfo
@@ -516,6 +516,7 @@ def create_many_related_manager(superclass, rel):
             self.instance = instance
             self.symmetrical = symmetrical
             self.source_field = source_field
+            self.target_field = through._meta.get_field(target_field_name)
             self.source_field_name = source_field_name
             self.target_field_name = target_field_name
             self.reverse = reverse
@@ -614,17 +615,18 @@ def create_many_related_manager(superclass, rel):
                 instance=self.instance, reverse=self.reverse,
                 model=self.model, pk_set=None, using=db)
 
-            manager = self.through._default_manager.using(db)
-            queryset = manager.filter(**{
+            filters = Q(**{
                 self.source_field_name: self.related_val,
                 '%s__in' % self.target_field_name: self.using(db).all()
             })
+
             if self.symmetrical:
-                queryset |= manager.filter(**{
+                filters |= Q(**{
                     self.target_field_name: self.related_val,
                     '%s__in' % self.source_field_name: self.using(db).all()
                 })
-            queryset.delete()
+
+            self.through._default_manager.using(db).filter(filters).delete()
 
             signals.m2m_changed.send(sender=self.through, action="post_clear",
                 instance=self.instance, reverse=self.reverse,
@@ -721,11 +723,11 @@ def create_many_related_manager(superclass, rel):
             old_ids = set()
             for obj in objs:
                 if isinstance(obj, self.model):
-                    fk_val = self.through._meta.get_field(
-                        target_field_name).get_foreign_related_value(obj)[0]
+                    fk_val = self.target_field.get_foreign_related_value(obj)[0]
                     old_ids.add(fk_val)
                 else:
                     old_ids.add(obj)
+
             db = router.db_for_write(self.through, instance=self.instance)
 
             # Send a signal to the other end if need be.
@@ -733,21 +735,20 @@ def create_many_related_manager(superclass, rel):
                 instance=self.instance, reverse=self.reverse,
                 model=self.model, pk_set=old_ids, using=db)
 
-            manager = self.through._default_manager.using(db)
-            queryset = manager.filter(**{
-                '%s__in' % target_field_name: self.using(db).all(),
-            }).filter(**{
+            filters = Q(**{
                 source_field_name: self.related_val,
-                '%s__in' % target_field_name: old_ids,
+                '%s__in' % target_field_name: self.using(db).filter(**{
+                    '%s__in' % self.target_field.related_field.attname: old_ids})
             })
+
             if self.symmetrical:
-                queryset |= manager.filter(**{
-                    '%s__in' % source_field_name: self.using(db).all(),
-                }).filter(**{
+                filters |= Q(**{
                     target_field_name: self.related_val,
-                    '%s__in' % source_field_name: old_ids,
+                    '%s__in' % source_field_name: self.using(db).filter(**{
+                        '%s__in' % self.target_field.related_field.attname: old_ids})
                 })
-            queryset.delete()
+
+            self.through._default_manager.using(db).filter(filters).delete()
 
             signals.m2m_changed.send(sender=self.through, action="post_remove",
                 instance=self.instance, reverse=self.reverse,
