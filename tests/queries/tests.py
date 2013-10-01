@@ -3071,3 +3071,37 @@ class Ticket20955Tests(TestCase):
                              task_get.creator.staffuser.staff)
             self.assertEqual(task_select_related.owner.staffuser.staff,
                              task_get.owner.staffuser.staff)
+
+class OnlyLoadBugTests(TestCase):
+    def test_only_load_bug(self):
+        category1 = NamedCategory.objects.create(name='category1')
+        category2 = NamedCategory.objects.create(name='category2')
+        category3 = NamedCategory.objects.create(name='category3')
+        t1 = Tag.objects.create(name='t1', category=category1)
+        t2 = Tag.objects.create(name='t2', category=category2, parent=t1)
+        t3 = Tag.objects.create(name='t3', category=category3, parent=t2)
+        qs = Tag.objects.select_related(
+            'parent', 'parent__parent'
+        ).defer(
+            'parent__name', 'parent__parent__category'
+        ).filter(pk=t3.pk)
+        self.assertQuerysetEqual(qs, [t3], lambda x: x)
+        # Force re-evaluation for assertNumQueries
+        qs = qs.all()
+        with self.assertNumQueries(1):
+            qs_t3 = qs[0]
+            self.assertEqual(qs_t3, t3)
+            qs_t2 = qs_t3.parent
+            self.assertEqual(qs_t2, t2)
+            qs_t1 = qs_t2.parent
+            self.assertEqual(qs_t1, t1)
+        with self.assertNumQueries(0):
+            self.assertEqual(qs_t1.name, 't1')
+            self.assertEqual(qs_t3.name, 't3')
+            self.assertEqual(qs_t1.category_id, category1.pk)
+            self.assertEqual(qs_t2.category_id, category2.pk)
+        # parent__name and parent__parent__category were deferred
+        with self.assertNumQueries(1):
+            self.assertEqual(qs_t2.name, 't2')
+        with self.assertNumQueries(1):
+            self.assertEqual(qs_t3.category, category3)
