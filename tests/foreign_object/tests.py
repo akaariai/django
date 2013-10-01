@@ -5,7 +5,7 @@ from .models import (
     Country, Person, Group, Membership, Friendship, Article,
     ArticleTranslation, ArticleTag, ArticleIdea, NewsArticle)
 from django.test import TestCase
-from django.utils.translation import activate
+from django.utils.translation import override
 from django.core.exceptions import FieldError
 from django import forms
 
@@ -309,38 +309,38 @@ class MultiColumnFKTests(TestCase):
         self.assertEqual(groups_lists, normal_groups_lists)
 
     def test_translations(self):
-        activate('fi')
-        a1 = Article.objects.create(pub_date=datetime.date.today())
-        at1_fi = ArticleTranslation(article=a1, lang='fi', title='Otsikko', body='Diipadaapa')
-        at1_fi.save()
-        at2_en = ArticleTranslation(article=a1, lang='en', title='Title', body='Lalalalala')
-        at2_en.save()
-        with self.assertNumQueries(1):
-            fetched = Article.objects.select_related('active_translation').get(
-                active_translation__title='Otsikko')
-            self.assertTrue(fetched.active_translation.title == 'Otsikko')
-        a2 = Article.objects.create(pub_date=datetime.date.today())
-        at2_fi = ArticleTranslation(article=a2, lang='fi', title='Atsikko', body='Diipadaapa',
-                                    abstract='dipad')
-        at2_fi.save()
-        a3 = Article.objects.create(pub_date=datetime.date.today())
-        at3_en = ArticleTranslation(article=a3, lang='en', title='A title', body='lalalalala',
-                                    abstract='lala')
-        at3_en.save()
-        # Test model initialization with active_translation field.
-        a3 = Article(id=a3.id, pub_date=a3.pub_date, active_translation=at3_en)
-        a3.save()
-        self.assertEqual(
-            list(Article.objects.filter(active_translation__abstract=None)),
-            [a1, a3])
-        self.assertEqual(
-            list(Article.objects.filter(active_translation__abstract=None,
-                                        active_translation__pk__isnull=False)),
-            [a1])
-        activate('en')
-        self.assertEqual(
-            list(Article.objects.filter(active_translation__abstract=None)),
-            [a1, a2])
+        with override('fi'):
+            a1 = Article.objects.create(pub_date=datetime.date.today())
+            at1_fi = ArticleTranslation(article=a1, lang='fi', title='Otsikko', body='Diipadaapa')
+            at1_fi.save()
+            at2_en = ArticleTranslation(article=a1, lang='en', title='Title', body='Lalalalala')
+            at2_en.save()
+            with self.assertNumQueries(1):
+                fetched = Article.objects.select_related('active_translation').get(
+                    active_translation__title='Otsikko')
+                self.assertTrue(fetched.active_translation.title == 'Otsikko')
+            a2 = Article.objects.create(pub_date=datetime.date.today())
+            at2_fi = ArticleTranslation(article=a2, lang='fi', title='Atsikko', body='Diipadaapa',
+                                        abstract='dipad')
+            at2_fi.save()
+            a3 = Article.objects.create(pub_date=datetime.date.today())
+            at3_en = ArticleTranslation(article=a3, lang='en', title='A title', body='lalalalala',
+                                        abstract='lala')
+            at3_en.save()
+            # Test model initialization with active_translation field.
+            a3 = Article(id=a3.id, pub_date=a3.pub_date, active_translation=at3_en)
+            a3.save()
+            self.assertEqual(
+                list(Article.objects.filter(active_translation__abstract=None)),
+                [a1, a3])
+            self.assertEqual(
+                list(Article.objects.filter(active_translation__abstract=None,
+                                            active_translation__pk__isnull=False)),
+                [a1])
+        with override('en'):
+            self.assertEqual(
+                list(Article.objects.filter(active_translation__abstract=None)),
+                [a1, a2])
 
     def test_foreign_key_raises_informative_does_not_exist(self):
         referrer = ArticleTranslation()
@@ -365,19 +365,19 @@ class MultiColumnFKTests(TestCase):
             Article.objects.filter(ideas__name="idea1")
 
     def test_inheritance(self):
-        activate("fi")
-        na = NewsArticle.objects.create(pub_date=datetime.date.today())
-        ArticleTranslation.objects.create(
-            article=na, lang="fi", title="foo", body="bar")
-        self.assertQuerysetEqual(
-            NewsArticle.objects.select_related('active_translation'),
-            [na], lambda x: x
-        )
-        with self.assertNumQueries(1):
-            self.assertEqual(
-                NewsArticle.objects.select_related(
-                    'active_translation')[0].active_translation.title,
-                "foo")
+        with override('fi'):
+            na = NewsArticle.objects.create(pub_date=datetime.date.today())
+            ArticleTranslation.objects.create(
+                article=na, lang="fi", title="foo", body="bar")
+            self.assertQuerysetEqual(
+                NewsArticle.objects.select_related('active_translation'),
+                [na], lambda x: x
+            )
+            with self.assertNumQueries(1):
+                self.assertEqual(
+                    NewsArticle.objects.select_related(
+                        'active_translation')[0].active_translation.title,
+                    "foo")
 
 class FormsTests(TestCase):
     # ForeignObjects should not have any form fields, currently the user needs
