@@ -40,9 +40,14 @@ class DatabaseCreation(BaseDatabaseCreation):
             suffix.append('COLLATE %s' % self.connection.settings_dict['TEST_COLLATION'])
         return ' '.join(suffix)
 
-    def sql_for_inline_foreign_key_references(self, model, field, known_models, style):
+    def sql_for_foreign_key_references(self, model, field, style,
+                                       known_models=None):
         "All inline references are pending under MySQL"
-        return [], True
+        if known_models is not None:
+            # known_models is only supplied for references within
+            # CREATE TABLE statements
+            return "", True
+        return super(DatabaseCreation, self).sql_for_foreign_key_references(model, field, style, known_models)
 
     def sql_destroy_indexes_for_fields(self, model, fields, style):
         qn = self.connection.ops.quote_name

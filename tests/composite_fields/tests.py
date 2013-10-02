@@ -2,9 +2,12 @@ from __future__ import unicode_literals
 
 from datetime import date, datetime, time
 from decimal import Decimal
+import unittest
 
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
+from django.db import connection, IntegrityError
 from django.db.models.fields import FieldDoesNotExist
+from django.db.transaction import atomic
 from django.utils.encoding import force_text
 
 from .models import (Person, PersonWithBirthplace, Song, MostFieldTypes,
@@ -231,3 +234,18 @@ class CompositeFieldTests(TestCase):
 
         with self.assertRaises(PersonWithBirthplace.DoesNotExist):
             self.p2.personwithbirthplace
+
+
+def CompositeFieldTransactionTests(TransactionTestCase):
+    @unittest.skipUnless(connection.features.supports_foreign_keys, "No FK support")
+    def test_composite_fk_database_constraints(self):
+        with self.assertRaises(IntegrityError):
+            with atomic():
+                Song.objects.create(author_first_name="Unknown",
+                                    author_last_name="Artist", title="Help!")
+
+        s = Song.objects.create(author=self.p1, title="Help!")
+        s.author_first_name = "John2"
+        with self.assertRaises(IntegrityError):
+            with atomic():
+                s.save()

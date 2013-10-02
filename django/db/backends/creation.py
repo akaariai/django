@@ -82,17 +82,18 @@ class BaseDatabaseCreation(object):
                     tablespace, inline=True)
                 if tablespace_sql:
                     field_output.append(tablespace_sql)
-            if f.auxiliary_to and f.auxiliary_to.db_constraint:
-                ref_output, pending = self.sql_for_inline_foreign_key_references(
-                    model, f.auxiliary_to, known_models, style)
-                if pending:
-                    pending_references.setdefault(f.auxiliary_to.rel.to, []).append(
-                        (model, f.auxiliary_to))
-                else:
-                    field_output.extend(ref_output)
             if col_type_suffix:
                 field_output.append(style.SQL_KEYWORD(col_type_suffix))
             table_output.append(' '.join(field_output))
+        for f in opts.local_fields:
+            if not (f.rel and f.db_constraint):
+                continue
+            ref_output, pending = self.sql_for_foreign_key_references(
+                model, f, style, known_models)
+            if pending:
+                pending_references.setdefault(f.rel.to, []).append((model, f))
+            else:
+                table_output.append(ref_output)
         unique_togethers = []
         for field_constraints in opts.unique_together:
             unique_togethers.append([opts.get_field(f) for f in field_constraints])
@@ -140,25 +141,29 @@ class BaseDatabaseCreation(object):
 
         return final_output, pending_references
 
-    def sql_for_inline_foreign_key_references(self, model, field, known_models, style):
+    def sql_for_foreign_key_references(self, model, field, style,
+                                       known_models=None):
         """
         Return the SQL snippet defining the foreign key reference for a field.
         """
         qn = self.connection.ops.quote_name
         rel_to = field.rel.to
-        target_field = rel_to._meta.get_field(field.rel.field_name)
-        target_columns = [f.column for f in target_field.resolve_basic_fields()]
-        if rel_to in known_models or rel_to == model:
-            output = [style.SQL_KEYWORD('REFERENCES') + ' ' +
-                style.SQL_TABLE(qn(rel_to._meta.db_table)) + ' (' +
-                ', '.join(style.SQL_FIELD(qn(col)) for col in target_columns) + ')' +
+        local_columns = [f.column for f in field.local_related_fields]
+        target_columns = [f.column for f in field.foreign_related_fields]
+        if known_models is None or rel_to in known_models or rel_to == model:
+            output = "%s (%s) %s %s (%s)%s" % (
+                style.SQL_KEYWORD('FOREIGN KEY'),
+                ', '.join(style.SQL_FIELD(qn(col)) for col in local_columns),
+                style.SQL_KEYWORD('REFERENCES'),
+                style.SQL_TABLE(qn(rel_to._meta.db_table)),
+                ', '.join(style.SQL_FIELD(qn(col)) for col in target_columns),
                 self.connection.ops.deferrable_sql()
-            ]
+            )
             pending = False
         else:
             # We haven't yet created the table to which this field
             # is related, so save it for later.
-            output = []
+            output = ""
             pending = True
 
         return output, pending
@@ -176,22 +181,24 @@ class BaseDatabaseCreation(object):
             for rel_class, f in pending_references[model]:
                 rel_opts = rel_class._meta
                 r_table = rel_opts.db_table
-                r_cols = [basic.column for basic in f.resolve_basic_fields()]
+                r_cols = [rel_f.column for rel_f in f.local_related_fields]
                 table = opts.db_table
-                cols = [basic.column for basic in
-                        opts.get_field(f.rel.field_name).resolve_basic_fields()]
+                cols = [rel_f.column for rel_f in f.foreign_related_fields]
                 # For MySQL, r_name must be unique in the first 64 characters.
                 # So we are careful with character usage here.
                 r_name = '%s_refs_%s_%s' % (
                     '_'.join(r_cols), '_'.join(cols), self._digest(r_table, table))
-                final_output.append(style.SQL_KEYWORD('ALTER TABLE') +
-                    ' %s ADD CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)%s;' %
-                    (qn(r_table), qn(truncate_name(
-                        r_name, self.connection.ops.max_name_length())),
-                    ', '.join(qn(col) for col in r_cols),
-                    qn(table),
-                    ', '.join(qn(col) for col in cols),
-                    self.connection.ops.deferrable_sql()))
+                constraint, pending = self.sql_for_foreign_key_references(
+                    rel_class, f, style)
+                assert not pending
+
+                final_output.append("%s %s %s %s %s;" % (
+                    style.SQL_KEYWORD('ALTER TABLE'),
+                    style.SQL_TABLE(qn(r_table)),
+                    style.SQL_KEYWORD('ADD CONSTRAINT'),
+                    qn(truncate_name(r_name, self.connection.ops.max_name_length())),
+                    constraint,
+                ))
             del pending_references[model]
         return final_output
 

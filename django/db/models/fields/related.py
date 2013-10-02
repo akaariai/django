@@ -969,9 +969,15 @@ class ForeignObject(RelatedField):
     # GenericRelation is an example of a reverse link.
     is_reverse_link = False
 
-    def __init__(self, to, from_fields, to_fields, **kwargs):
+    # We need to set db_constraint to False by default here because when
+    # ForeignObject was introduced, Django didn't support multi-column
+    # database-level FK constraints and ForeignObject is tested as not
+    # having the constraints in place.
+    def __init__(self, to, from_fields, to_fields, db_constraint=False,
+                 **kwargs):
         self.from_fields = from_fields
         self.to_fields = to_fields
+        self.db_constraint = db_constraint
 
         if 'rel' not in kwargs:
             kwargs['rel'] = ForeignObjectRel(
@@ -1198,7 +1204,7 @@ class ForeignKey(ForeignObject):
     prepare_after_contribute_to_class = False
 
     def __init__(self, to, to_field=None, rel_class=ManyToOneRel,
-                 db_constraint=True, aux_field=None, **kwargs):
+                 aux_field=None, **kwargs):
         try:
             to._meta.object_name.lower()
         except AttributeError:  # to._meta doesn't exist, so it must be RECURSIVE_RELATIONSHIP_CONSTANT
@@ -1212,8 +1218,9 @@ class ForeignKey(ForeignObject):
 
         if 'db_index' not in kwargs:
             kwargs['db_index'] = True
+        if 'db_constraint' not in kwargs:
+            kwargs['db_constraint'] = True
 
-        self.db_constraint = db_constraint
         self._aux_field = aux_field
 
         kwargs['rel'] = rel_class(
