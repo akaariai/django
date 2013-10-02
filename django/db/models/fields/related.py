@@ -1404,8 +1404,7 @@ class ForeignKey(ForeignObject):
         to_add = field.clone_for_foreignkey(
             name, self.null, self.db_tablespace,
             self.creation_counter, self.creation_counter + 1,
-            self.db_column or self.attname,
-            fk_field=self
+            self.db_column, fk_field=self
         )
         for new_name, new_field in to_add:
             self.model.add_to_class(new_name, new_field)

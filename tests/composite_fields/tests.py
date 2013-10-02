@@ -193,6 +193,12 @@ class CompositeFieldTests(TestCase):
         emf_parent = MostFieldTypes.objects.exclude(pk=mft.pk).get()
         self.assertEqual(emf_parent.all_fields, emf.all_fields)
 
+    def test_composite_fk_column_names(self):
+        author_field = Song._meta.get_field('author')
+        first_name_field, last_name_field = author_field.local_related_fields
+        self.assertEqual(first_name_field.column, 'author_first_name')
+        self.assertEqual(last_name_field.column, 'author_last_name')
+
     def test_composite_fk_save_retrieve(self):
         s1 = Song(title="Help!", author=self.p1)
         s1.save()

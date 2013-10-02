@@ -510,6 +510,9 @@ class AuxiliaryFieldTests(TestCase):
         self.assertIs(aux.auxiliary_to, fk)
         self.assertIsNot(fk, aux)
 
+        # The aux field's column should by default be fk_name_id
+        self.assertEqual(aux.column, 'reporter_id')
+
     def test_aux_not_created_when_specified(self):
         with self.assertRaises(FieldDoesNotExist):
             Assignment._meta.get_field('assignee_id')
