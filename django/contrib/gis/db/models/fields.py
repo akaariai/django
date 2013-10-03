@@ -33,9 +33,9 @@ class GeoCol(Col):
             # transformed geometries have an SRID different than that of the
             # field -- this is only used by `transform` for Oracle and
             # SpatiaLite backends.
-            if query and query.transformed_srid and (self.connection.ops.oracle or
-                                                self.connection.ops.spatialite):
-                sel_fmt = "'SRID=%d;'||%s" % (query.transformed_srid, sel_fmt)
+            if query and query.custom_data.get('transformed_srid') and (
+                    self.connection.ops.oracle or self.connection.ops.spatialite):
+                sel_fmt = "'SRID=%d;'||%s" % (query.custom_data['transformed_srid'], sel_fmt)
         else:
             sel_fmt = '%s'
         return sel_fmt

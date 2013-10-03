@@ -164,6 +164,9 @@ class Query(object):
         # load.
         self.deferred_loading = (set(), True)
 
+        # Subclasses or users can pass immutable values around in custom_data.
+        self.custom_data = {}
+
     def __str__(self):
         """
         Returns the query as a string of SQL with the parameter values
@@ -265,6 +268,7 @@ class Query(object):
             obj.alias_prefix = self.alias_prefix
         if 'subq_aliases' in self.__dict__:
             obj.subq_aliases = self.subq_aliases.copy()
+        obj.custom_data = self.custom_data.copy()
 
         obj.__dict__.update(kwargs)
         if hasattr(obj, '_setup_query'):

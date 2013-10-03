@@ -74,7 +74,6 @@ class SDORelate(SpatialFunction):
 dtypes = (Decimal, Distance, float) + six.integer_types
 
 class OracleOperations(DatabaseOperations, BaseSpatialOperations):
-    compiler_module = "django.contrib.gis.db.backends.oracle.compiler"
 
     name = 'oracle'
     oracle = True

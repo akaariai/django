@@ -190,7 +190,7 @@ class GeoModelTest(TestCase):
         qs = PennsylvaniaCity.objects.transform(32128)
 
         self.assertEqual(1, qs.count())
-        self.assertEqual(qs.query.transformed_srid, 32128)
+        self.assertEqual(qs.query.custom_data['transformed_srid'], 32128)
         for pc in qs:
             self.assertEqual(32128, pc.point.srid)
 

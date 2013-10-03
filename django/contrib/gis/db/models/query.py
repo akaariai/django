@@ -6,7 +6,7 @@ from django.contrib.gis import memoryview
 from django.contrib.gis.db.models import aggregates
 from django.contrib.gis.db.models.fields import get_srid_info, PointField, LineStringField, GeometryField
 from django.contrib.gis.db.models.lookups import GeoLookup
-from django.contrib.gis.db.models.sql import AreaField, DistanceField, GeomField, GeoQuery
+from django.contrib.gis.db.models.sql import AreaField, DistanceField, GeomField
 from django.contrib.gis.geometry.backend import Geometry
 from django.contrib.gis.measure import Area, Distance
 
@@ -33,11 +33,6 @@ class GeoRawSQL(RawSQL):
 
 class GeoQuerySet(QuerySet):
     "The Geographic QuerySet."
-
-    ### Methods overloaded from QuerySet ###
-    def __init__(self, model=None, query=None, using=None):
-        super(GeoQuerySet, self).__init__(model=model, query=query, using=using)
-        self.query = query or GeoQuery(self.model)
 
     ### GeoQuerySet Methods ###
     def area(self, tolerance=0.05, **kwargs):
@@ -426,7 +421,7 @@ class GeoQuerySet(QuerySet):
         # override the geometry column returned from the database.
         sql, params = field_col.as_sql(connections[self.db].ops.quote_name, connections[self.db])
         custom_sel = '%s(%s, %s)' % (connections[self.db].ops.transform, sql, srid)
-        self.query.transformed_srid = srid  # So other GeoQuerySet methods
+        self.query.custom_data['transformed_srid'] = srid  # So other GeoQuerySet methods
         self.query.add_custom_select(label, GeoRawSQL(custom_sel, params, field_col.output_type))
         return self._clone()
 
@@ -650,28 +645,32 @@ class GeoQuerySet(QuerySet):
         else:
             # Getting whether this field is in units of degrees since the field may have
             # been transformed via the `transform` GeoQuerySet method.
-            if self.query.transformed_srid:
-                u, unit_name, s = get_srid_info(self.query.transformed_srid, connection)
+            if self.query.custom_data.get('transformed_srid'):
+                u, unit_name, s = get_srid_info(self.query.custom_data['transformed_srid'],
+                                                connection)
                 geodetic = unit_name in geo_field.geodetic_units
 
             if backend.spatialite and geodetic:
                 raise ValueError('SQLite does not support linear distance calculations on geodetic coordinate systems.')
 
             if distance:
-                if self.query.transformed_srid:
+                if self.query.custom_data.get('transformed_srid'):
                     # Setting the `geom_args` flag to false because we want to handle
                     # transformation SQL here, rather than the way done by default
                     # (which will transform to the original SRID of the field rather
                     #  than to what was transformed to).
                     geom_args = False
-                    procedure_fmt = '%s(%%(geo_col)s, %s)' % (backend.transform, self.query.transformed_srid)
-                    if geom.srid is None or geom.srid == self.query.transformed_srid:
+                    procedure_fmt = ('%s(%%(geo_col)s, %s)' % (
+                        backend.transform, self.query.custom_data['transformed_srid']))
+                    if geom.srid is None or geom.srid == self.query.custom_data['transformed_srid']:
                         # If the geom parameter srid is None, it is assumed the coordinates
                         # are in the transformed units.  A placeholder is used for the
                         # geometry parameter.  `GeomFromText` constructor is also needed
                         # to wrap geom placeholder for SpatiaLite.
                         if backend.spatialite:
-                            procedure_fmt += ', %s(%%%%s, %s)' % (backend.from_text, self.query.transformed_srid)
+                            procedure_fmt += (
+                                ', %s(%%%%s, %s)' %
+                                (backend.from_text, self.query.custom_data['transformed_srid']))
                         else:
                             procedure_fmt += ', %%s'
                     else:
@@ -680,13 +679,15 @@ class GeoQuerySet(QuerySet):
                         # SpatiaLite also needs geometry placeholder wrapped in `GeomFromText`
                         # constructor.
                         if backend.spatialite:
-                            procedure_fmt += ', %s(%s(%%%%s, %s), %s)' % (backend.transform, backend.from_text,
-                                                                          geom.srid, self.query.transformed_srid)
+                            procedure_fmt += (', %s(%s(%%%%s, %s), %s)' % (
+                                backend.transform, backend.from_text,
+                                geom.srid, self.query.custom_data['transformed_srid']))
                         else:
-                            procedure_fmt += ', %s(%%%%s, %s)' % (backend.transform, self.query.transformed_srid)
+                            procedure_fmt += ', %s(%%%%s, %s)' % (
+                                backend.transform, self.query.custom_data['transformed_srid'])
                 else:
                     # `transform()` was not used on this GeoQuerySet.
-                    procedure_fmt  = '%(geo_col)s,%(geom)s'
+                    procedure_fmt = '%(geo_col)s,%(geom)s'
 
                 if not geography and geodetic:
                     # Spherical distance calculation is needed (because the geographic

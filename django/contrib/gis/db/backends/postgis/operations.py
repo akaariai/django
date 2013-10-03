@@ -64,7 +64,6 @@ class PostGISRelate(PostGISFunctionParam):
 
 
 class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
-    compiler_module = 'django.contrib.gis.db.models.sql.compiler'
     name = 'postgis'
     postgis = True
     geom_func_prefix = 'ST_'
