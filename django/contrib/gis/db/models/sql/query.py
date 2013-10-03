@@ -1,13 +1,9 @@
 from django.db.models.query import sql
 
-from django.contrib.gis.db.models.sql import aggregates as gis_aggregates
-
 class GeoQuery(sql.Query):
     """
     A single spatial SQL query.
     """
-    # Overridding the valid query terms.
-    aggregates_module = gis_aggregates
 
     #### Methods overridden from the base Query class ####
     def __init__(self, *args, **kwargs):
