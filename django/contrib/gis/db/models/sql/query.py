@@ -2,34 +2,20 @@ from django.db.models.query import sql
 
 from django.contrib.gis.db.models.fields import GeometryField
 from django.contrib.gis.db.models.sql import aggregates as gis_aggregates
-from django.contrib.gis.db.models.sql.where import GeoWhereNode
-
-
-ALL_TERMS = set([
-            'bbcontains', 'bboverlaps', 'contained', 'contains',
-            'contains_properly', 'coveredby', 'covers', 'crosses', 'disjoint',
-            'distance_gt', 'distance_gte', 'distance_lt', 'distance_lte',
-            'dwithin', 'equals', 'exact',
-            'intersects', 'overlaps', 'relate', 'same_as', 'touches', 'within',
-            'left', 'right', 'overlaps_left', 'overlaps_right',
-            'overlaps_above', 'overlaps_below',
-            'strictly_above', 'strictly_below'
-            ])
-ALL_TERMS.update(sql.constants.QUERY_TERMS)
+from django.contrib.gis.db.models.lookups import GeoLookup
 
 class GeoQuery(sql.Query):
     """
     A single spatial SQL query.
     """
     # Overridding the valid query terms.
-    query_terms = ALL_TERMS
     aggregates_module = gis_aggregates
 
     compiler = 'GeoSQLCompiler'
 
     #### Methods overridden from the base Query class ####
-    def __init__(self, model, where=GeoWhereNode):
-        super(GeoQuery, self).__init__(model, where)
+    def __init__(self, *args, **kwargs):
+        super(GeoQuery, self).__init__(*args, **kwargs)
         # The following attributes are customized for the GeoQuerySet.
         # The GeoWhereNode and SpatialBackend classes contain backend-specific
         # routines and functions.
@@ -58,4 +44,4 @@ class GeoQuery(sql.Query):
         else:
             # Otherwise, check by the given field name -- which may be
             # a lookup to a _related_ geographic field.
-            return GeoWhereNode._check_geo_field(self.model._meta, field_name)
+            return GeoLookup._check_geo_field(self.model._meta, field_name)

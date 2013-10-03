@@ -1,55 +1,30 @@
+"""
+Lookups for GeoFields. The implementation was adapted directly from
+GeoWhereNode when custom lookups were implemented. Rewrite to better use
+standard custom lookups features wouldn't be a bad idea.
+"""
+from django.contrib.gis.db.models.fields import GeometryField
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import FieldDoesNotExist
+from django.db.models.lookups import SimpleLookup
 from django.db.models.sql.expressions import SQLEvaluator
-from django.db.models.sql.where import Constraint, WhereNode
-from django.contrib.gis.db.models.fields import GeometryField
 
-class GeoConstraint(Constraint):
-    """
-    This subclass overrides `process` to better handle geographic SQL
-    construction.
-    """
-    def __init__(self, init_constraint):
-        self.alias = init_constraint.alias
-        self.col = init_constraint.col
-        self.field = init_constraint.field
+class GeoLookup(SimpleLookup):
 
-    def process(self, lookup_type, value, connection):
+    def as_sql(self, qn, connection):
+        lhs, lhs_params = self.process_lhs(qn, connection)
+        assert not lhs_params
+        value = self.value
         if isinstance(value, SQLEvaluator):
-            # Make sure the F Expression destination field exists, and
-            # set an `srid` attribute with the same as that of the
-            # destination.
-            geo_fld = GeoWhereNode._check_geo_field(value.opts, value.expression.name)
+            geo_fld = self._check_geo_field(value.opts, value.expression.name)
             if not geo_fld:
                 raise ValueError('No geographic field found in expression.')
             value.srid = geo_fld.srid
         db_type = self.field.db_type(connection=connection)
-        params = self.field.get_db_prep_lookup(lookup_type, value, connection=connection)
-        return (self.alias, self.col, db_type), params
-
-class GeoWhereNode(WhereNode):
-    """
-    Used to represent the SQL where-clause for spatial databases --
-    these are tied to the GeoQuery class that created it.
-    """
-
-    def _prepare_data(self, data):
-        if isinstance(data, (list, tuple)):
-            obj, lookup_type, value = data
-            if ( isinstance(obj, Constraint) and
-                 isinstance(obj.field, GeometryField) ):
-                data = (GeoConstraint(obj), lookup_type, value)
-        return super(GeoWhereNode, self)._prepare_data(data)
-
-    def make_atom(self, child, qn, connection):
-        lvalue, lookup_type, value_annot, params_or_value = child
-        if isinstance(lvalue, GeoConstraint):
-            data, params = lvalue.process(lookup_type, params_or_value, connection)
-            spatial_sql, spatial_params = connection.ops.spatial_lookup_sql(
-                    data, lookup_type, params_or_value, lvalue.field, qn)
-            return spatial_sql, spatial_params + params
-        else:
-            return super(GeoWhereNode, self).make_atom(child, qn, connection)
+        field_params = self.field.get_db_prep_lookup(self.lookup_type, value, connection=connection)
+        sql, params = connection.ops.spatial_lookup_sql(
+            (lhs, db_type), self.lookup_type, value, self.field, qn)
+        return sql, params + field_params
 
     @classmethod
     def _check_geo_field(cls, opts, lookup):
@@ -89,3 +64,18 @@ class GeoWhereNode(WhereNode):
             return geo_fld
         else:
             return False
+
+ALL_TERMS = [
+    'bbcontains', 'bboverlaps', 'contained', 'contains',
+    'contains_properly', 'coveredby', 'covers', 'crosses', 'disjoint',
+    'distance_gt', 'distance_gte', 'distance_lt', 'distance_lte',
+    'dwithin', 'equals', 'exact',
+    'intersects', 'overlaps', 'relate', 'same_as', 'touches', 'within',
+    'left', 'right', 'overlaps_left', 'overlaps_right',
+    'overlaps_above', 'overlaps_below',
+    'strictly_above', 'strictly_below'
+]
+
+for term in ALL_TERMS:
+    term_lookup = type(term, (GeoLookup,), {'lookup_type': term})
+    GeometryField.register_class_lookup(term_lookup)

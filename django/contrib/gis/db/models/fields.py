@@ -228,10 +228,6 @@ class GeometryField(Field):
         else:
             return geom
 
-    def get_lookup(self, lookup):
-        # For now, use the old-style lookups
-        return None
-
     def get_srid(self, geom):
         """
         Returns the default SRID for the given geometry, taking into account
