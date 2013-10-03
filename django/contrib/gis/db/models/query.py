@@ -5,6 +5,7 @@ from django.db.models.sql.query import RawSQL
 from django.contrib.gis import memoryview
 from django.contrib.gis.db.models import aggregates
 from django.contrib.gis.db.models.fields import get_srid_info, PointField, LineStringField, GeometryField
+from django.contrib.gis.db.models.lookups import GeoLookup
 from django.contrib.gis.db.models.sql import AreaField, DistanceField, GeomField, GeoQuery
 from django.contrib.gis.geometry.backend import Geometry
 from django.contrib.gis.measure import Area, Distance
@@ -463,7 +464,7 @@ class GeoQuerySet(QuerySet):
 
         # Is there a geographic field in the model to perform this
         # operation on?
-        geo_field = self.query._geo_field(field_name)
+        geo_field = self._geo_field(field_name)
         if not geo_field:
             raise TypeError('%s output only available on GeometryFields.' % func)
 
@@ -484,7 +485,7 @@ class GeoQuerySet(QuerySet):
         returning their result to the caller of the function.
         """
         # Getting the field the geographic aggregate will be called on.
-        geo_field = self.query._geo_field(field_name)
+        geo_field = self._geo_field(field_name)
         if not geo_field:
             raise TypeError('%s aggregate only available on GeometryFields.' % aggregate.name)
 
@@ -770,13 +771,13 @@ class GeoQuerySet(QuerySet):
         ForeignKey relation to the current model.
         """
         opts = self.model._meta
+        compiler = self.query.get_compiler(self.db)
         if not geo_field in opts.fields:
             # Is this operation going to be on a related geographic field?
             # If so, it'll have to be added to the select related information
             # (e.g., if 'location__point' was given as the field name).
             self.query.add_select_related([field_name])
-            compiler = self.query.get_compiler(self.db)
-            # How beautiful...
+            # Needed so that related_select_cols is populated. How beautiful...
             compiler.pre_sql_setup()
             for col in compiler.related_select_cols:
                 if col.field == geo_field:
@@ -786,6 +787,39 @@ class GeoQuerySet(QuerySet):
             # This geographic field is inherited from another model, so we have to
             # use the db table for the _parent_ model instead.
             tmp_fld, parent_model, direct, m2m = opts.get_field_by_name(geo_field.name)
-            return self.query.get_compiler(self.db)._field_column(geo_field, parent_model._meta.db_table)
+            return self._field_column(compiler, geo_field, parent_model._meta.db_table)
         else:
-            return self.query.get_compiler(self.db)._field_column(geo_field)
+            return self._field_column(compiler, geo_field)
+
+    # Private API utilities, subject to change.
+    def _geo_field(self, field_name=None):
+        """
+        Returns the first Geometry field encountered; or specified via the
+        `field_name` keyword.  The `field_name` may be a string specifying
+        the geometry field on this GeoQuery's model, or a lookup string
+        to a geometry field via a ForeignKey relation.
+        """
+        if field_name is None:
+            # Incrementing until the first geographic field is found.
+            for fld in self.model._meta.fields:
+                if isinstance(fld, GeometryField):
+                    return fld
+            return False
+        else:
+            # Otherwise, check by the given field name -- which may be
+            # a lookup to a _related_ geographic field.
+            return GeoLookup._check_geo_field(self.model._meta, field_name)
+
+    def _field_column(self, compiler, field, table_alias=None, column=None):
+        """
+        Helper function that returns the database column for the given field.
+        The table and column are returned (quoted) in the proper format, e.g.,
+        `"geoapp_city"."point"`.  If `table_alias` is not specified, the
+        database table associated with the model of this `GeoQuery` will be
+        used.  If `column` is specified, it will be used instead of the value
+        in `field.column`.
+        """
+        if table_alias is None:
+            table_alias = compiler.query.get_meta().db_table
+        return "%s.%s" % (compiler.quote_name_unless_alias(table_alias),
+                          compiler.connection.ops.quote_name(column or field.column))
