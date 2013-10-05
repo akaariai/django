@@ -200,22 +200,22 @@ class CustomManagerTests(TestCase):
 
         # TODO: Uncomment once FK RelatedManager.remove() is fixed.
         ## Check that the fun manager DOESN'T remove boring people.
-        #self.b1.favorite_books(manager='fun_people').remove(self.boring)
-        #self.assertQuerysetEqual(
-        #    self.b1.favorite_books(manager='boring_people').all(), [
-        #        self.boring.first_name,
-        #    ],
-        #    lambda c: c.first_name
-        #)
-        ## Check that the boring manager DOES remove boring people.
-        #self.b1.favorite_books(manager='boring_people').remove(self.boring)
-        #self.assertQuerysetEqual(
-        #    self.b1.favorite_books(manager='boring_people').all(), [
-        #    ],
-        #    lambda c: c.first_name
-        #)
-        #self.boring.favorite_book = self.b1
-        #self.boring.save()
+        self.b1.favorite_books(manager='fun_people').remove(self.boring)
+        self.assertQuerysetEqual(
+            self.b1.favorite_books(manager='boring_people').all(), [
+                self.boring.first_name,
+            ],
+            lambda c: c.first_name
+        )
+        # Check that the boring manager DOES remove boring people.
+        self.b1.favorite_books(manager='boring_people').remove(self.boring)
+        self.assertQuerysetEqual(
+            self.b1.favorite_books(manager='boring_people').all(), [
+            ],
+            lambda c: c.first_name
+        )
+        self.boring.favorite_book = self.b1
+        self.boring.save()
 
         # Check that the fun manager ONLY clears fun people.
         self.b1.favorite_books(manager='fun_people').clear()
@@ -274,6 +274,7 @@ class CustomManagerTests(TestCase):
         self.b1.authors.add(self.fun)
         self.b1.authors.add(self.boring)
 
+        # Check that the fun manager DOESN'T remove boring people.
         self.b1.authors(manager='fun_people').remove(self.boring)
         self.assertQuerysetEqual(
             self.b1.authors(manager='boring_people').all(), [
@@ -282,6 +283,7 @@ class CustomManagerTests(TestCase):
             lambda c: c.first_name
         )
 
+        # Check that the boring manager DOES remove boring people.
         self.b1.authors(manager='boring_people').remove(self.boring)
         self.assertQuerysetEqual(
             self.b1.authors(manager='boring_people').all(), [

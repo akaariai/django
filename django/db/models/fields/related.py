@@ -444,14 +444,24 @@ def create_foreign_related_manager(superclass, rel_field, rel_model):
         # remove() and clear() are only provided if the ForeignKey can have a value of null.
         if rel_field.null:
             def remove(self, *objs):
+                # If there aren't any objects, there is nothing to do.
+                if not objs:
+                    return
+
                 val = rel_field.get_foreign_related_value(self.instance)
+
+                old_ids = set()
                 for obj in objs:
                     # Is obj actually part of this descriptor set?
                     if rel_field.get_local_related_value(obj) == val:
-                        setattr(obj, rel_field.name, None)
-                        obj.save()
+                        old_ids.add(val)
                     else:
                         raise rel_field.rel.to.DoesNotExist("%r is not related to %r." % (obj, self.instance))
+
+                db = router.db_for_write(self.model, instance=self.instance)
+                for obj in self.using(db).filter(**{'%s__in' % rel_field.name: old_ids}):
+                    setattr(obj, rel_field.name, None)
+                    obj.save(using=db)
             remove.alters_data = True
 
             def clear(self):
