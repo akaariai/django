@@ -198,6 +198,25 @@ class CustomManagerTests(TestCase):
         self.boring.favorite_book = self.b1
         self.boring.save()
 
+        # TODO: Uncomment once FK RelatedManager.remove() is fixed.
+        ## Check that the fun manager DOESN'T remove boring people.
+        #self.b1.favorite_books(manager='fun_people').remove(self.boring)
+        #self.assertQuerysetEqual(
+        #    self.b1.favorite_books(manager='boring_people').all(), [
+        #        self.boring.first_name,
+        #    ],
+        #    lambda c: c.first_name
+        #)
+        ## Check that the boring manager DOES remove boring people.
+        #self.b1.favorite_books(manager='boring_people').remove(self.boring)
+        #self.assertQuerysetEqual(
+        #    self.b1.favorite_books(manager='boring_people').all(), [
+        #    ],
+        #    lambda c: c.first_name
+        #)
+        #self.boring.favorite_book = self.b1
+        #self.boring.save()
+
         # Check that the fun manager ONLY clears fun people.
         self.b1.favorite_books(manager='fun_people').clear()
         self.assertQuerysetEqual(
@@ -215,6 +234,25 @@ class CustomManagerTests(TestCase):
     def test_related_manager_gfk_removal(self):
         self.fun.favorite_thing = self.b1
         self.fun.save()
+        self.boring.favorite_thing = self.b1
+        self.boring.save()
+
+        # Check that the fun manager DOESN'T remove boring people.
+        self.b1.favorite_things(manager='fun_people').remove(self.boring)
+        self.assertQuerysetEqual(
+            self.b1.favorite_things(manager='boring_people').all(), [
+                self.boring.first_name,
+            ],
+            lambda c: c.first_name
+        )
+
+        # Check that the boring manager DOES remove boring people.
+        self.b1.favorite_things(manager='boring_people').remove(self.boring)
+        self.assertQuerysetEqual(
+            self.b1.favorite_things(manager='boring_people').all(), [
+            ],
+            lambda c: c.first_name
+        )
         self.boring.favorite_thing = self.b1
         self.boring.save()
 
