@@ -458,11 +458,7 @@ def create_foreign_related_manager(superclass, rel_field, rel_model):
                     else:
                         raise rel_field.rel.to.DoesNotExist("%r is not related to %r." % (obj, self.instance))
 
-                db = router.db_for_write(self.model, instance=self.instance)
-                with transaction.commit_on_success_unless_managed(using=db):
-                    for obj in self.using(db).filter(pk__in=old_ids):
-                        setattr(obj, rel_field.name, None)
-                        obj.save(using=db)
+                self.filter(pk__in=old_ids).update(**{rel_field.name: None})
             remove.alters_data = True
 
             def clear(self):
