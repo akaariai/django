@@ -454,14 +454,15 @@ def create_foreign_related_manager(superclass, rel_field, rel_model):
                 for obj in objs:
                     # Is obj actually part of this descriptor set?
                     if rel_field.get_local_related_value(obj) == val:
-                        old_ids.add(val)
+                        old_ids.add(obj.pk)
                     else:
                         raise rel_field.rel.to.DoesNotExist("%r is not related to %r." % (obj, self.instance))
 
                 db = router.db_for_write(self.model, instance=self.instance)
-                for obj in self.using(db).filter(**{'%s__in' % rel_field.name: old_ids}):
-                    setattr(obj, rel_field.name, None)
-                    obj.save(using=db)
+                with transaction.commit_on_success_unless_managed(using=db):
+                    for obj in self.using(db).filter(pk__in=old_ids):
+                        setattr(obj, rel_field.name, None)
+                        obj.save(using=db)
             remove.alters_data = True
 
             def clear(self):
@@ -563,6 +564,19 @@ def create_many_related_manager(superclass, rel):
             )
         do_not_call_in_templates = True
 
+        def _build_clear_filters(self, qs):
+            filters = Q(**{
+                self.source_field_name: self.related_val,
+                '%s__in' % self.target_field_name: qs
+            })
+
+            if self.symmetrical:
+                filters |= Q(**{
+                    self.target_field_name: self.related_val,
+                    '%s__in' % self.source_field_name: qs
+                })
+            return filters
+
         def get_queryset(self):
             try:
                 return self.instance._prefetched_objects_cache[self.prefetch_cache_name]
@@ -624,18 +638,7 @@ def create_many_related_manager(superclass, rel):
             signals.m2m_changed.send(sender=self.through, action="pre_clear",
                 instance=self.instance, reverse=self.reverse,
                 model=self.model, pk_set=None, using=db)
-
-            filters = Q(**{
-                self.source_field_name: self.related_val,
-                '%s__in' % self.target_field_name: self.using(db).all()
-            })
-
-            if self.symmetrical:
-                filters |= Q(**{
-                    self.target_field_name: self.related_val,
-                    '%s__in' % self.source_field_name: self.using(db).all()
-                })
-
+            filters = self._build_clear_filters(self.using(db))
             self.through._default_manager.using(db).filter(filters).delete()
 
             signals.m2m_changed.send(sender=self.through, action="post_clear",
@@ -745,19 +748,9 @@ def create_many_related_manager(superclass, rel):
                 instance=self.instance, reverse=self.reverse,
                 model=self.model, pk_set=old_ids, using=db)
 
-            filters = Q(**{
-                source_field_name: self.related_val,
-                '%s__in' % target_field_name: self.using(db).filter(**{
-                    '%s__in' % self.target_field.related_field.attname: old_ids})
-            })
-
-            if self.symmetrical:
-                filters |= Q(**{
-                    target_field_name: self.related_val,
-                    '%s__in' % source_field_name: self.using(db).filter(**{
-                        '%s__in' % self.target_field.related_field.attname: old_ids})
-                })
-
+            old_vals_qs = self.using(db).filter(**{
+                '%s__in' % self.target_field.related_field.attname: old_ids})
+            filters = self._build_clear_filters(old_vals_qs)
             self.through._default_manager.using(db).filter(filters).delete()
 
             signals.m2m_changed.send(sender=self.through, action="post_remove",
