@@ -195,12 +195,16 @@ class BaseHandler(object):
             signals.got_request_exception.send(sender=self.__class__, request=request)
             response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
 
-        try:
-            # Apply response middleware, regardless of the response
-            for middleware_method in self._response_middleware:
+        # Apply response middleware, regardless of the response
+        for middleware_method in self._response_middleware:
+            try:
                 response = middleware_method(request, response)
+            except: # Any exception should be gathered and handled
+                signals.got_request_exception.send(sender=self.__class__, request=request)
+                response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
+        try:
             response = self.apply_response_fixes(request, response)
-        except: # Any exception should be gathered and handled
+        except:
             signals.got_request_exception.send(sender=self.__class__, request=request)
             response = self.handle_uncaught_exception(request, resolver, sys.exc_info())
 
