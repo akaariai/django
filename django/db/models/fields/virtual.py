@@ -25,13 +25,13 @@ class VirtualField(Field):
         super(VirtualField, self).__init__(**kwargs)
 
     def db_type(self, connection):
+        """
+        By default no db representation, and thus also no db_type.
+        """
         return None
 
     def contribute_to_class(self, cls, name):
         super(VirtualField, self).contribute_to_class(cls, name)
-        # Virtual fields are descriptors; they are not handled
-        # individually at instance level.
-        setattr(cls, name, self)
 
     def get_column(self):
         return None
@@ -44,15 +44,22 @@ class VirtualField(Field):
                 for myfield in self.get_enclosed_fields()
                 for f in myfield.resolve_basic_fields()]
 
-    def formfield(self):
-        return None
-
-    def __get__(self, instance, owner):
-        return None
-
-    def __set__(self, instance, value):
-        pass
-
+    def resolve_concrete_values(self, data):
+        concrete_fields = self.resolve_basic_fields()
+        if data is None:
+            return [None] * len(concrete_fields)
+        if len(concrete_fields) > 1:
+            if not isinstance(data, (list, tuple)):
+                raise ValueError(
+                    "Can't resolve data that isn't list or tuple to values for field %s" %
+                    self.name)
+            elif len(data) != len(concrete_fields):
+                raise ValueError(
+                    "Invalid amount of values for field %s. Required %s, got %s." %
+                    (self.name, len(concrete_fields), len(data)))
+            return data
+        else:
+            return [data]
 
 class CompositeField(VirtualField):
     """
@@ -89,6 +96,7 @@ class CompositeField(VirtualField):
 
     def contribute_to_class(self, cls, name):
         super(CompositeField, self).contribute_to_class(cls, name)
+        setattr(cls, name, self)
 
         # We can process the fields only after they've been added to the
         # model class.
@@ -123,15 +131,13 @@ class CompositeField(VirtualField):
         return self.nt._make(getattr(instance, f.attname, None) for f in self.fields)
 
     def __set__(self, instance, value):
-        # Ignore attempts to set to None; deletion code does that and we
-        # don't want to throw an exception.
-        if value is None:
-            return
         value = self.to_python(value)
         for f, val in zip([f.attname for f in self.fields], value):
             setattr(instance, f, val)
 
     def to_python(self, value):
+        if value is None:
+            value = [None] * len(self.fields)
         if isinstance(value, six.string_types):
             value = [unquote(v, escape=COMPOSITE_VALUE_QUOTING_CHAR)
                      for v in value.split(COMPOSITE_VALUE_SEPARATOR)]

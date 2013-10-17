@@ -76,6 +76,7 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
 
         # Dictionary of relations to return
         relations = {}
+        columns = [f.name for f in self.get_table_description(cursor, table_name)]
 
         # Schema for this table
         cursor.execute("SELECT sql FROM sqlite_master WHERE tbl_name = %s AND type = %s", [table_name, "table"])
@@ -90,11 +91,12 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
             if field_desc.startswith("UNIQUE"):
                 continue
 
-            m = re.search('references (.*) \(["|](.*)["|]\)', field_desc, re.I)
+            m = re.search('\((.*)\) references (.*) \(["|](.*)["|]\)', field_desc, re.I)
             if not m:
                 continue
 
-            table, column = [s.strip('"') for s in m.groups()]
+            from_column, table, column = [s.strip('"') for s in m.groups()]
+            field_index = columns.index(from_column)
 
             cursor.execute("SELECT sql FROM sqlite_master WHERE tbl_name = %s", [table])
             result = cursor.fetchall()[0]

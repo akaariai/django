@@ -5,7 +5,7 @@ from django.db.backends import utils
 from django.db.models import signals
 from django.db.models.fields import (AutoField, Field, IntegerField,
     PositiveIntegerField, PositiveSmallIntegerField, FieldDoesNotExist)
-from django.db.models.fields.virtual import get_composite_in_constraint
+from django.db.models.fields.virtual import get_composite_in_constraint, VirtualField
 from django.db.models.related import RelatedObject, PathInfo
 from django.db.models.query import QuerySet
 from django.db.models.deletion import CASCADE
@@ -89,11 +89,15 @@ def do_pending_lookups(sender, **kwargs):
 signals.class_prepared.connect(do_pending_lookups)
 
 
-class RelatedField(Field):
-    def db_type(self, connection):
-        '''By default related field will not have a column
-           as it relates columns to another table'''
-        return None
+class RelatedField(VirtualField):
+    def __init__(self, **kwargs):
+        # TODO - why do we serialize RelatedField, not its concrete fields?
+        kwargs.setdefault('serialize', True)
+        super(RelatedField, self).__init__(**kwargs)
+
+    def formfield(self, *args, **kwargs):
+        # We want to pass VirtualField.formfield() and use directly field.formfield().
+        return super(VirtualField, self).formfield(*args, **kwargs)
 
     def contribute_to_class(self, cls, name):
         sup = super(RelatedField, self)
@@ -996,10 +1000,11 @@ class ForeignObject(RelatedField):
     def get_enclosed_fields(self):
         return self.local_related_fields
 
-    def resolve_basic_fields(self):
-        return [f
-                for myfield in self.get_enclosed_fields()
-                for f in myfield.resolve_basic_fields()]
+    def resolve_concrete_values(self, data):
+        if not isinstance(data, self.related.field.model):
+            return super(ForeignObject, self).resolve_concrete_values(data)
+        return tuple(getattr(data, field.attname)
+                     for field in self.related.field.resolve_basic_fields())
 
     def resolve_related_fields(self):
         if len(self.from_fields) < 1 or len(self.from_fields) != len(self.to_fields):
@@ -1064,9 +1069,6 @@ class ForeignObject(RelatedField):
                     continue
             ret.append(getattr(instance, field.attname))
         return tuple(ret)
-
-    def get_column(self):
-        return None
 
     def get_joining_columns(self, reverse_join=False):
         source = self.reverse_related_fields if reverse_join else self.related_fields
@@ -1302,9 +1304,6 @@ class ForeignKey(ForeignObject):
             return self._aux_field
         return '%s_id' % self.name
 
-    def get_column(self):
-        return None
-
     def get_validator_unique_lookup_type(self):
         return '%s__%s__exact' % (self.name, self.related_field.name)
 
@@ -1532,6 +1531,8 @@ class ManyToManyField(RelatedField):
             # Class names must be ASCII in Python 2.x, so we forcibly coerce it here to break early if there's a problem.
             to = str(to)
 
+        kwargs.setdefault('editable', True)
+        kwargs.setdefault('serialize', True)
         kwargs['verbose_name'] = kwargs.get('verbose_name', None)
         kwargs['rel'] = ManyToManyRel(to,
             related_name=kwargs.pop('related_name', None),
@@ -1717,11 +1718,6 @@ class ManyToManyField(RelatedField):
                 initial = initial()
             defaults['initial'] = [i._get_pk_val() for i in initial]
         return super(ManyToManyField, self).formfield(**defaults)
-
-    def db_type(self, connection):
-        # A ManyToManyField is not represented by a single column,
-        # so return None.
-        return None
 
     def db_parameters(self, connection):
         return {"type": None, "check": None}

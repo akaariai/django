@@ -44,6 +44,9 @@ class GenericForeignKey(six.with_metaclass(RenameGenericForeignKeyMethods,
 
     def contribute_to_class(self, cls, name):
         super(GenericForeignKey, self).contribute_to_class(cls, name)
+        # Virtual fields are descriptors; they are not handled
+        # individually at instance level.
+        setattr(cls, name, self)
         self.cache_attr = "_%s_cache" % name
 
     def get_content_type(self, obj=None, id=None, using=None):

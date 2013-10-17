@@ -27,9 +27,8 @@ class DeleteQuery(Query):
 
     compiler = 'SQLDeleteCompiler'
 
-    def do_query(self, table, where, using):
+    def do_query(self, table, using):
         self.tables = [table]
-        self.where = where
         self.get_compiler(using).execute_sql(None)
 
     def delete_batch(self, pk_list, using, field=None):
@@ -41,21 +40,11 @@ class DeleteQuery(Query):
         """
         if not field:
             field = self.get_meta().pk
-        # We need an alias because get_lookup_constraint requires one.
-        alias = self.get_initial_alias()
-        # Used in case of ForeignKeys.
-        basic_fields = field.resolve_basic_fields()
         for offset in range(0, len(pk_list), GET_ITERATOR_CHUNK_SIZE):
             pk_batch = pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]
-            if hasattr(field, 'get_lookup_constraint'):
-                where = field.get_lookup_constraint(
-                    self.where_class, alias, basic_fields, basic_fields,
-                    'in', pk_batch)
-            else:
-                where = self.where_class()
-                where.add((Constraint(alias, field.column, field), 'in',
-                           pk_batch), AND)
-            self.do_query(self.get_meta().db_table, where, using=using)
+            self.where = self.where_class()
+            self.add_filter(('%s__in' % field.name, pk_batch))
+            self.do_query(self.get_meta().db_table, using=using)
 
     def delete_qs(self, query, using):
         """
@@ -90,9 +79,8 @@ class DeleteQuery(Query):
                     SelectInfo((self.get_initial_alias(), pk.column), None)
                 ]
                 values = innerq
-            where = self.where_class()
-            where.add((Constraint(None, pk.column, pk), 'in', values), AND)
-            self.where = where
+            self.where = self.where_class()
+            self.add_filter(('pk__in', values))
         self.get_compiler(using).execute_sql(None)
 
 
@@ -123,13 +111,10 @@ class UpdateQuery(Query):
                 related_updates=self.related_updates.copy(), **kwargs)
 
     def update_batch(self, pk_list, values, using):
-        pk_field = self.get_meta().pk
         self.add_update_values(values)
         for offset in range(0, len(pk_list), GET_ITERATOR_CHUNK_SIZE):
             self.where = self.where_class()
-            self.where.add((Constraint(None, pk_field.column, pk_field), 'in',
-                            pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]),
-                           AND)
+            self.add_filter(('pk__in', pk_list[offset:offset + GET_ITERATOR_CHUNK_SIZE]))
             self.get_compiler(using).execute_sql(None)
 
     def add_update_values(self, values):
@@ -139,14 +124,21 @@ class UpdateQuery(Query):
         querysets.
         """
         values_seq = []
-        for name, val in six.iteritems(values):
+        resolved_field_values = []
+        for name, val in values.items():
             field, model, direct, m2m = self.get_meta().get_field_by_name(name)
             if not direct or m2m:
                 raise FieldError('Cannot update model field %r (only non-relations and foreign keys permitted).' % field)
+            if hasattr(val, 'prepare_database_save'):
+                val.prepare_database_save(False)
+            values = field.resolve_concrete_values(val)
+            resolved_field_values.extend(
+                [(f, model, val) for f, val in zip(field.resolve_basic_fields(), values)])
+        for field, model, val in resolved_field_values:
             if model:
                 self.add_related_update(model, field, val)
-                continue
-            values_seq.append((field, model, val))
+            else:
+                values_seq.append((field, model, val))
         return self.add_update_fields(values_seq)
 
     def add_update_fields(self, values_seq):

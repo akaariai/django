@@ -282,6 +282,9 @@ class Field(object):
     def resolve_basic_fields(self):
         return [self]
 
+    def resolve_concrete_values(self, data):
+        return [data]
+
     def __eq__(self, other):
         # Needed for @total_ordering
         if isinstance(other, Field):
