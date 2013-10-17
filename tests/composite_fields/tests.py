@@ -94,6 +94,26 @@ class CompositeFieldTests(TestCase):
         self.h1.owners = []
         self.assertQuerysetEqual(self.h1.owners.all(), [], lambda x: x)
 
+    def test_assign_tuple_foreignkey(self):
+        # Possible to assign non-model data directly to the fk.
+        with self.assertNumQueries(0):
+            # No queries on assign
+            s = Song(title='foo', author=self.p2.pk)
+        with self.assertNumQueries(1):
+            # The real instance is queried on access.
+            self.assertEqual(s.author, self.p2)
+
+    def test_update_multicolumn_field(self):
+        s = Song.objects.create(title='foo', author=self.p1)
+        s = Song.objects.get(pk=s.pk)
+        # s.author is of Person, self.p1 is of PersonWithBirthplace type,
+        # so use [0:2] assignment.
+        self.assertEqual(s.author.pk[0:2], self.p1.pk[0:2])
+        Song.objects.update(author=self.p2)
+        self.assertEqual(Song.objects.get(pk=s.pk).author, self.p2)
+        Song.objects.update(author=self.p2.pk)
+        self.assertEqual(Song.objects.get(pk=s.pk).author.pk[0:2], self.p2.pk[0:2])
+
     def test_cf_assignment(self):
         self.p1.full_name = ('Keith', 'Sanderson')
         self.assertEqual(self.p1.first_name, 'Keith')

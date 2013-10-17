@@ -1005,10 +1005,10 @@ class ForeignObject(RelatedField):
         return self.local_related_fields
 
     def resolve_concrete_values(self, data):
-        if not isinstance(data, self.related.field.model):
+        if not isinstance(data, self.rel.to):
             return super(ForeignObject, self).resolve_concrete_values(data)
         return tuple(getattr(data, field.attname)
-                     for field in self.related.field.resolve_basic_fields())
+                     for field in self.related_field.resolve_basic_fields())
 
     def resolve_related_fields(self):
         if len(self.from_fields) < 1 or len(self.from_fields) != len(self.to_fields):
