@@ -320,11 +320,7 @@ class ReverseSingleRelatedObjectDescriptor(six.with_metaclass(RenameRelatedObjec
         if value is None and self.field.null is False:
             raise ValueError('Cannot assign None: "%s.%s" does not allow null values.' %
                                 (instance._meta.object_name, self.field.name))
-        elif value is not None and not isinstance(value, self.field.rel.to):
-            raise ValueError('Cannot assign "%r": "%s.%s" must be a "%s" instance.' %
-                                (value, instance._meta.object_name,
-                                 self.field.name, self.field.rel.to._meta.object_name))
-        elif value is not None:
+        elif value is not None and isinstance(value, self.field.rel.to):
             if instance._state.db is None:
                 instance._state.db = router.db_for_write(instance.__class__, instance=value)
             elif value._state.db is None:
@@ -332,6 +328,9 @@ class ReverseSingleRelatedObjectDescriptor(six.with_metaclass(RenameRelatedObjec
             elif value._state.db is not None and instance._state.db is not None:
                 if not router.allow_relation(value, instance):
                     raise ValueError('Cannot assign "%r": the current database router prevents this relation.' % value)
+        elif not isinstance(value, (tuple, list)):
+            raise ValueError("Cannot assign values that aren't instances of list, tuple or %s" %
+                             self.model.__name__)
 
         # If we're setting the value of a OneToOneField to None, we need to clear
         # out the cache on any old related object. Otherwise, deleting the
@@ -351,6 +350,11 @@ class ReverseSingleRelatedObjectDescriptor(six.with_metaclass(RenameRelatedObjec
             # hasn't been accessed yet.
             if related is not None:
                 setattr(related, self.field.related.get_cache_name(), None)
+        elif isinstance(value, (list, tuple)):
+            concrete_fields = self.field.resolve_basic_fields()
+            for v, field in zip(value, concrete_fields):
+                setattr(instance, field.name, v)
+            return
 
         # Set the value of the related field
         for lh_field, rh_field in self.field.related_fields:
@@ -662,8 +666,8 @@ def create_many_related_manager(superclass, rel):
                             raise ValueError('Cannot add "%r": instance is on database "%s", value is on database "%s"' %
                                                (obj, self.instance._state.db, obj._state.db))
                         fk_val = self.through._meta.get_field(
-                            target_field_name).get_foreign_related_value(obj)[0]
-                        if fk_val is None:
+                            target_field_name).get_foreign_related_value(obj)
+                        if None in fk_val:
                             raise ValueError('Cannot add "%r": the value for field "%s" is None' %
                                              (obj, target_field_name))
                         new_ids.add(fk_val)
@@ -674,7 +678,7 @@ def create_many_related_manager(superclass, rel):
                 db = router.db_for_write(self.through, instance=self.instance)
                 vals = self.through._default_manager.using(db).values_list(target_field_name, flat=True)
                 vals = vals.filter(**{
-                    source_field_name: self.related_val[0],
+                    source_field_name: self.related_val,
                     '%s__in' % target_field_name: new_ids,
                 })
                 new_ids = new_ids - set(vals)
@@ -688,8 +692,8 @@ def create_many_related_manager(superclass, rel):
                 # Add the ones that aren't there already
                 self.through._default_manager.using(db).bulk_create([
                     self.through(**{
-                        '%s_id' % source_field_name: self.related_val[0],
-                        '%s_id' % target_field_name: obj_id,
+                        source_field_name: self.related_val,
+                        target_field_name: obj_id,
                     })
                     for obj_id in new_ids
                 ])
@@ -713,7 +717,7 @@ def create_many_related_manager(superclass, rel):
                 for obj in objs:
                     if isinstance(obj, self.model):
                         fk_val = self.through._meta.get_field(
-                            target_field_name).get_foreign_related_value(obj)[0]
+                            target_field_name).get_foreign_related_value(obj)
                         old_ids.add(fk_val)
                     else:
                         old_ids.add(obj)
@@ -728,7 +732,7 @@ def create_many_related_manager(superclass, rel):
                         model=self.model, pk_set=old_ids, using=db)
                 # Remove the specified objects from the join table
                 self.through._default_manager.using(db).filter(**{
-                    source_field_name: self.related_val[0],
+                    source_field_name: self.related_val,
                     '%s__in' % target_field_name: old_ids
                 }).delete()
                 if self.reverse or source_field_name == self.source_field_name:

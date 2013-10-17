@@ -4,13 +4,14 @@ from datetime import date, datetime, time
 from decimal import Decimal
 import unittest
 
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.db import connection, IntegrityError
 from django.db.models.fields import FieldDoesNotExist
 from django.db.transaction import atomic
 from django.utils.encoding import force_text
 
-from .models import (Person, PersonWithBirthplace, Song, MostFieldTypes,
+from .models import (
+    Person, House, PersonWithBirthplace, Song, MostFieldTypes,
     EvenMoreFields, WeekDay, Sentence, SentenceFreq)
 
 
@@ -30,6 +31,8 @@ class CompositeFieldTests(TestCase):
         Person.objects.create(
             first_name='Ringo', last_name='Starr', birthday=date(1940, 7, 7),
         )
+        self.h1 = House.objects.create(street_address='Maple street 1', zip_code='01234')
+        self.h2 = House.objects.create(street_address='Maple street 2', zip_code='01234')
 
     def test_cf_retrieval(self):
         name1 = self.p1.full_name
@@ -38,6 +41,58 @@ class CompositeFieldTests(TestCase):
 
         self.assertEqual(self.p2.full_name.first_name, self.p2.first_name)
         self.assertEqual(self.p2.full_name.last_name, 'Harrison')
+
+    def test_m2m_add(self):
+        self.p2.houses.add(self.h1)
+        self.assertQuerysetEqual(
+            self.p2.houses.all(),
+            [self.h1], lambda x: x)
+
+    def test_m2m_add_reverse(self):
+        self.h1.owners.add(self.p2)
+        self.assertQuerysetEqual(
+            self.h1.owners.all(),
+            [self.p2], lambda x: x)
+
+    def test_m2m_clear(self):
+        self.p2.houses.add(self.h1)
+        self.assertQuerysetEqual(
+            self.p2.houses.all(),
+            [self.h1], lambda x: x)
+        self.p2.houses.clear()
+        self.assertQuerysetEqual(
+            self.p2.houses.all(),
+            [])
+
+    def test_m2m_clear_reverse(self):
+        self.h1.owners.add(self.p1, self.p2)
+        self.assertQuerysetEqual(
+            self.h1.owners.all(),
+            [self.p2.pk[0:2], self.p1.pk[0:2]], lambda x: x.pk[0:2])
+        self.h1.owners.clear()
+        self.assertQuerysetEqual(
+            self.h1.owners.all(),
+            [])
+
+    def test_m2m_remove(self):
+        self.p2.houses.add(self.h1, self.h2)
+        self.assertEqual(len(self.p2.houses.all()), 2)
+        self.p2.houses.remove(self.h1)
+        self.assertQuerysetEqual(self.p2.houses.all(), [self.h2], lambda x: x)
+
+    def test_m2m_remove_reverse(self):
+        self.h1.owners.add(self.p1, self.p2)
+        self.assertEqual(len(self.h1.owners.all()), 2)
+        self.h1.owners.remove(self.p1)
+        self.assertQuerysetEqual(self.h1.owners.all(), [self.p2], lambda x: x)
+
+    def test_m2m_assign(self):
+        self.h1.owners = [self.p1, self.p2]
+        self.assertEqual(len(self.h1.owners.all()), 2)
+        self.h1.owners = [self.p2]
+        self.assertQuerysetEqual(self.h1.owners.all(), [self.p2], lambda x: x)
+        self.h1.owners = []
+        self.assertQuerysetEqual(self.h1.owners.all(), [], lambda x: x)
 
     def test_cf_assignment(self):
         self.p1.full_name = ('Keith', 'Sanderson')

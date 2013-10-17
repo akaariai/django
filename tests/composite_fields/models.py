@@ -19,6 +19,19 @@ class Person(models.Model):
     def __str__(self):
         return '%s %s' % (self.first_name, self.last_name)
 
+class House(models.Model):
+    street_address = models.CharField(max_length=100)
+    zip_code = models.CharField(max_length=5)
+    owners = models.ManyToManyField(Person, related_name='houses')
+
+    full_address = models.CompositeField('street_address', 'zip_code', primary_key=True)
+
+    class Meta:
+        ordering = ('street_address', 'zip_code')
+
+    def __str__(self):
+        return '%s - %s' % (self.street_address, self.zip_code)
+
 
 class PersonWithBirthplace(Person):
     birthplace = models.CharField(max_length=100)
