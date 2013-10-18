@@ -171,8 +171,8 @@ class GenericRelation(ForeignObject):
     def resolve_related_fields(self):
         self.to_fields = [self.model._meta.pk.name]
         from_field = self.rel.to._meta.get_field_by_name(self.object_id_field_name)[0]
-        basic_from = from_field.resolve_basic_fields()
-        basic_to = self.model._meta.pk.resolve_basic_fields()
+        basic_from = from_field.concrete_fields
+        basic_to = self.model._meta.pk.concrete_fields
         return list(zip(basic_from, basic_to))
 
     def get_reverse_path_info(self):

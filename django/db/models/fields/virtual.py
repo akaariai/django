@@ -40,24 +40,24 @@ class VirtualField(Field):
     def get_enclosed_fields(self):
         return []
 
-    def resolve_basic_fields(self):
+    @cached_property
+    def concrete_fields(self):
         return [f
                 for myfield in self.get_enclosed_fields()
-                for f in myfield.resolve_basic_fields()]
+                for f in myfield.concrete_fields]
 
     def resolve_concrete_values(self, data):
-        concrete_fields = self.resolve_basic_fields()
         if data is None:
-            return [None] * len(concrete_fields)
-        if len(concrete_fields) > 1:
+            return [None] * len(self.concrete_fields)
+        if len(self.concrete_fields) > 1:
             if not isinstance(data, (list, tuple)):
                 raise ValueError(
                     "Can't resolve data that isn't list or tuple to values for field %s" %
                     self.name)
-            elif len(data) != len(concrete_fields):
+            elif len(data) != len(self.concrete_fields):
                 raise ValueError(
                     "Invalid amount of values for field %s. Required %s, got %s." %
-                    (self.name, len(concrete_fields), len(data)))
+                    (self.name, len(self.concrete_fields), len(data)))
             return data
         else:
             return [data]
@@ -65,12 +65,12 @@ class VirtualField(Field):
     @cached_property
     def nt(self):
         nt_name = "%s_%s" % (self.__class__.__name__, self.name)
-        nt_fields = " ".join(f.name for f in self.resolve_basic_fields())
+        nt_fields = " ".join(f.name for f in self.concrete_fields)
         return get_composite_value_class(nt_name, nt_fields)
 
     @cached_property
     def is_multicolumn(self):
-        return len(self.resolve_basic_fields()) > 1
+        return len(self.concrete_fields) > 1
 
 class CompositeField(VirtualField):
     """

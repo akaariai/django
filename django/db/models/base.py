@@ -566,7 +566,7 @@ class Model(six.with_metaclass(ModelBase)):
 
                     if (field.name in update_fields
                             or field.attname in update_fields):
-                        basic_update_fields.update(field.resolve_basic_fields())
+                        basic_update_fields.update(field.concrete_fields)
 
             non_model_fields = update_fields.difference(field_names)
 
@@ -587,9 +587,9 @@ class Model(six.with_metaclass(ModelBase)):
             # that we don't update those as well. They might be virtual
             # fields, which means we need to resolve them into basic
             # concrete fields first.
-            pk_field_names = set(f.name for f in self._meta.pk.resolve_basic_fields())
+            pk_field_names = set(f.name for f in self._meta.pk.concrete_fields)
             for parent in self._meta.parents:
-                pk_field_names.update(f.name for f in parent._meta.pk.resolve_basic_fields())
+                pk_field_names.update(f.name for f in parent._meta.pk.concrete_fields)
 
             for field in self._meta.concrete_fields:
                 if not field.name in pk_field_names and not hasattr(field, 'through'):
@@ -677,7 +677,7 @@ class Model(six.with_metaclass(ModelBase)):
         for a single table.
         """
         meta = cls._meta
-        pk_names = set(f.name for f in meta.pk.resolve_basic_fields())
+        pk_names = set(f.name for f in meta.pk.concrete_fields)
         non_pks = [f for f in meta.local_concrete_fields if not f.name in pk_names]
 
         if update_fields:

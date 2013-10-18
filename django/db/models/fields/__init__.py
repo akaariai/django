@@ -19,7 +19,7 @@ from django import forms
 from django.core import exceptions, validators
 from django.utils.datastructures import DictWrapper
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
-from django.utils.functional import curry, total_ordering, Promise
+from django.utils.functional import curry, total_ordering, Promise, cached_property
 from django.utils.text import capfirst
 from django.utils import timezone
 from django.utils.translation import ugettext_lazy as _
@@ -282,7 +282,8 @@ class Field(object):
                                      Fraction(counter_high)) / 2
         return [(name, instance)]
 
-    def resolve_basic_fields(self):
+    @cached_property
+    def concrete_fields(self):
         return [self]
 
     def resolve_concrete_values(self, data):

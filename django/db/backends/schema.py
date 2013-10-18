@@ -191,22 +191,22 @@ class BaseDatabaseSchemaEditor(object):
                 ))
                 params.extend(extra_params)
             # Indexes
-            basic_fields = field.resolve_basic_fields()
+            concrete_fields = field.concrete_fields
             if field.db_index and not field.unique:
                 self.deferred_sql.append(
                     self.sql_create_index % {
-                        "name": self._create_index_name(model, [f.column for f in basic_fields], suffix=""),
+                        "name": self._create_index_name(model, [f.column for f in concrete_fields], suffix=""),
                         "table": self.quote_name(model._meta.db_table),
-                        "columns": "".join(self.quote_name(f.column) for f in basic_fields),
+                        "columns": "".join(self.quote_name(f.column) for f in concrete_fields),
                         "extra": "",
                     }
                 )
             # FK
             if field.rel and self.connection.features.supports_foreign_keys:
                 to_table = field.rel.to._meta.db_table
-                to_fields = field.rel.to._meta.get_field(field.rel.field_name).resolve_basic_fields()
+                to_fields = field.rel.to._meta.get_field(field.rel.field_name).concrete_fields
                 to_columns = [f.column for f in to_fields]
-                from_columns = [f.column for f in basic_fields]
+                from_columns = [f.column for f in concrete_fields]
                 self.deferred_sql.append(
                     self.sql_create_fk % {
                         "name": self._create_index_name(model, from_columns, suffix="_fk_%s_%s" % (to_table, '_'.join(to_columns))),
@@ -224,7 +224,7 @@ class BaseDatabaseSchemaEditor(object):
         # Add any unique_togethers
         for fields in model._meta.unique_together:
             columns = [basic.column for field in fields
-                       for basic in model._meta.get_field_by_name(field)[0].resolve_basic_fields()]
+                       for basic in model._meta.get_field_by_name(field)[0].concrete_fields]
             column_sqls.append(self.sql_create_table_unique % {
                 "columns": ", ".join(self.quote_name(column) for column in columns),
             })
@@ -237,7 +237,7 @@ class BaseDatabaseSchemaEditor(object):
         # Add any index_togethers
         for fields in model._meta.index_together:
             columns = [basic.column for field in fields
-                       for basic in model._meta.get_field_by_name(field)[0].resolve_basic_fields()]
+                       for basic in model._meta.get_field_by_name(field)[0].concrete_fields]
             self.execute(self.sql_create_index % {
                 "table": self.quote_name(model._meta.db_table),
                 "name": self._create_index_name(model, columns, suffix="_idx"),
@@ -352,10 +352,10 @@ class BaseDatabaseSchemaEditor(object):
         # Special-case implicit M2M tables
         if isinstance(field, ManyToManyField) and field.rel.through._meta.auto_created:
             return self.create_model(field.rel.through)
-        basic_fields = field.resolve_basic_fields()
+        concrete_fields = field.concrete_fields
         # Also special-case FK fields to handle their aux fields
         if isinstance(field, ForeignKey):
-            for f in basic_fields:
+            for f in concrete_fields:
                 if f.auto_created:
                     self.add_field(model, f)
         # Get the column's definition
@@ -387,18 +387,18 @@ class BaseDatabaseSchemaEditor(object):
         if field.db_index and not field.unique:
             self.deferred_sql.append(
                 self.sql_create_index % {
-                    "name": self._create_index_name(model, [f.column for f in basic_fields], suffix=""),
+                    "name": self._create_index_name(model, [f.column for f in concrete_fields], suffix=""),
                     "table": self.quote_name(model._meta.db_table),
-                    "columns": ", ".join(self.quote_name(f.column) for f in basic_fields),
+                    "columns": ", ".join(self.quote_name(f.column) for f in concrete_fields),
                     "extra": "",
                 }
             )
         # Add any FK constraints later
         if field.rel and self.connection.features.supports_foreign_keys:
             to_table = field.rel.to._meta.db_table
-            to_fields = field.rel.to._meta.get_field(field.rel.field_name).resolve_basic_fields()
+            to_fields = field.rel.to._meta.get_field(field.rel.field_name).concrete_fields
             to_columns = [f.column for f in to_fields]
-            from_columns = [f.column for f in basic_fields]
+            from_columns = [f.column for f in concrete_fields]
             self.deferred_sql.append(
                 self.sql_create_fk % {
                     "name": self._create_index_name(model, from_columns, suffix="_fk_%s_%s" % (to_table, '_'.join(to_columns))),
@@ -447,12 +447,12 @@ class BaseDatabaseSchemaEditor(object):
         # changes in numbers of enclosed fields etc.
         old_db_params = old_field.db_parameters(connection=self.connection)
         old_type = old_db_params['type']
-        old_basic_fields = old_field.resolve_basic_fields()
-        old_columns = [f.column for f in old_basic_fields]
+        old_concrete_fields = old_field.concrete_fields
+        old_columns = [f.column for f in old_concrete_fields]
         new_db_params = new_field.db_parameters(connection=self.connection)
         new_type = new_db_params['type']
-        new_basic_fields = new_field.resolve_basic_fields()
-        new_columns = [f.column for f in new_basic_fields]
+        new_concrete_fields = new_field.concrete_fields
+        new_columns = [f.column for f in new_concrete_fields]
         # Ensure the fields are compatible
         if old_type is None and new_type is None and (getattr(old_field.rel, 'through', None) and getattr(new_field.rel, 'through', None) and old_field.rel.through._meta.auto_created and new_field.rel.through._meta.auto_created):
             return self._alter_many_to_many(model, old_field, new_field, strict)
@@ -667,7 +667,7 @@ class BaseDatabaseSchemaEditor(object):
         # Does it have a foreign key?
         if new_field.rel and self.connection.features.supports_foreign_keys:
             to_table = new_field.rel.to._meta.db_table
-            to_fields = new_field.rel.to._meta.get_field(new_field.rel.field_name).resolve_basic_fields()
+            to_fields = new_field.rel.to._meta.get_field(new_field.rel.field_name).concrete_fields
             to_columns = [f.column for f in to_fields]
             from_columns = new_columns
             self.execute(

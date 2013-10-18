@@ -259,7 +259,7 @@ class Options(object):
         the self.concrete_fields list.
         """
         return [self.concrete_fields.index(basic)
-                for basic in self.pk.resolve_basic_fields()]
+                for basic in self.pk.concrete_fields]
 
     def setup_proxy(self, target):
         """

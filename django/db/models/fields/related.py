@@ -654,7 +654,7 @@ def create_many_related_manager(superclass, rel):
             # *objs - objects to add. Either object instances, or primary keys of object instances.
             source_field = self.through._meta.get_field_by_name(source_field_name)[0]
             target_field = self.through._meta.get_field_by_name(target_field_name)[0]
-            target_fnames = [f.name for f in target_field.resolve_basic_fields()]
+            target_fnames = [f.name for f in target_field.concrete_fields]
 
             # If there aren't any objects, there is nothing to do.
             from django.db.models import Model
@@ -696,7 +696,7 @@ def create_many_related_manager(superclass, rel):
                         model=self.model, pk_set=pks_for_signals, using=db)
                 # Add the ones that aren't there already
                 new_objs = []
-                source_fnames = [f.name for f in source_field.resolve_basic_fields()]
+                source_fnames = [f.name for f in source_field.concrete_fields]
                 for obj_id in new_ids:
                     init_data = dict(zip(source_fnames, self.related_val))
                     if not isinstance(obj_id, target_field.nt):
@@ -733,7 +733,7 @@ def create_many_related_manager(superclass, rel):
                 # Work out what DB we're operating on
                 db = router.db_for_write(self.through, instance=self.instance)
                 # Send a signal to the other end if need be.
-                if len(target_field.resolve_basic_fields()) == 1:
+                if not target_field.is_multicolumn:
                     pks_for_signals = [p[0] for p in old_ids]
                 else:
                     pks_for_signals = old_ids
@@ -1021,7 +1021,7 @@ class ForeignObject(RelatedField):
         if not isinstance(data, self.rel.to):
             return super(ForeignObject, self).resolve_concrete_values(data)
         return tuple(getattr(data, field.attname)
-                     for field in self.related_field.resolve_basic_fields())
+                     for field in self.related_field.concrete_fields)
 
     def resolve_related_fields(self):
         if len(self.from_fields) < 1 or len(self.from_fields) != len(self.to_fields):
@@ -1037,8 +1037,8 @@ class ForeignObject(RelatedField):
                           else self.opts.get_field_by_name(from_field_name)[0])
             to_field = (self.rel.to._meta.pk if to_field_name is None
                         else self.rel.to._meta.get_field_by_name(to_field_name)[0])
-            basic_from = from_field.resolve_basic_fields()
-            basic_to = to_field.resolve_basic_fields()
+            basic_from = from_field.concrete_fields
+            basic_to = to_field.concrete_fields
             if len(basic_from) != len(basic_to):
                 raise ValueError('Related from field %s and to field %s '
                                  'resolve to different numbers of basic '
@@ -1135,7 +1135,7 @@ class ForeignObject(RelatedField):
         """
         opts = self.model._meta
         from_opts = self.rel.to._meta
-        fields = opts.pk.resolve_basic_fields()
+        fields = opts.pk.concrete_fields
         pathinfos = [PathInfo(from_opts, opts, fields, self.rel, not self.unique, False)]
         return pathinfos
 
@@ -1292,7 +1292,7 @@ class ForeignKey(ForeignObject):
         """
         opts = self.model._meta
         from_opts = self.rel.to._meta
-        fields = opts.pk.resolve_basic_fields()
+        fields = opts.pk.concrete_fields
         pathinfos = [PathInfo(from_opts, opts, fields, self.rel, not self.unique, False)]
         return pathinfos
 
@@ -1426,8 +1426,8 @@ class ForeignKey(ForeignObject):
         aux_field = self.model._meta.get_field(self.attname)
 
         def process_aux_field(sender, **kwargs):
-            self.from_fields = [f.name for f in aux_field.resolve_basic_fields()]
-            self.to_fields = [f.name for f in field.resolve_basic_fields()]
+            self.from_fields = [f.name for f in aux_field.concrete_fields]
+            self.to_fields = [f.name for f in field.concrete_fields]
             # Cache the aux field for later use.
             self.auxiliary_field = aux_field
             self.prepare()

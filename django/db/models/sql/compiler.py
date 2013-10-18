@@ -923,7 +923,7 @@ class SQLUpdateCompiler(SQLCompiler):
         result.append('SET')
         values, update_params = [], []
         for field, model, val in self.query.values:
-            basic_fields = field.resolve_basic_fields()
+            basic_fields = field.concrete_fields
             if len(basic_fields) != 1:
                 raise FieldError("Cannot update field %s which is not "
                                  "backed by exactly one column." %

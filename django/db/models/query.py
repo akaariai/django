@@ -1375,7 +1375,7 @@ def get_klass_info(klass, max_depth=0, cur_depth=0, requested=None,
                 reverse_related_fields.append((o.field, klass_info))
     if field_names:
         pk_idx = [field_names.index(basic.name)
-                  for basic in klass._meta.pk.resolve_basic_fields()]
+                  for basic in klass._meta.pk.concrete_fields]
     else:
         pk_idx = klass._meta.pk_indexes()
 

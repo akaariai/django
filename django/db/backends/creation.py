@@ -105,14 +105,14 @@ class BaseDatabaseCreation(object):
             table_output.append(style.SQL_KEYWORD('UNIQUE') + ' (%s)' %
                 ", ".join(style.SQL_FIELD(qn(basic.column))
                           for f in field_list
-                          for basic in f.resolve_basic_fields())
+                          for basic in f.concrete_fields)
             )
 
         # FIXME: this will probably need some tablespace SQL as well
         if opts.pk.column is None:
             table_output.append(style.SQL_KEYWORD('PRIMARY KEY') + ' (%s)' %
                 ", ".join(style.SQL_FIELD(qn(f.column))
-                          for f in opts.pk.resolve_basic_fields())
+                          for f in opts.pk.concrete_fields)
             )
 
         full_statement = [style.SQL_KEYWORD('CREATE TABLE') + ' ' +
@@ -238,7 +238,7 @@ class BaseDatabaseCreation(object):
         field_names = []
         qn = self.connection.ops.quote_name
         for f in fields:
-            for basic in f.resolve_basic_fields():
+            for basic in f.concrete_fields:
                 field_names.append(style.SQL_FIELD(qn(basic.column)))
 
         index_name = "%s_%s" % (model._meta.db_table, self._digest([f.name for f in fields]))

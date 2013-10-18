@@ -10,7 +10,6 @@ from django.db.models.fields import DateField, DateTimeField, FieldDoesNotExist
 from django.db.models.sql.constants import GET_ITERATOR_CHUNK_SIZE, SelectInfo
 from django.db.models.sql.datastructures import Date, DateTime
 from django.db.models.sql.query import Query
-from django.db.models.sql.where import AND, Constraint
 from django.utils import six
 from django.utils import timezone
 
@@ -133,7 +132,7 @@ class UpdateQuery(Query):
                 val.prepare_database_save(False)
             values = field.resolve_concrete_values(val)
             resolved_field_values.extend(
-                [(f, model, val) for f, val in zip(field.resolve_basic_fields(), values)])
+                [(f, model, val) for f, val in zip(field.concrete_fields, values)])
         for field, model, val in resolved_field_values:
             if model:
                 self.add_related_update(model, field, val)

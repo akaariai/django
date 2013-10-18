@@ -599,14 +599,14 @@ class Query(object):
                 # both the current model's pk and the related reference field
                 # (if it's not a reverse relation) to the things we select.
                 if not is_reverse_o2o(source):
-                    must_include[old_model].update(source.resolve_basic_fields())
+                    must_include[old_model].update(source.concrete_fields)
                 add_to_dict(must_include, cur_model,
-                            opts.pk.resolve_basic_fields())
+                            opts.pk.concrete_fields)
             field, model, _, _ = opts.get_field_by_name(parts[-1])
             if model is None:
                 model = cur_model
             if not is_reverse_o2o(field):
-                add_to_dict(seen, model, field.resolve_basic_fields())
+                add_to_dict(seen, model, field.concrete_fields)
 
         if defer:
             # We need to load all fields for each model, except those that
@@ -618,7 +618,7 @@ class Query(object):
                 for field, m in model._meta.get_concrete_fields_with_model():
                     if field in values:
                         continue
-                    add_to_dict(workset, m or model, field.resolve_basic_fields())
+                    add_to_dict(workset, m or model, field.concrete_fields)
             for model, values in six.iteritems(must_include):
                 # If we haven't included a model in workset, we don't add the
                 # corresponding must_include fields for that model, since an
@@ -655,7 +655,7 @@ class Query(object):
         if table not in target:
             target[table] = set()
         for field in fields:
-            target[table].update(f.column for f in field.resolve_basic_fields())
+            target[table].update(f.column for f in field.concrete_fields)
 
     def table_alias(self, table_name, create=False):
         """
@@ -1391,7 +1391,7 @@ class Query(object):
             else:
                 # Local non-relational field.
                 final_field = field
-                targets = field.resolve_basic_fields()
+                targets = field.concrete_fields
                 break
 
         if pos != len(names) - 1:
@@ -1611,11 +1611,11 @@ class Query(object):
                 field, targets, u2, joins, path = self.setup_joins(
                     name.split(LOOKUP_SEP), opts, alias, can_reuse=None,
                     allow_many=allow_m2m, outer_if_first=True)
-                if not allow_multicol and len(field.resolve_basic_fields()) > 1:
+                if not allow_multicol and field.is_multicolumn:
                     raise ValueError("Multicolumn fields not allowed in this query")
                 targets, final_alias, joins = self.trim_joins(targets, joins, path)
                 for target in targets:
-                    for f in target.resolve_basic_fields():
+                    for f in target.concrete_fields:
                         self.select.append(SelectInfo((final_alias, f.column), f))
         except MultiJoin:
             raise FieldError("Invalid field name: '%s'" % name)
@@ -1798,7 +1798,7 @@ class Query(object):
             if prefix:
                 prefix = prefix + LOOKUP_SEP
             try:
-                resolved.update(prefix + f.name for f in field.resolve_basic_fields())
+                resolved.update(prefix + f.name for f in field.concrete_fields)
             except AttributeError:
                 # In case of a reverse relation, leave it as it is.
                 resolved.add(field_name)
@@ -1874,7 +1874,7 @@ class Query(object):
         Callback used by get_deferred_field_names().
         """
         target[model] = set(basic.name for f in fields
-                            for basic in f.resolve_basic_fields())
+                            for basic in f.concrete_fields)
 
     def set_aggregate_mask(self, names):
         "Set the mask of aggregates that will actually be returned by the SELECT"
