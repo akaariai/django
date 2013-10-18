@@ -647,6 +647,8 @@ def create_many_related_manager(superclass, rel):
         get_or_create.alters_data = True
 
         def _add_items(self, source_field_name, target_field_name, *objs):
+            # TODO: clean up field values handling (tuple vs. direct value)
+            # here and in _remove_items()
             # source_field_name: the PK fieldname in join table for the source object
             # target_field_name: the PK fieldname in join table for the target object
             # *objs - objects to add. Either object instances, or primary keys of object instances.
@@ -1712,7 +1714,14 @@ class ManyToManyField(RelatedField):
 
     def value_from_object(self, obj):
         "Returns the value of this field in the given model instance."
-        return getattr(obj, self.attname).all()
+        if obj.pk is None:
+            return []
+        baseqs = getattr(obj, self.attname)
+        if not self.rel.get_related_field().is_multicolumn:
+            return list(baseqs.values_list('pk', flat=True))
+        else:
+            target_nt = self.rel.get_related_field().nt
+            return [target_nt(*v) for v in baseqs.values_list('pk')]
 
     def save_form_data(self, instance, data):
         setattr(instance, self.attname, data)

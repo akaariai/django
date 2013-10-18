@@ -68,6 +68,10 @@ class VirtualField(Field):
         nt_fields = " ".join(f.name for f in self.resolve_basic_fields())
         return get_composite_value_class(nt_name, nt_fields)
 
+    @cached_property
+    def is_multicolumn(self):
+        return len(self.resolve_basic_fields()) > 1
+
 class CompositeField(VirtualField):
     """
     Virtual field type enclosing several atomic fields into one.

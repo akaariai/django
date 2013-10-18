@@ -14,6 +14,13 @@ from .models import (
     Person, House, PersonWithBirthplace, Song, MostFieldTypes,
     EvenMoreFields, WeekDay, Sentence, SentenceFreq)
 
+from django import forms
+
+class M2MModelForm(forms.ModelForm):
+    class Meta:
+        model = House
+        fields = '__all__'
+
 
 class CompositeFieldTests(TestCase):
     def setUp(self):
@@ -41,6 +48,12 @@ class CompositeFieldTests(TestCase):
 
         self.assertEqual(self.p2.full_name.first_name, self.p2.first_name)
         self.assertEqual(self.p2.full_name.last_name, 'Harrison')
+
+    def test_m2m_form(self):
+        self.p2.houses.add(self.h1)
+        form = M2MModelForm(instance=self.h1)
+        self.assertTrue(
+            'selected' in str(form['owners']))
 
     def test_m2m_add(self):
         self.p2.houses.add(self.h1)

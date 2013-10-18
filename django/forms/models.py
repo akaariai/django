@@ -114,8 +114,6 @@ def model_to_dict(instance, fields=None, exclude=None):
     fields will be excluded from the returned dict, even if they are listed in
     the ``fields`` argument.
     """
-    # avoid a circular import
-    from django.db.models.fields.related import ManyToManyField
     opts = instance._meta
     data = {}
     for f in opts.fields + opts.many_to_many:
@@ -125,18 +123,7 @@ def model_to_dict(instance, fields=None, exclude=None):
             continue
         if exclude and f.name in exclude:
             continue
-        if isinstance(f, ManyToManyField):
-            # If the object doesn't have a primary key yet, just use an empty
-            # list for its m2m fields. Calling f.value_from_object will raise
-            # an exception.
-            if instance.pk is None:
-                data[f.name] = []
-            else:
-                # MultipleChoiceWidget needs a list of pks, not object instances.
-                data[f.name] = list(
-                    f.value_from_object(instance).values_list('pk', flat=len(f.resolve_basic_fields()) == 1))
-        else:
-            data[f.name] = f.value_from_object(instance)
+        data[f.name] = f.value_from_object(instance)
     return data
 
 def fields_for_model(model, fields=None, exclude=None, widgets=None,

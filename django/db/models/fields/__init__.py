@@ -72,6 +72,9 @@ def _empty(of_cls):
 @total_ordering
 class Field(object):
     """Base class for all field types"""
+    # Designates if this field is multicolumn - virtual fields will override
+    # this on instance level
+    is_multicolumn = False
 
     # Designates whether empty strings fundamentally are allowed at the
     # database level.
