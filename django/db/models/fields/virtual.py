@@ -6,6 +6,7 @@ from fractions import Fraction
 from django.db.models import signals
 from django.db.models.fields import Field
 from django.db.models.sql.where import Constraint, InConstraint, AND
+from django.utils.functional import cached_property
 from django.utils.encoding import (force_text, python_2_unicode_compatible,
         quote, unquote)
 from django.utils import six
@@ -61,6 +62,12 @@ class VirtualField(Field):
         else:
             return [data]
 
+    @cached_property
+    def nt(self):
+        nt_name = "%s_%s" % (self.__class__.__name__, self.name)
+        nt_fields = " ".join(f.name for f in self.resolve_basic_fields())
+        return get_composite_value_class(nt_name, nt_fields)
+
 class CompositeField(VirtualField):
     """
     Virtual field type enclosing several atomic fields into one.
@@ -110,9 +117,6 @@ class CompositeField(VirtualField):
                     new_fields.append(f)
             self.fields = new_fields
 
-            nt_name = "%s_%s" % (cls.__name__, name)
-            nt_fields = " ".join(f.name for f in self.fields)
-            self.nt = get_composite_value_class(nt_name, nt_fields)
             self.prepare()
 
         if cls._meta.model_prepared:
@@ -140,7 +144,7 @@ class CompositeField(VirtualField):
             value = [None] * len(self.fields)
         if isinstance(value, six.string_types):
             value = [unquote(v, escape=COMPOSITE_VALUE_QUOTING_CHAR)
-                     for v in value.split(COMPOSITE_VALUE_SEPARATOR)]
+                     for v in value[1:-1].split(COMPOSITE_VALUE_SEPARATOR)]
 
         if len(value) != len(self.fields):
             raise ValueError("%s values must have length %d; "
@@ -167,7 +171,6 @@ class CompositeField(VirtualField):
                             "fields." % lookup_type)
         return root_constraint
 
-
 def get_composite_value_class(name, fields):
     """
     Returns a namedtuple subclass with our custom unicode representation.
@@ -177,11 +180,16 @@ def get_composite_value_class(name, fields):
     @python_2_unicode_compatible
     class CompositeValue(nt):
         def __str__(self):
-            return COMPOSITE_VALUE_SEPARATOR.join(
+            return '(' + COMPOSITE_VALUE_SEPARATOR.join(
                     quote(force_text(v),
                           unsafe_chars=COMPOSITE_VALUE_SEPARATOR,
                           escape=COMPOSITE_VALUE_QUOTING_CHAR)
-                    for v in self)
+                    for v in self) + ')'
+
+        def __eq__(self, other):
+            if isinstance(other, tuple):
+                return tuple(self) == other
+            return False
 
     return CompositeValue
 

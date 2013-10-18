@@ -94,15 +94,6 @@ class CompositeFieldTests(TestCase):
         self.h1.owners = []
         self.assertQuerysetEqual(self.h1.owners.all(), [], lambda x: x)
 
-    def test_assign_tuple_foreignkey(self):
-        # Possible to assign non-model data directly to the fk.
-        with self.assertNumQueries(0):
-            # No queries on assign
-            s = Song(title='foo', author=self.p2.pk)
-        with self.assertNumQueries(1):
-            # The real instance is queried on access.
-            self.assertEqual(s.author, self.p2)
-
     def test_update_multicolumn_field(self):
         s = Song.objects.create(title='foo', author=self.p1)
         s = Song.objects.get(pk=s.pk)
@@ -197,7 +188,7 @@ class CompositeFieldTests(TestCase):
             int_field=474747,
         )
         text_repr = force_text(instance.all_fields)
-        self.assertEqual(text_repr, "True,some~7Eunpleasant~2C string!#%;',2011-07-07,2010-03-04 12:47:47,10:11:12,123.4747,47.474,474747")
+        self.assertEqual(text_repr, "(True,some~7Eunpleasant~2C string!#%;',2011-07-07,2010-03-04 12:47:47,10:11:12,123.4747,47.474,474747)")
         another = MostFieldTypes(all_fields=text_repr)
         self.assertEqual(instance.all_fields, another.all_fields)
 

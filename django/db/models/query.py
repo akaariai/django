@@ -1108,7 +1108,7 @@ class ValuesQuerySet(QuerySet):
         self.query.select = []
         if self.extra_names is not None:
             self.query.set_extra_mask(self.extra_names)
-        self.query.add_fields(self.field_names, True)
+        self.query.add_fields(self.field_names, True, not getattr(self, 'flat', False))
         if self.aggregate_names is not None:
             self.query.set_aggregate_mask(self.aggregate_names)
 

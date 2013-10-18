@@ -319,8 +319,12 @@ class ReverseSingleRelatedObjectDescriptor(six.with_metaclass(RenameRelatedObjec
         # to be an instance of the related class.
         if value is None and self.field.null is False:
             raise ValueError('Cannot assign None: "%s.%s" does not allow null values.' %
-                                (instance._meta.object_name, self.field.name))
-        elif value is not None and isinstance(value, self.field.rel.to):
+                             (instance._meta.object_name, self.field.name))
+        elif value is not None and not isinstance(value, self.field.rel.to):
+            raise ValueError('Cannot assign "%r": "%s.%s" must be a "%s" instance.' %
+                             (value, instance._meta.object_name,
+                              self.field.name, self.field.rel.to._meta.object_name))
+        elif value is not None:
             if instance._state.db is None:
                 instance._state.db = router.db_for_write(instance.__class__, instance=value)
             elif value._state.db is None:
@@ -328,10 +332,6 @@ class ReverseSingleRelatedObjectDescriptor(six.with_metaclass(RenameRelatedObjec
             elif value._state.db is not None and instance._state.db is not None:
                 if not router.allow_relation(value, instance):
                     raise ValueError('Cannot assign "%r": the current database router prevents this relation.' % value)
-        elif not isinstance(value, (tuple, list)):
-            raise ValueError("Cannot assign values that aren't instances of list, tuple or %s" %
-                             self.model.__name__)
-
         # If we're setting the value of a OneToOneField to None, we need to clear
         # out the cache on any old related object. Otherwise, deleting the
         # previously-related object will also cause this object to be deleted,
@@ -350,11 +350,6 @@ class ReverseSingleRelatedObjectDescriptor(six.with_metaclass(RenameRelatedObjec
             # hasn't been accessed yet.
             if related is not None:
                 setattr(related, self.field.related.get_cache_name(), None)
-        elif isinstance(value, (list, tuple)):
-            concrete_fields = self.field.resolve_basic_fields()
-            for v, field in zip(value, concrete_fields):
-                setattr(instance, field.name, v)
-            return
 
         # Set the value of the related field
         for lh_field, rh_field in self.field.related_fields:
@@ -655,6 +650,9 @@ def create_many_related_manager(superclass, rel):
             # source_field_name: the PK fieldname in join table for the source object
             # target_field_name: the PK fieldname in join table for the target object
             # *objs - objects to add. Either object instances, or primary keys of object instances.
+            source_field = self.through._meta.get_field_by_name(source_field_name)[0]
+            target_field = self.through._meta.get_field_by_name(target_field_name)[0]
+            target_fnames = [f.name for f in target_field.resolve_basic_fields()]
 
             # If there aren't any objects, there is nothing to do.
             from django.db.models import Model
@@ -665,8 +663,7 @@ def create_many_related_manager(superclass, rel):
                         if not router.allow_relation(obj, self.instance):
                             raise ValueError('Cannot add "%r": instance is on database "%s", value is on database "%s"' %
                                                (obj, self.instance._state.db, obj._state.db))
-                        fk_val = self.through._meta.get_field(
-                            target_field_name).get_foreign_related_value(obj)
+                        fk_val = target_field.get_foreign_related_value(obj)
                         if None in fk_val:
                             raise ValueError('Cannot add "%r": the value for field "%s" is None' %
                                              (obj, target_field_name))
@@ -674,36 +671,44 @@ def create_many_related_manager(superclass, rel):
                     elif isinstance(obj, Model):
                         raise TypeError("'%s' instance expected, got %r" % (self.model._meta.object_name, obj))
                     else:
+                        if not isinstance(obj, target_field.nt):
+                            obj = target_field.nt(obj)
                         new_ids.add(obj)
                 db = router.db_for_write(self.through, instance=self.instance)
-                vals = self.through._default_manager.using(db).values_list(target_field_name, flat=True)
+                vals = self.through._default_manager.using(db).values_list(
+                    target_field_name)
                 vals = vals.filter(**{
                     source_field_name: self.related_val,
                     '%s__in' % target_field_name: new_ids,
                 })
                 new_ids = new_ids - set(vals)
-
+                # Don't send the signal when we are inserting the
+                # duplicate data row for symmetrical reverse entries.
+                if len(target_fnames) == 1:
+                    pks_for_signals = [p[0] for p in new_ids]
+                else:
+                    pks_for_signals = new_ids
                 if self.reverse or source_field_name == self.source_field_name:
-                    # Don't send the signal when we are inserting the
-                    # duplicate data row for symmetrical reverse entries.
                     signals.m2m_changed.send(sender=self.through, action='pre_add',
                         instance=self.instance, reverse=self.reverse,
-                        model=self.model, pk_set=new_ids, using=db)
+                        model=self.model, pk_set=pks_for_signals, using=db)
                 # Add the ones that aren't there already
-                self.through._default_manager.using(db).bulk_create([
-                    self.through(**{
-                        source_field_name: self.related_val,
-                        target_field_name: obj_id,
-                    })
-                    for obj_id in new_ids
-                ])
+                new_objs = []
+                source_fnames = [f.name for f in source_field.resolve_basic_fields()]
+                for obj_id in new_ids:
+                    init_data = dict(zip(source_fnames, self.related_val))
+                    if not isinstance(obj_id, target_field.nt):
+                        obj_id = target_field.nt(obj_id)
+                    init_data.update(dict(zip(target_fnames, obj_id)))
+                    new_objs.append(self.through(**init_data))
+                self.through._default_manager.using(db).bulk_create(new_objs)
 
                 if self.reverse or source_field_name == self.source_field_name:
                     # Don't send the signal when we are inserting the
                     # duplicate data row for symmetrical reverse entries.
                     signals.m2m_changed.send(sender=self.through, action='post_add',
                         instance=self.instance, reverse=self.reverse,
-                        model=self.model, pk_set=new_ids, using=db)
+                        model=self.model, pk_set=pks_for_signals, using=db)
 
         def _remove_items(self, source_field_name, target_field_name, *objs):
             # source_field_name: the PK colname in join table for the source object
@@ -711,25 +716,31 @@ def create_many_related_manager(superclass, rel):
             # *objs - objects to remove
 
             # If there aren't any objects, there is nothing to do.
+            target_field = self.through._meta.get_field(target_field_name)
             if objs:
                 # Check that all the objects are of the right type
                 old_ids = set()
                 for obj in objs:
                     if isinstance(obj, self.model):
-                        fk_val = self.through._meta.get_field(
-                            target_field_name).get_foreign_related_value(obj)
+                        fk_val = target_field.get_foreign_related_value(obj)
                         old_ids.add(fk_val)
                     else:
+                        if not isinstance(obj, target_field.nt):
+                            obj = target_field.nt(obj)
                         old_ids.add(obj)
                 # Work out what DB we're operating on
                 db = router.db_for_write(self.through, instance=self.instance)
                 # Send a signal to the other end if need be.
+                if len(target_field.resolve_basic_fields()) == 1:
+                    pks_for_signals = [p[0] for p in old_ids]
+                else:
+                    pks_for_signals = old_ids
                 if self.reverse or source_field_name == self.source_field_name:
                     # Don't send the signal when we are deleting the
                     # duplicate data row for symmetrical reverse entries.
                     signals.m2m_changed.send(sender=self.through, action="pre_remove",
                         instance=self.instance, reverse=self.reverse,
-                        model=self.model, pk_set=old_ids, using=db)
+                        model=self.model, pk_set=pks_for_signals, using=db)
                 # Remove the specified objects from the join table
                 self.through._default_manager.using(db).filter(**{
                     source_field_name: self.related_val,
@@ -740,7 +751,7 @@ def create_many_related_manager(superclass, rel):
                     # duplicate data row for symmetrical reverse entries.
                     signals.m2m_changed.send(sender=self.through, action="post_remove",
                         instance=self.instance, reverse=self.reverse,
-                        model=self.model, pk_set=old_ids, using=db)
+                        model=self.model, pk_set=pks_for_signals, using=db)
 
         def _clear_items(self, source_field_name):
             db = router.db_for_write(self.through, instance=self.instance)
@@ -1058,8 +1069,7 @@ class ForeignObject(RelatedField):
     def get_foreign_related_value(self, instance):
         return self.get_instance_value_for_fields(instance, self.foreign_related_fields)
 
-    @staticmethod
-    def get_instance_value_for_fields(instance, fields):
+    def get_instance_value_for_fields(self, instance, fields):
         ret = []
         for field in fields:
             # Gotcha: in some cases (like fixture loading) a model can have
@@ -1072,7 +1082,7 @@ class ForeignObject(RelatedField):
                     ret.append(instance.pk)
                     continue
             ret.append(getattr(instance, field.attname))
-        return tuple(ret)
+        return self.nt(*ret)
 
     def get_joining_columns(self, reverse_join=False):
         source = self.reverse_related_fields if reverse_join else self.related_fields

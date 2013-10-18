@@ -133,7 +133,8 @@ def model_to_dict(instance, fields=None, exclude=None):
                 data[f.name] = []
             else:
                 # MultipleChoiceWidget needs a list of pks, not object instances.
-                data[f.name] = list(f.value_from_object(instance).values_list('pk', flat=True))
+                data[f.name] = list(
+                    f.value_from_object(instance).values_list('pk', flat=len(f.resolve_basic_fields()) == 1))
         else:
             data[f.name] = f.value_from_object(instance)
     return data
