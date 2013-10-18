@@ -531,7 +531,7 @@ class BaseDatabaseSchemaEditor(object):
         # concrete fields, do it directly, in case of virtual ones with
         # auto-created enclosed fields, recurse.
         if old_field.column is None and new_field.column is None:
-            for old_f, new_f in zip(old_field.get_enclosed_fields(), new_field.get_enclosed_fields()):
+            for old_f, new_f in zip(old_field.concrete_fields, new_field.concrete_fields):
                 # Recurse only in case both are auto-created, otherwise we
                 # assume the changes are handled explicitly.
                 if old_f.auto_created and new_f.auto_created:

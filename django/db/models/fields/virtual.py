@@ -37,13 +37,14 @@ class VirtualField(Field):
     def get_column(self):
         return None
 
-    def get_enclosed_fields(self):
+    @cached_property
+    def fields(self):
         return []
 
     @cached_property
     def concrete_fields(self):
         return [f
-                for myfield in self.get_enclosed_fields()
+                for myfield in self.fields
                 for f in myfield.concrete_fields]
 
     def resolve_concrete_values(self, data):
@@ -128,9 +129,6 @@ class CompositeField(VirtualField):
         else:
             signals.class_prepared.connect(process_enclosed_fields,
                                            sender=cls, weak=False)
-
-    def get_enclosed_fields(self):
-        return self.fields
 
     def __get__(self, instance, owner):
         if instance is None:

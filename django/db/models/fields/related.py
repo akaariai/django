@@ -1014,7 +1014,8 @@ class ForeignObject(RelatedField):
 
         super(ForeignObject, self).__init__(**kwargs)
 
-    def get_enclosed_fields(self):
+    @cached_property
+    def fields(self):
         return self.local_related_fields
 
     def resolve_concrete_values(self, data):
@@ -1279,8 +1280,9 @@ class ForeignKey(ForeignObject):
         # itself.
         return self.auxiliary_field.clone_for_foreignkey(*args, **kwargs)
 
-    def get_enclosed_fields(self):
-        return [self.auxiliary_field]
+    @cached_property
+    def fields(self):
+        return self.auxiliary_field.concrete_fields
 
     @cached_property
     def related_field(self):
