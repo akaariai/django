@@ -4,7 +4,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 import unittest
 
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.db import connection, IntegrityError
 from django.db.models.fields import FieldDoesNotExist
 from django.db.transaction import atomic
@@ -12,7 +12,8 @@ from django.utils.encoding import force_text
 
 from .models import (
     Person, House, PersonWithBirthplace, Song, MostFieldTypes,
-    EvenMoreFields, WeekDay, Sentence, SentenceFreq)
+    EvenMoreFields, WeekDay, Sentence, SentenceFreq, Arena, Team,
+    Game)
 
 from django import forms
 
@@ -321,7 +322,7 @@ class CompositeFieldTests(TestCase):
             self.p2.personwithbirthplace
 
 
-def CompositeFieldTransactionTests(TransactionTestCase):
+class CompositeFieldTransactionTests(TransactionTestCase):
     @unittest.skipUnless(connection.features.supports_foreign_keys, "No FK support")
     def test_composite_fk_database_constraints(self):
         with self.assertRaises(IntegrityError):
@@ -334,3 +335,32 @@ def CompositeFieldTransactionTests(TransactionTestCase):
         with self.assertRaises(IntegrityError):
             with atomic():
                 s.save()
+
+class CompositeFieldAuxTests(TestCase):
+    def test_game(self):
+        arena = Arena.objects.create()
+        team = Team.objects.create(home_field=arena)
+        game = Game.objects.create(arena=arena, team=team)
+        self.assertQuerysetEqual(Game.objects.all(), [game], lambda x: x)
+
+    def test_game_values_list(self):
+        arena = Arena.objects.create()
+        team = Team.objects.create(home_field=arena)
+        game = Game.objects.create(arena=arena, team=team)
+        self.assertQuerysetEqual(
+            Game.objects.values_list('arena'), [arena.pk],
+            lambda x: x[0])
+        self.assertQuerysetEqual(
+            Game.objects.values_list('pk'), [game.pk],
+            lambda x: x[0])
+        self.assertQuerysetEqual(
+            Game.objects.values_list('home_team_arena'), [(game.team_arena,)],
+            lambda x: x)
+        self.assertQuerysetEqual(
+            Game.objects.values_list('team_arena', 'pk', 'home_team_arena'),
+            [(game.team_arena, game.pk, game.team_arena)],
+            lambda x: x)
+        self.assertQuerysetEqual(
+            Game.objects.values_list('team_arena', flat=True),
+            [game.team_arena],
+            lambda x: x)

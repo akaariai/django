@@ -1053,13 +1053,8 @@ class ValuesQuerySet(QuerySet):
 
     def iterator(self):
         # Purge any extra columns that haven't been explicitly asked for
-        extra_names = list(self.query.extra_select)
-        field_names = self.field_names
-        aggregate_names = list(self.query.aggregate_select)
-
-        names = extra_names + field_names + aggregate_names
-
-        for row in self.query.get_compiler(self.db).results_iter():
+        transformers, names = self._setup_transformers(self._fields, self.found_fields)
+        for row in self.query.get_compiler(self.db).results_iter(transformers):
             yield dict(zip(names, row))
 
     def delete(self):
@@ -1099,18 +1094,59 @@ class ValuesQuerySet(QuerySet):
                         self.aggregate_names.append(f)
                     else:
                         self.field_names.append(f)
+            self.query.set_extra_mask(self.extra_names)
+            self.query.set_aggregate_mask(self.aggregate_names)
         else:
             # Default to all fields.
-            self.extra_names = None
+            self.extra_names = list(self.query.extra_select.keys())
             self.field_names = [f.attname for f in self.model._meta.concrete_fields]
-            self.aggregate_names = None
+            self.aggregate_names = list(self.query.aggregate_select.keys())
+            self._fields = self.extra_names + self.field_names + self.aggregate_names
 
         self.query.select = []
-        if self.extra_names is not None:
-            self.query.set_extra_mask(self.extra_names)
-        self.query.add_fields(self.field_names, True, not getattr(self, 'flat', False))
-        if self.aggregate_names is not None:
-            self.query.set_aggregate_mask(self.aggregate_names)
+        self.found_fields = self.query.add_fields(
+            self.field_names, True)
+
+    def _setup_transformers(self, values_order, found_fields):
+        """
+        In multicolumn field select multiple columns of the selected row need
+        to be collapsed into single value.
+
+        The values_order parameter tells us the values the user wants. The
+        found_fields paramter is a map of name to field for all model fields
+        in the query (that is, aggregates and extra selects not included).
+        """
+        extra_names = list(self.query.extra_select)
+        aggregate_names = list(self.query.aggregate_select)
+        select_order = extra_names + self.field_names + aggregate_names
+        # The given values_order was what the user asked - however the API is
+        # that any existing annotation is added after that values_order and
+        # extra select before it. If the user didn't define fields for values,
+        # then all .extra() and .annotate() are added to the select list.
+        # If the user defined fields, then only annotations are added. This
+        # logic isn't implemented here, it is part of Query's implementation
+        # of annotation and extra additions.
+        values_order = [
+            ename for ename in extra_names if ename not in values_order
+        ] + list(values_order) + [
+            aname for aname in aggregate_names if aname not in values_order
+        ]
+        if (select_order == values_order and
+                not any(f.is_multicolumn for f in found_fields.values())):
+            # No need for transformation if all fields are non-multicolumn and
+            # no reordering needs to be done.
+            return None, values_order
+        transformers = []
+        for name in values_order:
+            select_index = select_order.index(name)
+            if name not in found_fields or not found_fields[name].is_multicolumn:
+                # This is aggregate, extra, or non-multicolumn => no transformers.
+                transformers.append((select_index, None))
+            else:
+                field = found_fields[name]
+                transformers.append((
+                    slice(select_index, select_index + len(field.concrete_fields)), field.nt))
+        return transformers, values_order
 
     def _clone(self, klass=None, setup=False, **kwargs):
         """
@@ -1123,6 +1159,7 @@ class ValuesQuerySet(QuerySet):
             c._fields = self._fields[:]
         c.field_names = self.field_names
         c.extra_names = self.extra_names
+        c.found_fields = self.found_fields
         c.aggregate_names = self.aggregate_names
         if setup and hasattr(c, '_setup_query'):
             c._setup_query()
@@ -1180,32 +1217,13 @@ class ValuesQuerySet(QuerySet):
 
 class ValuesListQuerySet(ValuesQuerySet):
     def iterator(self):
+        transformers, _ = self._setup_transformers(self._fields, self.found_fields)
         if self.flat and len(self._fields) == 1:
-            for row in self.query.get_compiler(self.db).results_iter():
+            for row in self.query.get_compiler(self.db).results_iter(transformers):
                 yield row[0]
-        elif not self.query.extra_select and not self.query.aggregate_select:
-            for row in self.query.get_compiler(self.db).results_iter():
-                yield tuple(row)
         else:
-            # When extra(select=...) or an annotation is involved, the extra
-            # cols are always at the start of the row, and we need to reorder
-            # the fields to match the order in self._fields.
-            extra_names = list(self.query.extra_select)
-            field_names = self.field_names
-            aggregate_names = list(self.query.aggregate_select)
-
-            names = extra_names + field_names + aggregate_names
-
-            # If a field list has been specified, use it. Otherwise, use the
-            # full list of fields, including extras and aggregates.
-            if self._fields:
-                fields = list(self._fields) + [f for f in aggregate_names if f not in self._fields]
-            else:
-                fields = names
-
-            for row in self.query.get_compiler(self.db).results_iter():
-                data = dict(zip(names, row))
-                yield tuple(data[f] for f in fields)
+            for row in self.query.get_compiler(self.db).results_iter(transformers):
+                yield row
 
     def _clone(self, *args, **kwargs):
         clone = super(ValuesListQuerySet, self)._clone(*args, **kwargs)

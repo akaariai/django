@@ -19,6 +19,7 @@ class Person(models.Model):
     def __str__(self):
         return '%s %s' % (self.first_name, self.last_name)
 
+
 class House(models.Model):
     street_address = models.CharField(max_length=100)
     zip_code = models.CharField(max_length=5)
@@ -112,3 +113,25 @@ class SentenceFreq(models.Model):
 
     def __str__(self):
         return self.sentence.sentence.replace('?', self.weekday.name)
+
+
+class Arena(models.Model):
+    pass
+
+
+class Team(models.Model):
+    id = models.AutoField(primary_key=True)
+    home_field = models.ForeignKey(Arena)
+    home_arena_uq = models.CompositeField(id, home_field)
+
+
+class Game(models.Model):
+    # This example doesn't make that much sense - the main point
+    # is that we want to use an existing foreign key inside
+    # another foreign key.
+    arena = models.ForeignKey(Arena)
+    team = models.ForeignKey(Team)
+    team_arena = models.CompositeField(team, arena)
+    home_team_arena = models.ForeignKey(
+        Team, to_field='home_arena_uq', aux_field='team_arena',
+        related_name='home_team_arena_set')

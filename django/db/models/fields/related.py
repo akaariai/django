@@ -1719,11 +1719,7 @@ class ManyToManyField(RelatedField):
         if obj.pk is None:
             return []
         baseqs = getattr(obj, self.attname)
-        if not self.rel.get_related_field().is_multicolumn:
-            return list(baseqs.values_list('pk', flat=True))
-        else:
-            target_nt = self.rel.get_related_field().nt
-            return [target_nt(*v) for v in baseqs.values_list('pk')]
+        return list(baseqs.values_list('pk', flat=True))
 
     def save_form_data(self, instance, data):
         setattr(instance, self.attname, data)

@@ -1600,10 +1600,13 @@ class Query(object):
         """
         Adds the given (model) fields to the select set. The field names are
         added in the order specified.
+
+        Returns a map of field name to found field for that name.
         """
         alias = self.get_initial_alias()
         opts = self.get_meta()
 
+        found_fields = {}
         try:
             for name in field_names:
                 # Join promotion note - we must not remove any rows here, so
@@ -1611,6 +1614,7 @@ class Query(object):
                 field, targets, u2, joins, path = self.setup_joins(
                     name.split(LOOKUP_SEP), opts, alias, can_reuse=None,
                     allow_many=allow_m2m, outer_if_first=True)
+                found_fields[name] = field
                 if not allow_multicol and field.is_multicolumn:
                     raise ValueError("Multicolumn fields not allowed in this query")
                 targets, final_alias, joins = self.trim_joins(targets, joins, path)
@@ -1630,6 +1634,7 @@ class Query(object):
                 raise FieldError("Cannot resolve keyword %r into field. "
                                  "Choices are: %s" % (name, ", ".join(names)))
         self.remove_inherited_models()
+        return found_fields
 
     def add_ordering(self, *ordering):
         """

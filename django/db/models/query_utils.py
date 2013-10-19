@@ -211,3 +211,12 @@ def deferred_class_factory(model, attrs):
 # The above function is also used to unpickle model instances with deferred
 # fields.
 deferred_class_factory.__safe_for_unpickling__ = True
+
+def transform_row(row, transformers):
+    new_row = []
+    for slice, trans_func in transformers:
+        data = row[slice]
+        if trans_func:
+            data = trans_func(*data)
+        new_row.append(data)
+    return tuple(new_row)

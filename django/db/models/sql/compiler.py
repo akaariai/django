@@ -4,7 +4,7 @@ from django.conf import settings
 from django.core.exceptions import FieldError
 from django.db.backends.utils import truncate_name
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.query_utils import select_related_descend, QueryWrapper
+from django.db.models.query_utils import select_related_descend, QueryWrapper, transform_row
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
         GET_ITERATOR_CHUNK_SIZE, SelectInfo)
 from django.db.models.sql.datastructures import EmptyResultSet
@@ -677,7 +677,7 @@ class SQLCompiler(object):
         self.query.deferred_to_data(columns, self.query.deferred_to_columns_cb)
         return columns
 
-    def results_iter(self):
+    def results_iter(self, transformers=None):
         """
         Returns an iterator over the results from executing this query.
         """
@@ -728,8 +728,10 @@ class SQLCompiler(object):
                         for (alias, aggregate), value
                         in zip(self.query.aggregate_select.items(), row[aggregate_start:aggregate_end])
                     ) + tuple(row[aggregate_end:])
-
-                yield row
+                if transformers:
+                    yield transform_row(row, transformers)
+                else:
+                    yield row
 
     def has_results(self):
         """
