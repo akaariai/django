@@ -108,6 +108,29 @@ class CompositeFieldTests(TestCase):
         self.h1.owners = []
         self.assertQuerysetEqual(self.h1.owners.all(), [], lambda x: x)
 
+    def test_fk_attname(self):
+        s = Song.objects.create(title='foo', author=self.p1)
+        self.assertEqual(Song.objects.get(pk=s.pk).author_id, self.p1.pk)
+
+    def test_fk_attname_init(self):
+        s = Song.objects.create(title='foo', author_id=self.p1.pk)
+        self.assertEqual(Song.objects.get(pk=s.pk).author_id, self.p1.pk)
+
+    def test_fk_attname_assign(self):
+        s = Song.objects.create(title='foo', author_id=self.p1.pk)
+        s.author_id = self.p2.pk
+        s.save()
+        self.assertEqual(Song.objects.get(pk=s.pk).author_id, self.p2.pk)
+
+    def test_fk_attname_update_fields(self):
+        s = Song.objects.create(title='foo', author_id=self.p1.pk)
+        s.author_id = self.p2.pk
+        s.save(update_fields=['author_id'])
+        self.assertEqual(Song.objects.get(pk=s.pk).author_id, self.p2.pk)
+        s.author_id = self.p1.pk
+        s.save(update_fields=['author'])
+        self.assertEqual(Song.objects.get(pk=s.pk).author_id, self.p1.pk)
+
     def test_update_multicolumn_field(self):
         s = Song.objects.create(title='foo', author=self.p1)
         s = Song.objects.get(pk=s.pk)
