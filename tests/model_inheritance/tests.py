@@ -369,7 +369,7 @@ class ModelInheritanceTests(TestCase):
         b = Base.objects.get(pk=s.id)
         self.assertNotEqual(b.pk, s.pk)
         # Low-level test for related_val
-        self.assertEqual(s.titles.related_val, (s.id,))
+        self.assertEqual(s.titles.related_val, s.id)
         # Higher level test for correct query values (title foof not
         # accidentally found).
         self.assertQuerysetEqual(
