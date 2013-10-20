@@ -17,6 +17,7 @@ from django.db import (router, transaction, DatabaseError,
 from django.db.models.query import Q
 from django.db.models.query_utils import DeferredAttribute, deferred_class_factory
 from django.db.models.deletion import Collector
+from django.db.models.update import Collector as UpdateCollector
 from django.db.models.options import Options
 from django.db.models import signals
 from django.db.models.loading import register_models, get_model, MODELS_MODULE_NAME
@@ -603,10 +604,13 @@ class Model(six.with_metaclass(ModelBase)):
             loaded_fields = field_names.difference(deferred_fields)
             if loaded_fields:
                 update_fields = frozenset(loaded_fields)
-
         self.save_base(using=using, force_insert=force_insert,
                        force_update=force_update, update_fields=update_fields)
     save.alters_data = True
+
+    def _cascade_update(self, using, update_fields):
+        collector = UpdateCollector(using)
+        collector.cascade_model_update(self, update_fields)
 
     def save_base(self, raw=False, force_insert=False,
                   force_update=False, using=None, update_fields=None):
@@ -631,6 +635,8 @@ class Model(six.with_metaclass(ModelBase)):
             signals.pre_save.send(sender=origin, instance=self, raw=raw, using=using,
                                   update_fields=update_fields)
         with transaction.commit_on_success_unless_managed(using=using, savepoint=False):
+            if self.pk and not raw:
+                self._cascade_update(using, update_fields)
             if not raw:
                 self._save_parents(cls, using, update_fields)
             updated = self._save_table(raw, cls, force_insert, force_update, using, update_fields)

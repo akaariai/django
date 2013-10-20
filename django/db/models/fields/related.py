@@ -8,7 +8,7 @@ from django.db.models.fields import (AutoField, Field, IntegerField,
 from django.db.models.fields.virtual import get_composite_in_constraint, VirtualField
 from django.db.models.related import RelatedObject, PathInfo
 from django.db.models.query import QuerySet
-from django.db.models.deletion import CASCADE
+from django.db.models.deletion import CASCADE, DO_NOTHING
 from django.utils.encoding import smart_text
 from django.utils import six
 from django.utils.deprecation import RenameMethodsBase
@@ -869,7 +869,7 @@ class ReverseManyRelatedObjectsDescriptor(object):
 
 class ForeignObjectRel(object):
     def __init__(self, field, to, related_name=None, limit_choices_to=None,
-                 parent_link=False, on_delete=None, related_query_name=None):
+                 parent_link=False, on_delete=None, on_update=None, related_query_name=None):
         try:
             to._meta
         except AttributeError:  # to._meta doesn't exist, so it must be RECURSIVE_RELATIONSHIP_CONSTANT
@@ -883,6 +883,7 @@ class ForeignObjectRel(object):
         self.multiple = True
         self.parent_link = parent_link
         self.on_delete = on_delete
+        self.on_update = on_update
 
     def is_hidden(self):
         "Should the related object be hidden?"
@@ -906,11 +907,13 @@ class ForeignObjectRel(object):
 
 
 class ManyToOneRel(ForeignObjectRel):
+    on_update = None
     def __init__(self, field, to, field_name, related_name=None, limit_choices_to=None,
-                 parent_link=False, on_delete=None, related_query_name=None):
+                 parent_link=False, on_delete=None, on_update=None, related_query_name=None):
         super(ManyToOneRel, self).__init__(
             field, to, related_name=related_name, limit_choices_to=limit_choices_to,
-            parent_link=parent_link, on_delete=on_delete, related_query_name=related_query_name)
+            parent_link=parent_link, on_delete=on_delete, on_update=on_update,
+            related_query_name=related_query_name)
         self.field_name = field_name
 
     def get_related_field(self):
@@ -930,10 +933,12 @@ class ManyToOneRel(ForeignObjectRel):
 
 class OneToOneRel(ManyToOneRel):
     def __init__(self, field, to, field_name, related_name=None, limit_choices_to=None,
-                 parent_link=False, on_delete=None, related_query_name=None):
-        super(OneToOneRel, self).__init__(field, to, field_name,
-                related_name=related_name, limit_choices_to=limit_choices_to,
-                parent_link=parent_link, on_delete=on_delete, related_query_name=related_query_name,
+                 parent_link=False, on_delete=None, on_update=None, related_query_name=None):
+        super(OneToOneRel, self).__init__(
+            field, to, field_name,
+            related_name=related_name, limit_choices_to=limit_choices_to,
+            parent_link=parent_link, on_delete=on_delete, on_update=on_update,
+            related_query_name=related_query_name,
         )
         self.multiple = False
 
@@ -992,6 +997,7 @@ class ForeignObject(RelatedField):
                 limit_choices_to=kwargs.pop('limit_choices_to', None),
                 parent_link=kwargs.pop('parent_link', False),
                 on_delete=kwargs.pop('on_delete', CASCADE),
+                on_update=kwargs.pop('on_update', DO_NOTHING),
             )
         kwargs['verbose_name'] = kwargs.get('verbose_name', None)
         kwargs.setdefault('editable', False)
@@ -1248,6 +1254,7 @@ class ForeignKey(ForeignObject):
             limit_choices_to=kwargs.pop('limit_choices_to', None),
             parent_link=kwargs.pop('parent_link', False),
             on_delete=kwargs.pop('on_delete', CASCADE),
+            on_update=kwargs.pop('on_update', DO_NOTHING),
         )
         kwargs.setdefault('editable', True)
         super(ForeignKey, self).__init__(to, ['self'], [to_field], **kwargs)
@@ -1263,6 +1270,8 @@ class ForeignKey(ForeignObject):
             kwargs['db_constraint'] = self.db_constraint
         if self.rel.on_delete is not CASCADE:
             kwargs['on_delete'] = self.rel.on_delete
+        if self.rel.on_update is not DO_NOTHING:
+            kwargs['on_update'] = self.rel.on_update
         if self._aux_field is not None:
             kwargs['aux_field'] = self._aux_field
         # Rel needs more work.

@@ -3,6 +3,7 @@ from operator import attrgetter
 
 from django.db import connections, transaction, IntegrityError
 from django.db.models import signals, sql
+from django.db.models.update import Collector as UpdateCollector
 from django.utils import six
 
 
@@ -11,12 +12,20 @@ class ProtectedError(IntegrityError):
         self.protected_objects = protected_objects
         super(ProtectedError, self).__init__(msg, protected_objects)
 
+class _CASCADE(object):
+    def do_update(self, using, field, concrete_fields, from_vals, to_val):
+        collector = UpdateCollector(using)
+        related_to_val = collector.related_to_val(to_val, concrete_fields)
+        from_vals = [row[field.name] for row in from_vals]
+        collector.collect(field, from_vals, related_to_val)
+        collector.update()
 
-def CASCADE(collector, field, sub_objs, using):
-    collector.collect(sub_objs, source=field.rel.to,
-                      source_attr=field.name, nullable=field.null)
-    if field.null and not connections[using].features.can_defer_constraint_checks:
-        collector.add_field_update(field, None, sub_objs)
+    def __call__(self, collector, field, sub_objs, using):
+        collector.collect(sub_objs, source=field.rel.to,
+                          source_attr=field.name, nullable=field.null)
+        if field.null and not connections[using].features.can_defer_constraint_checks:
+            collector.add_field_update(field, None, sub_objs)
+CASCADE = _CASCADE()
 
 
 def PROTECT(collector, field, sub_objs, using):
