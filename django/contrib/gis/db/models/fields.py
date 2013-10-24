@@ -40,18 +40,18 @@ class GeoCol(Col):
             sel_fmt = '%s'
         return sel_fmt
 
-    def as_sql(self, qn, connection):
+    def as_sql(self, compiler, connection):
         # Ugly hack - need access to query, but that is only available from
         # qn.__self__.query - assuming qn is quote_name_unless_alias...
         try:
-            query = qn.__self__.query
+            query = compiler.query
         except AttributeError:
             query = None
         if query:
             for f in query.custom_select.values():
                 if f.output_type == self.field and f is not self and getattr(f, 'col', None) is not self:
-                    return f.as_sql(qn, connection)
-        sql, params = super(GeoCol, self).as_sql(qn, connection)
+                    return f.as_sql(compiler, connection)
+        sql, params = super(GeoCol, self).as_sql(compiler, connection)
         return self.get_select_format(query, connection, self.field) % sql, params
 
 def get_srid_info(srid, connection):

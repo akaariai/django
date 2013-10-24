@@ -66,6 +66,19 @@ class SQLCompiler(object):
         self.quote_cache[name] = r
         return r
 
+    def __call__(self, name):
+        """
+        Backwards compatibility hack to make compiler work like qn() for
+        as_sql(qn, connection) calls.
+        """
+        return self.quote_name_unless_alias(name)
+
+    def compile(self, node):
+        if node.__class__ in self.connection.compile_implementations:
+            return self.connection.compile_implementations[node.__class__](node, self)
+        else:
+            return node.as_sql(self, self.connection)
+
     def as_sql(self, with_limits=True, with_col_aliases=False):
         """
         Creates the SQL for this query. Returns the SQL string and list of
@@ -95,8 +108,8 @@ class SQLCompiler(object):
 
         qn = self.quote_name_unless_alias
 
-        where, w_params = self.query.where.as_sql(qn=qn, connection=self.connection)
-        having, h_params = self.query.having.as_sql(qn=qn, connection=self.connection)
+        where, w_params = self.compile(self.query.where)
+        having, h_params = self.compile(self.query.having)
         having_group_by = self.query.having.get_cols()
         params = []
 
@@ -189,7 +202,7 @@ class SQLCompiler(object):
         params = []
         aliases = set()
         for name, col in self.query.custom_select_clause:
-            sql, col_params = col.as_sql(qn, self.connection)
+            sql, col_params = self.compile(col)
             if name:
                 sql = '%s AS %s' % (sql, qn2(name))
             result.append(sql)
@@ -203,13 +216,13 @@ class SQLCompiler(object):
             cols, new_aliases = self.get_default_columns(
                 with_aliases, col_aliases)
             for col in cols:
-                sql, col_params = col.as_sql(qn, self.connection)
+                sql, col_params = self.compile(col)
                 result.append(sql)
                 params.extend(col_params)
             aliases.update(new_aliases)
 
         for col in self.related_select_cols:
-            r, col_params = col.as_sql(qn, self.connection)
+            r, col_params = self.compile(col)
             params.extend(col_params)
             if with_aliases and col.alias_label in col_aliases:
                 c_alias = 'Col%d' % len(col_aliases)
@@ -340,7 +353,7 @@ class SQLCompiler(object):
                 # It is an aggregate
                 if col not in self.query.custom_select_mask:
                     # not in select clause
-                    sql, inner_params = self.query.custom_select[col].as_sql(qn, self.connection)
+                    sql, inner_params = self.compile(self.query.custom_select[col])
                     result.append('%s %s' % (sql, order))
                     params.extend(inner_params)
                 else:
@@ -362,7 +375,7 @@ class SQLCompiler(object):
                 # '-field1__field2__field', etc.
                 for col, order in self.find_ordering_name(
                         field, self.query.get_meta(), default_order=asc):
-                    sql, col_params = col.as_sql(qn, self.connection)
+                    sql, col_params = self.compile(col)
                     if sql not in processed_pairs:
                         # TODO: this should take params in account...
                         processed_pairs.add(sql)
@@ -375,7 +388,7 @@ class SQLCompiler(object):
                 if col not in self.query.custom_select_mask:
                     if hasattr(self.query.custom_select[col], 'add_to_query'):
                         self.query.custom_select[col].add_to_query(self.query, col)
-                    elt, col_params = self.query.custom_select[col].as_sql(qn, self.connection)
+                    elt, col_params = self.compile(self.query.custom_select[col])
                     params.extend(col_params)
                     ordering_aliases.append(elt)
                     ordering_params.extend(col_params)
@@ -385,7 +398,7 @@ class SQLCompiler(object):
                         ordering_aliases.append(elt)
                         ordering_params.extend(params)
                 result.append('%s %s' % (elt, order))
-                group_by.append(self.query.custom_select[col].as_sql(qn, self.connection))
+                group_by.append(self.compile(self.query.custom_select[col]))
         self.ordering_aliases = ordering_aliases
         self.ordering_params = ordering_params
         return result, params, group_by
@@ -487,8 +500,7 @@ class SQLCompiler(object):
                 extra_cond = join_field.get_extra_restriction(
                     self.query.where_class, alias, lhs)
                 if extra_cond:
-                    extra_sql, extra_params = extra_cond.as_sql(
-                        qn, self.connection)
+                    extra_sql, extra_params = self.compile(extra_cond)
                     extra_sql = 'AND (%s)' % extra_sql
                     from_params.extend(extra_params)
                 else:
@@ -551,7 +563,7 @@ class SQLCompiler(object):
             for col in cols:
                 col_params = ()
                 if hasattr(col, 'as_sql'):
-                    sql, col_params = col.as_sql(qn, self.connection)
+                    sql, col_params = self.compile(col)
                 else:
                     sql = '(%s)' % str(col)
                 if sql not in seen:
@@ -750,7 +762,6 @@ class SQLCompiler(object):
         return result
 
     def as_subquery_condition(self, alias, columns, qn):
-        inner_qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
         if len(columns) == 1:
             sql, params = self.as_sql()
@@ -758,7 +769,7 @@ class SQLCompiler(object):
 
         for index, (_, select_col) in enumerate(self.query.custom_select_clause):
             params = []
-            lhs, params = select_col.as_sql(inner_qn, self.connection)
+            lhs, params = self.compile(select_col)
             rhs = '%s.%s' % (qn(alias), qn2(columns[index]))
             self.query.where.add(
                 QueryWrapper('%s = %s' % (lhs, rhs), params), 'AND')
@@ -867,7 +878,7 @@ class SQLDeleteCompiler(SQLCompiler):
         assert len(self.query.tables) == 1, "Can only delete from one table at a time."
         qn = self.quote_name_unless_alias
         result = ['DELETE FROM %s' % qn(self.query.tables[0])]
-        where, params = self.query.where.as_sql(qn=qn, connection=self.connection)
+        where, params = self.compile(self.query.where)
         if where:
             result.append('WHERE %s' % where)
         return ' '.join(result), tuple(params)
@@ -903,7 +914,7 @@ class SQLUpdateCompiler(SQLCompiler):
                 val = SQLEvaluator(val, self.query, allow_joins=False)
             name = field.column
             if hasattr(val, 'as_sql'):
-                sql, params = val.as_sql(qn, self.connection)
+                sql, params = self.compile(val)
                 values.append('%s = %s' % (qn(name), sql))
                 update_params.extend(params)
             elif val is not None:
@@ -914,7 +925,7 @@ class SQLUpdateCompiler(SQLCompiler):
         if not values:
             return '', ()
         result.append(', '.join(values))
-        where, params = self.query.where.as_sql(qn=qn, connection=self.connection)
+        where, params = self.compile(self.query.where)
         if where:
             result.append('WHERE %s' % where)
         return ' '.join(result), tuple(update_params + params)
@@ -997,7 +1008,7 @@ class SQLAggregateCompiler(SQLCompiler):
 
         sql, params = [], []
         for _, aggregate in self.query.aggregate_select_clause:
-            agg_sql, agg_params = aggregate.as_sql(qn, self.connection)
+            agg_sql, agg_params = self.compile(aggregate)
             sql.append(agg_sql)
             params.extend(agg_params)
         sql = ', '.join(sql)

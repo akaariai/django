@@ -4,6 +4,7 @@ from __future__ import unicode_literals
 import re
 
 from django.db import connection
+from django.db.backends.utils import add_implementation
 from django.db.models import Sum, SimpleLookup, RefCol, Field, MultiRefCol, CharField, IntegerField
 from django.test import TestCase
 from unittest import skipUnless
@@ -34,6 +35,22 @@ class CustomColumnsTests(TestCase):
         Author._meta.get_field('age').register_lookup(NotEqual)
         self.assertQuerysetEqual(
             Author.objects.filter(age__ne=1), [self.a2, self.a3], lambda x: x)
+
+    def test_add_implementation(self):
+        CustomIntegerField.register_class_lookup(NotEqual)
+        try:
+            @add_implementation(NotEqual, connection.vendor)
+            def overriden_equal(node, compiler):
+                lhs, lhs_params = node.process_lhs(compiler, compiler.connection)
+                rhs, rhs_params = node.process_rhs(compiler, compiler.connection)
+                lhs_params.extend(rhs_params)
+                return '%s = %s' % (lhs, rhs), lhs_params
+
+            col_last_part = connection.ops.quote_name("age")
+            self.assertIn('%s = 3' % col_last_part, str(Author.objects.filter(age__ne=3).query))
+            self.assertIn('%s %% 3 = 3' % col_last_part, str(Author.objects.filter(age__div3__ne=3).query))
+        finally:
+            del connection.compile_implementations[NotEqual]
 
     def test_nested_lookup(self):
         self.assertQuerysetEqual(
