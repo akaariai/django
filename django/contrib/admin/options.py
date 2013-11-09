@@ -20,8 +20,8 @@ from django.core.paginator import Paginator
 from django.core.urlresolvers import reverse
 from django.db import models, transaction, router
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.related import RelatedObject
 from django.db.models.fields import BLANK_CHOICE_DASH, FieldDoesNotExist
+from django.db.models.fields.related import ForeignObjectRel
 from django.db.models.sql.constants import QUERY_TERMS
 from django.forms.formsets import all_valid, DELETION_FIELD_NAME
 from django.forms.models import (modelform_factory, modelformset_factory,
@@ -369,7 +369,7 @@ class BaseModelAdmin(six.with_metaclass(RenameBaseModelAdminMethods)):
                     return True
                 model = field.rel.to
                 rel_name = field.rel.get_related_field().name
-            elif isinstance(field, RelatedObject):
+            elif isinstance(field, ForeignObjectRel):
                 model = field.model
                 rel_name = model._meta.pk.name
             else:

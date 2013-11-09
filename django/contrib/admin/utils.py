@@ -7,7 +7,7 @@ from django.contrib.auth import get_permission_codename
 from django.db import models
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.deletion import Collector
-from django.db.models.related import RelatedObject
+from django.db.models.fields.related import ForeignObjectRel
 from django.forms.forms import pretty_name
 from django.utils import formats
 from django.utils.html import format_html
@@ -27,7 +27,7 @@ def lookup_needs_distinct(opts, lookup_path):
     field = opts.get_field_by_name(field_name)[0]
     if ((hasattr(field, 'rel') and
          isinstance(field.rel, models.ManyToManyRel)) or
-        (isinstance(field, models.related.RelatedObject) and
+        (isinstance(field, ForeignObjectRel) and
          not field.field.unique)):
         return True
     return False
@@ -286,7 +286,7 @@ def label_for_field(name, model, model_admin=None, return_attr=False):
     attr = None
     try:
         field = model._meta.get_field_by_name(name)[0]
-        if isinstance(field, RelatedObject):
+        if isinstance(field, ForeignObjectRel):
             label = field.opts.verbose_name
         else:
             label = field.verbose_name
@@ -337,7 +337,7 @@ def help_text_for_field(name, model):
         pass
     else:
         field = field_data[0]
-        if not isinstance(field, RelatedObject):
+        if not isinstance(field, ForeignObjectRel):
             help_text = field.help_text
     return smart_text(help_text)
 
@@ -389,7 +389,7 @@ class NotRelationField(Exception):
 
 
 def get_model_from_relation(field):
-    if isinstance(field, models.related.RelatedObject):
+    if isinstance(field, ForeignObjectRel):
         return field.model
     elif getattr(field, 'rel'):  # or isinstance?
         return field.rel.to

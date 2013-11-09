@@ -179,7 +179,7 @@ class RelatedFieldListFilter(FieldListFilter):
         self.title = self.lookup_title
 
     def has_output(self):
-        if (isinstance(self.field, models.related.RelatedObject)
+        if (isinstance(self.field, models.fields.related.ForeignObjectRel)
                 and self.field.field.null or hasattr(self.field, 'rel')
                     and self.field.null):
             extra = 1
@@ -206,7 +206,7 @@ class RelatedFieldListFilter(FieldListFilter):
                 }, [self.lookup_kwarg_isnull]),
                 'display': val,
             }
-        if (isinstance(self.field, models.related.RelatedObject)
+        if (isinstance(self.field, models.fields.related.ForeignObjectRel)
                 and self.field.field.null or hasattr(self.field, 'rel')
                     and self.field.null):
             yield {
@@ -219,7 +219,7 @@ class RelatedFieldListFilter(FieldListFilter):
 
 FieldListFilter.register(lambda f: (
     bool(f.rel) if hasattr(f, 'rel') else
-    isinstance(f, models.related.RelatedObject)), RelatedFieldListFilter)
+    isinstance(f, models.fields.related.ForeignObjectRel)), RelatedFieldListFilter)
 
 
 class BooleanFieldListFilter(FieldListFilter):

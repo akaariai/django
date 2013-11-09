@@ -10,8 +10,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection
 from django.db import models, router, DEFAULT_DB_ALIAS
 from django.db.models import signals
-from django.db.models.fields.related import ForeignObject, ForeignObjectRel
-from django.db.models.related import PathInfo
+from django.db.models.fields.related import ForeignObject, ForeignObjectRel, PathInfo
 from django.db.models.sql.where import Constraint
 from django.forms import ModelForm, ALL_FIELDS
 from django.forms.models import (BaseModelFormSet, modelformset_factory,
@@ -39,6 +38,7 @@ class GenericForeignKey(six.with_metaclass(RenameGenericForeignKeyMethods)):
         self.ct_field = ct_field
         self.fk_field = fk_field
         self.for_concrete_model = for_concrete_model
+        self.rel = None
 
     def contribute_to_class(self, cls, name):
         self.name = name

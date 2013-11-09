@@ -2,6 +2,7 @@ from __future__ import unicode_literals
 
 from datetime import datetime
 import threading
+import warnings
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.db import connections, DEFAULT_DB_ALIAS
@@ -880,3 +881,11 @@ class SelectOnSaveTests(TestCase):
                 asos.save(update_fields=['pub_date'])
         finally:
             Article._base_manager.__class__ = orig_class
+
+
+class TestRelatedObjectDeprecation(TestCase):
+    def test_deprecation(self):
+        field = SelfRef._meta.get_field_by_name('selfref')[0]
+        with warnings.catch_warnings():
+            from django.db.models.related import RelatedObject
+            self.assertTrue(isinstance(field.rel, RelatedObject))

@@ -258,5 +258,5 @@ class OneToOneRegressionTests(TestCase):
         be added to the related model.
         """
         self.assertFalse(
-            hasattr(Target, HiddenPointer._meta.get_field('target').related.get_accessor_name())
+            hasattr(Target, HiddenPointer._meta.get_field('target').rel.get_accessor_name())
         )

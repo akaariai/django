@@ -179,7 +179,7 @@ def get_validation_errors(outfile, app=None):
                             e.add(opts, "Field '%s' under model '%s' must have a unique=True constraint." % (f.foreign_related_fields[0].name, f.rel.to.__name__))
 
                 rel_opts = f.rel.to._meta
-                rel_name = f.related.get_accessor_name()
+                rel_name = f.rel.get_accessor_name()
                 rel_query_name = f.related_query_name()
                 if not f.rel.is_hidden():
                     for r in rel_opts.fields:
@@ -303,7 +303,7 @@ def get_validation_errors(outfile, app=None):
                 )
 
             rel_opts = f.rel.to._meta
-            rel_name = f.related.get_accessor_name()
+            rel_name = f.rel.get_accessor_name()
             rel_query_name = f.related_query_name()
             # If rel_name is none, there is no reverse accessor (this only
             # occurs for symmetrical m2m relations to self). If this is the
