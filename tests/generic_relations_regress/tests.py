@@ -1,11 +1,12 @@
 from django.db.models import Q
 from django.db.utils import IntegrityError
 from django.test import TestCase, skipIfDBFeature
+from django.forms.models import modelform_factory
 
 from .models import (
     Address, Place, Restaurant, Link, CharLink, TextLink,
     Person, Contact, Note, Organization, OddRelation1, OddRelation2, Company,
-    Developer, Team, Guild, Tag, Board, HasLinkThing, A, B, C, D)
+    Developer, Team, Guild, Tag, Board, HasLinkThing, A, B, C, D, HasLinks)
 
 
 class GenericRelationTests(TestCase):
@@ -212,3 +213,8 @@ class GenericRelationTests(TestCase):
         # B would then fail).
         self.assertNotIn(" join ", str(B.objects.exclude(a__flag=True).query).lower())
         self.assertIn("content_type_id", str(B.objects.exclude(a__flag=True).query).lower())
+
+    def test_editable_generic_rel(self):
+        GenericRelationForm = modelform_factory(HasLinks)
+        form = GenericRelationForm()
+        self.assertNotEqual(form.fields, {})

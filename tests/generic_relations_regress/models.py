@@ -125,6 +125,7 @@ class Board(models.Model):
 
 class HasLinks(models.Model):
     links = generic.GenericRelation(Link)
+    links.editable = True
 
     class Meta:
         abstract = True
