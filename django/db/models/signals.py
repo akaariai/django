@@ -12,6 +12,8 @@ post_save = Signal(providing_args=["instance", "raw", "created", "using", "updat
 pre_delete = Signal(providing_args=["instance", "using"], use_caching=True)
 post_delete = Signal(providing_args=["instance", "using"], use_caching=True)
 
+post_update = Signal(providing_args=["changes_dict", "update_kwargs"])
+
 pre_migrate = Signal(providing_args=["app", "create_models", "verbosity", "interactive", "db"])
 pre_syncdb = pre_migrate
 post_migrate = Signal(providing_args=["class", "app", "created_models", "verbosity", "interactive", "db"])

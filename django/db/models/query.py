@@ -15,6 +15,7 @@ from django.db.models.query_utils import (Q, select_related_descend,
     deferred_class_factory, InvalidQuery)
 from django.db.models.deletion import Collector
 from django.db.models import sql
+from django.db.models.signals import post_update
 from django.utils.functional import partition
 from django.utils import six
 from django.utils import timezone
@@ -563,6 +564,12 @@ class QuerySet(object):
         sql.DeleteQuery(self.model).delete_qs(self, using)
     _raw_delete.alters_data = True
 
+    class Changes(object):
+        __slots__ = ['new', 'old']
+
+        def __repr__(self):
+            return 'NEW: ' + repr(self.new) + ', OLD: ' + repr(self.old)
+
     def update(self, **kwargs):
         """
         Updates all elements in the current QuerySet, setting all the given
@@ -572,9 +579,28 @@ class QuerySet(object):
                 "Cannot update a query once a slice has been taken."
         self._for_write = True
         query = self.query.clone(sql.UpdateQuery)
+        field_name_list = ['pk'] + list(kwargs.keys())
+        if post_update.has_listeners(self.model):
+            qs = self.values_list(*field_name_list)
+            pre_values = list(qs.select_for_update())
+            # Of course, need to do batching...
+            query.add_filter(('pk__in', [row[0] for row in pre_values]))
         query.add_update_values(kwargs)
         with transaction.commit_on_success_unless_managed(using=self.db):
             rows = query.get_compiler(self.db).execute_sql(None)
+        if post_update.has_listeners(self.model):
+            post_values = list(qs)
+            assert len(pre_values) == len(post_values) and len(post_values) == rows
+            datadict = {}
+            for row in pre_values:
+                changes = QuerySet.Changes()
+                changes.old = dict(zip(field_name_list, row))
+                datadict[row[0]] = changes
+            for row in post_values:
+                changes = datadict[row[0]]
+                changes.new = dict(zip(field_name_list, row))
+            post_update.send(self.model, changes_dict=datadict, update_kwargs=kwargs)
+
         self._result_cache = None
         return rows
     update.alters_data = True

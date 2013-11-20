@@ -7,6 +7,7 @@ from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.db import connections, DEFAULT_DB_ALIAS
 from django.db import DatabaseError
 from django.db.models.fields import Field, FieldDoesNotExist
+from django.db.models.signals import post_update
 from django.db.models.manager import BaseManager
 from django.db.models.query import QuerySet, EmptyQuerySet, ValuesListQuerySet, MAX_GET_RESULTS
 from django.test import TestCase, TransactionTestCase, skipIfDBFeature, skipUnlessDBFeature
@@ -838,6 +839,15 @@ class SelectOnSaveTests(TestCase):
         with self.assertRaises(DatabaseError):
             with self.assertNumQueries(1):
                 asos.save(force_update=True)
+
+    def test_post_update(self):
+        a1 = Article.objects.create(pub_date=datetime.now())
+        a2 = Article.objects.create(pub_date=datetime.now())
+        a3 = Article.objects.create(pub_date=datetime.now())
+        def post_update_listener(signal, sender, update_kwargs, changes_dict):
+            print changes_dict
+        post_update.connect(post_update_listener, sender=Article)
+        Article.objects.update(pub_date=datetime.now())
 
     def test_select_on_save_lying_update(self):
         """
