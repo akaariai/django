@@ -110,6 +110,10 @@ Related objects reference
         the ``blog`` :class:`~django.db.models.ForeignKey` doesn't have
         ``null=True``, this is invalid.
 
+        For :class:`~django.db.models.ForeignKey` objects, this method accepts
+        a ``bulk`` argument to control whether or not to perform the operation
+        in bulk (i.e. using ``QuerySet.update()``). Defaults to ``True``.
+
     .. method:: clear()
 
         Removes all objects from the related object set::
@@ -121,7 +125,8 @@ Related objects reference
         them.
 
         Just like ``remove()``, ``clear()`` is only available on
-        :class:`~django.db.models.ForeignKey`\s where ``null=True``.
+        :class:`~django.db.models.ForeignKey`\s where ``null=True`` and it also
+        accepts the ``bulk`` keyword argument.
 
     .. note::
 
