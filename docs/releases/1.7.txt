@@ -587,24 +587,23 @@ zone-related date formats or :mod:`django.contrib.syndication`.
 
 The ``remove()`` and ``clear()`` methods of the related managers created by
 ``ForeignKey``, ``GenericForeignKey``, and ``ManyToManyField`` suffered from a
-number of issues, notably, they caused multiple consecutive database operations
-run without transaction handling, and they didn't respect default filtering when
-present (i.e. the default manager on the related model implements a custom
-``get_queryset``) which could lead to unexpected data loss.
+number of issues. Some operations ran multiple data modifying queries without
+wrapping them in a transaction, and some operations didn't respect default
+filtering when it was present (i.e. when the default manager on the related
+model implemented a custom ``get_queryset``).
 
-Besides the expected new behavior, fixing these issues induced some backward
-incompatible changes:
+Fixing the issues induced some backward incompatible changes:
 
 - The default implementation of ``remove()`` for ``ForeignKey`` related managers
-  changed from a series of ``Model.save()`` to a single ``QuerySet.update()``,
-  which means ``pre_save`` and ``post_save`` signals aren't called anymore.
-  You can use the ``bulk=False`` keyword argument to revert to the previous
-  behavior.
+  changed from a series of ``Model.save()`` calls to a single
+  ``QuerySet.update()`` call. The change means that ``pre_save`` and
+  ``post_save`` signals aren't sent anymore. You can use the ``bulk=False``
+  keyword argument to revert to the previous behavior.
 
 - The ``remove()`` and ``clear()`` methods for ``GenericForeignKey`` related
-  managers now perform bulk delete so ``Model.delete()`` isn't called anymore.
-  You can use the ``bulk=False`` keyword argument to revert to the previous
-  behavior.
+  managers now perform bulk delete. The ``Model.delete()`` method isn't called
+  per instance anymore. You can use the ``bulk=False`` keyword argument to
+  revert to the previous behavior.
 
 - The ``remove()`` and ``clear()`` methods for ``ManyToManyField`` related
   managers perform subqueries when filtering is involved, which may or may not
