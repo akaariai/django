@@ -217,7 +217,7 @@ class GenericRelation(ForeignObject):
         setattr(cls, self.name, ReverseGenericRelatedObjectsDescriptor(self, self.for_concrete_model))
 
     def contribute_to_related_class(self, cls, related):
-        pass
+        cls._meta.add_virtual_field(ReverseRelation(self, cls))
 
     def set_attributes_from_rel(self):
         pass
@@ -249,6 +249,27 @@ class GenericRelation(ForeignObject):
                 self.model, for_concrete_model=self.for_concrete_model).pk,
             "%s__in" % self.object_id_field_name: [obj.pk for obj in objs]
         })
+
+class ReverseRelation(ForeignObject):
+    def __init__(self, generic_rel, model):
+        self.generic_rel = generic_rel
+        self.model = model
+	self.name = self.attname = generic_rel.model._meta.model_name
+	self.related = self
+
+    def get_path_info(self):
+        opts = self.generic_rel.model._meta
+        target = self.model._meta.pk
+        return [PathInfo(self.model._meta, opts, (target,), self, True, False)]
+
+    def resolve_related_fields(self):
+        related = self.generic_rel.related_fields[:]        
+	related.reverse()
+	return related
+
+    def get_extra_restriction(self, where_class, alias, remote_alias):
+        return self.generic_rel.get_extra_restriction(
+	    where_class, alias, remote_alias)
 
 
 class ReverseGenericRelatedObjectsDescriptor(object):

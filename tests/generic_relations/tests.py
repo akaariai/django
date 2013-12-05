@@ -443,6 +443,17 @@ class ProxyRelatedModelTest(TestCase):
         newrel = ConcreteRelatedModel.objects.get(pk=newrel.pk)
         self.assertEqual(base, newrel.bases.get())
 
+    def test_reverse_generic_rel(self):
+        a = Animal.objects.create(common_name='foo', latin_name='bar')
+        v = Vegetable.objects.create(name='foo', pk=a.pk)
+        TaggedItem.objects.create(content_object=a)
+        TaggedItem.objects.create(content_object=v)
+        print([t.content_object for t in
+	       TaggedItem.objects.filter(vegetable__name__icontains='foo')])
+        print([t.content_object for t in
+	       TaggedItem.objects.filter(animal__common_name__icontains='foo')])
+	print(TaggedItem.objects.filter(vegetable__name__icontains='foo').query)
+
 
 class TestInitWithNoneArgument(TestCase):
     def test_none_not_allowed(self):
