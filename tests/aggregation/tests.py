@@ -16,6 +16,11 @@ from .models import Author, Publisher, Book, Store
 class BaseAggregateTestCase(TestCase):
     fixtures = ["aggregation.json"]
 
+    def test_foobar(self):
+        vals = Author.objects.annotate(avg=Avg("age")).order_by('avg').values('age')
+        print(vals.query)
+        print(vals)
+
     def test_empty_aggregate(self):
         self.assertEqual(Author.objects.all().aggregate(), {})
 

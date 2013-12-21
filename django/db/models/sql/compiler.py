@@ -389,8 +389,14 @@ class SQLCompiler(object):
                 group_by.append((str(field), []))
                 continue
             col, order = get_order_dir(field, asc)
-            if col in self.query.aggregate_select:
-                result.append('%s %s' % (qn(col), order))
+            if col in self.query.aggregates:
+                if col not in self.query.aggregate_select:
+                    agg = self.query.aggregates[col]
+                    col_sql, col_params = agg.as_sql(qn, self.connection)
+                    result.append('%s %s' % (col_sql, order))
+                    params.extend(col_params)
+                else:
+                    result.append('%s %s' % (qn(col), order))
                 continue
             if '.' in field:
                 # This came in through an extra(order_by=...) addition. Pass it
