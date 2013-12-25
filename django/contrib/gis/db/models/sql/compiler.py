@@ -76,8 +76,8 @@ class GeoSQLCompiler(compiler.SQLCompiler):
             aliases.update(new_aliases)
 
         max_name_length = self.connection.ops.max_name_length()
-        for alias, aggregate in self.query.aggregate_select.items():
-            agg_sql, agg_params = aggregate.as_sql(qn, self.connection)
+        for alias, annotation in self.query.annotation_select.items():
+            agg_sql, agg_params = annotation.as_sql(qn, self.connection)
             if alias is None:
                 result.append(agg_sql)
             else:

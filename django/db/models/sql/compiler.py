@@ -9,7 +9,6 @@ from django.db.models.query_utils import select_related_descend, QueryWrapper
 from django.db.models.sql.constants import (CURSOR, SINGLE, MULTI, NO_RESULTS,
         ORDER_DIR, GET_ITERATOR_CHUNK_SIZE, SelectInfo)
 from django.db.models.sql.datastructures import EmptyResultSet
-from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.query import get_order_dir, Query
 from django.db.transaction import TransactionManagementError
 from django.db.utils import DatabaseError
@@ -247,8 +246,8 @@ class SQLCompiler(object):
             aliases.update(new_aliases)
 
         max_name_length = self.connection.ops.max_name_length()
-        for alias, aggregate in self.query.aggregate_select.items():
-            agg_sql, agg_params = self.compile(aggregate)
+        for alias, annotation in self.query.annotation_select.items():
+            agg_sql, agg_params = self.compile(annotation)
             if alias is None:
                 result.append(agg_sql)
             else:
@@ -408,7 +407,7 @@ class SQLCompiler(object):
                 group_by.append((str(field), []))
                 continue
             col, order = get_order_dir(field, asc)
-            if col in self.query.aggregate_select:
+            if col in self.query.annotation_select:
                 result.append('%s %s' % (qn(col), order))
                 continue
             if '.' in field:
@@ -695,13 +694,13 @@ class SQLCompiler(object):
         """
         resolve_columns = hasattr(self, 'resolve_columns')
         fields = None
-        has_aggregate_select = bool(self.query.aggregate_select)
+        has_annotation_select = bool(self.query.annotation_select)
         for rows in self.execute_sql(MULTI):
             for row in rows:
-                if has_aggregate_select:
+                if has_annotation_select:
                     loaded_fields = self.query.get_loaded_field_names().get(self.query.model, set()) or self.query.select
-                    aggregate_start = len(self.query.extra_select) + len(loaded_fields)
-                    aggregate_end = aggregate_start + len(self.query.aggregate_select)
+                    annotation_start = len(self.query.extra_select) + len(loaded_fields)
+                    annotation_end = annotation_start + len(self.query.annotation_select)
                 if resolve_columns:
                     if fields is None:
                         # We only set this up here because
@@ -729,19 +728,19 @@ class SQLCompiler(object):
                         if only_load:
                             fields = [f for f in fields if f.model._meta.db_table not in only_load or
                                       f.column in only_load[f.model._meta.db_table]]
-                        if has_aggregate_select:
-                            # pad None in to fields for aggregates
-                            fields = fields[:aggregate_start] + [
-                                None for x in range(0, aggregate_end - aggregate_start)
-                            ] + fields[aggregate_start:]
+                        if has_annotation_select:
+                            # pad None in to fields for annotations
+                            fields = fields[:annotation_start] + [
+                                None for x in range(0, annotation_end - annotation_start)
+                            ] + fields[annotation_start:]
                     row = self.resolve_columns(row, fields)
 
-                if has_aggregate_select:
-                    row = tuple(row[:aggregate_start]) + tuple(
-                        self.query.resolve_aggregate(value, aggregate, self.connection)
-                        for (alias, aggregate), value
-                        in zip(self.query.aggregate_select.items(), row[aggregate_start:aggregate_end])
-                    ) + tuple(row[aggregate_end:])
+                if has_annotation_select:
+                    row = tuple(row[:annotation_start]) + tuple(
+                        self.query.resolve_aggregate(value, annotation, self.connection)
+                        for (alias, annotation), value
+                        in zip(self.query.annotation_select.items(), row[annotation_start:annotation_end])
+                    ) + tuple(row[annotation_end:])
 
                 yield row
 
@@ -851,7 +850,7 @@ class SQLInsertCompiler(SQLCompiler):
         elif hasattr(field, 'get_placeholder'):
             # Some fields (e.g. geo fields) need special munging before
             # they can be inserted.
-            return field.get_placeholder(val, self.connection)
+            return field.get_placeholder(val, self, self.connection)
         else:
             # Return the common case for the placeholder
             return '%s'
@@ -969,12 +968,13 @@ class SQLUpdateCompiler(SQLCompiler):
 
             # Getting the placeholder for the field.
             if hasattr(field, 'get_placeholder'):
-                placeholder = field.get_placeholder(val, self.connection)
+                placeholder = field.get_placeholder(val, self, self.connection)
             else:
                 placeholder = '%s'
 
             if hasattr(val, 'evaluate'):
-                val = SQLEvaluator(val, self.query, allow_joins=False)
+                # If val is a query expression, prepare it
+                val.prepare(self.query, allow_joins=False)
             name = field.column
             if hasattr(val, 'as_sql'):
                 sql, params = self.compile(val)
@@ -1074,8 +1074,8 @@ class SQLAggregateCompiler(SQLCompiler):
             qn = self
 
         sql, params = [], []
-        for aggregate in self.query.aggregate_select.values():
-            agg_sql, agg_params = self.compile(aggregate)
+        for annotation in self.query.annotation_select.values():
+            agg_sql, agg_params = self.compile(annotation)
             sql.append(agg_sql)
             params.extend(agg_params)
         sql = ', '.join(sql)
