@@ -23,7 +23,14 @@ Like Django 1.7, Django 1.8 requires Python 2.7 or above, though we
 What's new in Django 1.8
 ========================
 
-...
+Query Expressions
+~~~~~~~~~~~~~~~~~
+
+:doc:`Query Expressions </ref/models/expressions>` allow users to create,
+customize, and compose complex SQL expressions. This has enabled annotate
+to accept expressions other than aggregates. Aggregates are now able to
+reference multiple fields, as well as perform arithmetic, similar to ``F()``
+objects.
 
 Minor features
 ~~~~~~~~~~~~~~
@@ -652,6 +659,31 @@ Similarly for GIS sitemaps, add ``name='django.contrib.gis.sitemaps.views.kml'``
 or ``name='django.contrib.gis.sitemaps.views.kmz'``.
 
 .. _security issue: https://www.djangoproject.com/weblog/2014/apr/21/security/#s-issue-unexpected-code-execution-using-reverse
+
+Aggregate methods and modules
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``django.db.models.sql.aggregates`` and
+``django.contrib.gis.db.models.sql.aggregates`` are now redundant.
+``django.db.models.aggregates`` and
+``django.contrib.gis.db.models.aggregates`` are now also responsible
+for SQL generation. See :doc:`Query Expressions </ref/models/expressions>`
+for instructions on writing custom aggregates.
+
+``django.db.models.sql.query.aggregates`` has been supplanted by
+``django.db.models.sql.query.annotations``.
+
+``django.db.models.sql.query.add_aggregate`` has been supplanted by
+``django.db.models.sql.query.add_annotation``.
+
+``django.db.models.sql.query.set_aggregate_mask`` has been supplanted by
+``django.db.models.sql.query.set_annotation_mask``.
+
+``django.db.models.sql.query.append_aggregate_mask`` has been supplanted by
+``django.db.models.sql.query.append_annotation_mask``.
+
+``django.db.models.sql.query.aggregate_select`` has been supplanted by
+``django.db.models.sql.query.annotation_select``.
 
 Extending management command arguments through ``Command.option_list``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

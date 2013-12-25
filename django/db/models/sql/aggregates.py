@@ -2,13 +2,21 @@
 Classes to represent the default SQL aggregate functions
 """
 import copy
+import warnings
 
 from django.db.models.fields import IntegerField, FloatField
 from django.db.models.lookups import RegisterLookupMixin
+from django.utils.deprecation import RemovedInDjango20Warning
 from django.utils.functional import cached_property
 
 
 __all__ = ['Aggregate', 'Avg', 'Count', 'Max', 'Min', 'StdDev', 'Sum', 'Variance']
+
+
+warnings.warn(
+    "django.db.models.sql.aggregates is deprecated. Use "
+    "django.db.models.aggregates instead.",
+    RemovedInDjango20Warning, stacklevel=2)
 
 
 class Aggregate(RegisterLookupMixin):
@@ -83,7 +91,6 @@ class Aggregate(RegisterLookupMixin):
     def as_sql(self, qn, connection):
         "Return the aggregate, rendered as SQL with parameters."
         params = []
-
         if hasattr(self.col, 'as_sql'):
             field_name, params = self.col.as_sql(qn, connection)
         elif isinstance(self.col, (list, tuple)):
@@ -96,7 +103,6 @@ class Aggregate(RegisterLookupMixin):
             'field': field_name
         }
         substitutions.update(self.extra)
-
         return self.sql_template % substitutions, params
 
     def get_group_by_cols(self):

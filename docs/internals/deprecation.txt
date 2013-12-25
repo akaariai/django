@@ -38,6 +38,20 @@ about each item can often be found in the release notes of two versions prior.
   :class:`~django.core.management.BaseCommand` instead, which takes no arguments
   by default.
 
+* ``django.db.models.sql.aggregates`` module will be removed.
+
+* ``django.contrib.gis.db.models.sql.aggregates`` module will be removed.
+
+* ``django.db.models.sql.query.aggregates`` property will be removed.
+
+* ``django.db.models.sql.query.add_aggregate`` function will be removed.
+
+* ``django.db.models.sql.query.set_aggregate_mask`` function will be removed.
+
+* ``django.db.models.sql.query.append_aggregate_mask`` function will be removed.
+
+* ``django.db.models.sql.query.aggregate_select`` property will be removed.
+
 * ``django.template.resolve_variable`` will be removed.
 
 * The ``error_message`` argument of ``django.forms.RegexField`` will be removed.

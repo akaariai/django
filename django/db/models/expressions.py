@@ -1,14 +1,18 @@
+import copy
 import datetime
 
-from django.db.models.aggregates import refs_aggregate
+from django.core.exceptions import FieldError
 from django.db.models.constants import LOOKUP_SEP
-from django.utils import tree
+from django.db.models import fields
+from django.db.models.query_utils import refs_aggregate
+from django.utils.functional import cached_property
 
 
-class ExpressionNode(tree.Node):
+class ExpressionNode(object):
     """
     Base class for all query expressions.
     """
+
     # Arithmetic connectors
     ADD = '+'
     SUB = '-'
@@ -25,44 +29,148 @@ class ExpressionNode(tree.Node):
     BITAND = '&'
     BITOR = '|'
 
-    def __init__(self, children=None, connector=None, negated=False):
-        if children is not None and len(children) > 1 and connector is None:
-            raise TypeError('You have to specify a connector.')
-        super(ExpressionNode, self).__init__(children, connector, negated)
+    # aggregate specific fields
+    is_aggregate = False
+    is_summary = False
+    # resolve_aggregate uses below to coerce
+    is_ordinal = False
+    is_computed = False
+
+    def __init__(self, output_field=None):
+        self.col = None
+        self.source = output_field
 
     def _combine(self, other, connector, reversed, node=None):
         if isinstance(other, datetime.timedelta):
-            return DateModifierNode([self, other], connector)
+            return DateModifierNode(self, connector, other)
+
+        if not isinstance(other, ExpressionNode):
+            # everything must be some kind of ExpressionNode, so Value is the fallback
+            other = Value(other)
 
         if reversed:
-            obj = ExpressionNode([other], connector)
-            obj.add(node or self, connector)
-        else:
-            obj = node or ExpressionNode([self], connector)
-            obj.add(other, connector)
-        return obj
+            return Expression(other, connector, self)
+        return Expression(self, connector, other)
+
+    def as_sql(self, compiler, connection):
+        """
+        Responsible for returning a (sql, [params]) tuple to be included
+        in the current query.
+
+        Different backends can provide their own implementation, by
+        providing an `as_{vendor}` method, and patching the Expression:
+
+        ```
+        def override_as_sql(self, compiler, connection):
+            # custom logic
+            return super(ExpressionNode, self).as_sql(compiler, connection)
+        setattr(ExpressionNode, 'as_' + connection.vendor, override_as_sql)
+        ```
+
+        Arguments:
+         * compiler: the query compiler responsible for generating the query.
+           Must have a compile method, returning a (sql, [params]) tuple.
+           Calling compiler(value) will return a quoted `value`
+
+         * connection: the database connection used for the current query
+
+        Returns: (sql, params)
+          Where `sql` is a string containing ordered sql parameters to be
+          replaced with the elements of the list `params`
+        """
+        raise NotImplementedError("Subclasses must implement as_sql()")
+
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        """
+        Provides the chance to do any preprocessing or validation before being
+        added to the query.
+
+        Arguments:
+         * query: the backend query implementation
+         * allow_joins: boolean allowing or denying use of joins
+           in this query
+         * reuse: a set of reusable joins for multijoins
+         * summarize: a terminal aggregate clause
+
+        Returns: a copy of self prepared for the query
+        """
+        c = self.copy()
+        c.is_summary = summarize
+        return c
+
+    @property
+    def field(self):
+        return self.output_field
+
+    @cached_property
+    def output_field(self):
+        ot = self._output_field
+        if ot is None:
+            raise FieldError("Cannot resolve expression type, unknown output_field")
+        return ot
+
+    @cached_property
+    def _output_field(self):
+        self._resolve_source()
+        return self.source
+
+    def _resolve_source(self):
+        if self.source is None:
+            sources = self.get_sources()
+            num_sources = len(sources)
+            if num_sources == 0:
+                self.source = None
+            elif num_sources == 1:
+                self.source = sources[0]
+            else:
+                # this could be smarter by allowing certain combinations
+                self.source = sources[0]
+                for source in sources:
+                    if source is not None and not isinstance(self.source, source.__class__):
+                        raise FieldError(
+                            "Expression contains mixed types. You must set output_field")
+
+    def get_lookup(self, lookup):
+        return self.output_field.get_lookup(lookup)
+
+    def get_transform(self, name):
+        return self.output_field.get_transform(name)
+
+    def relabeled_clone(self, change_map):
+        return self.copy()
+
+    def copy(self):
+        c = copy.copy(self)
+        c.copied = True
+        return c
 
     def contains_aggregate(self, existing_aggregates):
-        if self.children:
-            return any(child.contains_aggregate(existing_aggregates)
-                       for child in self.children
-                       if hasattr(child, 'contains_aggregate'))
-        else:
-            return refs_aggregate(self.name.split(LOOKUP_SEP),
-                                  existing_aggregates)
+        return False, ()
 
-    def prepare_database_save(self, unused):
+    def refs_field(self, aggregate_types, field_types):
+        """
+        Helper method for check_aggregate_support on backends
+        """
+        return False
+
+    def prepare_database_save(self, field):
         return self
 
-    ###################
-    # VISITOR METHODS #
-    ###################
+    def get_group_by_cols(self):
+        if self.col is not None:
+            return [self.col]
+        return []
 
-    def prepare(self, evaluator, query, allow_joins):
-        return evaluator.prepare_node(self, query, allow_joins)
+    def get_sources(self):
+        if self.source is not None:
+            return [self.source]
+        return []
 
-    def evaluate(self, evaluator, qn, connection):
-        return evaluator.evaluate_node(self, qn, connection)
+    def __bool__(self):
+        """
+        For truth value testing.
+        """
+        return True
 
     #############
     # OPERATORS #
@@ -137,22 +245,67 @@ class ExpressionNode(tree.Node):
         )
 
 
-class F(ExpressionNode):
-    """
-    An expression representing the value of the given field.
-    """
-    def __init__(self, name):
-        super(F, self).__init__(None, None, False)
-        self.name = name
+class Expression(ExpressionNode):
 
-    def prepare(self, evaluator, query, allow_joins):
-        return evaluator.prepare_leaf(self, query, allow_joins)
+    def __init__(self, lhs, connector, rhs, output_field=None):
+        super(Expression, self).__init__(output_field=output_field)
+        self.lhs = lhs
+        self.rhs = rhs
+        self.connector = connector
+        self.is_aggregate = self.lhs.is_aggregate or self.rhs.is_aggregate
 
-    def evaluate(self, evaluator, qn, connection):
-        return evaluator.evaluate_leaf(self, qn, connection)
+    def as_sql(self, compiler, connection):
+        expressions = []
+        expression_params = []
+        sql, params = compiler.compile(self.lhs)
+        expressions.append(sql)
+        expression_params.extend(params)
+        sql, params = compiler.compile(self.rhs)
+        expressions.append(sql)
+        expression_params.extend(params)
+        # order of precedence
+        expression_wrapper = '(%s)'
+        sql = connection.ops.combine_expression(self.connector, expressions)
+        return expression_wrapper % sql, expression_params
+
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        c = self.copy()
+        c.is_summary = summarize
+        c.lhs = c.lhs.prepare(query, allow_joins, reuse, summarize)
+        c.rhs = c.rhs.prepare(query, allow_joins, reuse, summarize)
+        return c
+
+    def relabeled_clone(self, change_map):
+        clone = copy.copy(self)
+        clone.lhs = self.lhs.relabeled_clone(change_map)
+        clone.rhs = self.rhs.relabeled_clone(change_map)
+        return clone
+
+    def contains_aggregate(self, existing_aggregates):
+        for node in (self.lhs, self.rhs):
+            agg, lookup = node.contains_aggregate(existing_aggregates)
+            if agg:
+                return agg, lookup
+        return False, ()
+
+    def refs_field(self, aggregate_types, field_types):
+        """
+        Helper method for check_aggregate_support on backends
+        """
+        return any(
+            node.refs_field(aggregate_types, field_types)
+            for node in (self.lhs, self.rhs))
+
+    def get_group_by_cols(self):
+        return self.lhs.get_group_by_cols() + self.rhs.get_group_by_cols()
+
+    def get_sources(self):
+        if self.source is not None:
+            return [self.source]
+        return [self.lhs._output_field, self.rhs._output_field]
 
 
-class DateModifierNode(ExpressionNode):
+class DateModifierNode(Expression):
     """
     Node that implements the following syntax:
     filter(end_date__gt=F('start_date') + datetime.timedelta(days=3, seconds=200))
@@ -178,14 +331,245 @@ class DateModifierNode(ExpressionNode):
     Only adding and subtracting timedeltas is supported, attempts to use other
     operations raise a TypeError.
     """
-    def __init__(self, children, connector, negated=False):
-        if len(children) != 2:
-            raise TypeError('Must specify a node and a timedelta.')
-        if not isinstance(children[1], datetime.timedelta):
-            raise TypeError('Second child must be a timedelta.')
+    def __init__(self, lhs, connector, rhs):
+        if not isinstance(rhs, datetime.timedelta):
+            raise TypeError('rhs must be a timedelta.')
         if connector not in (self.ADD, self.SUB):
             raise TypeError('Connector must be + or -, not %s' % connector)
-        super(DateModifierNode, self).__init__(children, connector, negated)
+        super(DateModifierNode, self).__init__(lhs, connector, Value(rhs))
 
-    def evaluate(self, evaluator, qn, connection):
-        return evaluator.evaluate_date_modifier_node(self, qn, connection)
+    def as_sql(self, compiler, connection):
+        timedelta = self.rhs.value
+        sql, params = compiler.compile(self.lhs)
+        if (timedelta.days == timedelta.seconds == timedelta.microseconds == 0):
+            return sql, params
+        return connection.ops.date_interval_sql(sql, self.connector, timedelta), params
+
+
+class F(ExpressionNode):
+    """
+    An expression representing the value of the given field.
+    """
+
+    def __init__(self, name):
+        """
+        Arguments:
+         * name: the name of the field this expression references
+        """
+        super(F, self).__init__()
+        self.name = name
+
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        c = self.copy()
+        c.is_summary = summarize
+        if not allow_joins and LOOKUP_SEP in c.name:
+            raise FieldError("Joined field references are not permitted in this query")
+        c.setup_cols(query, reuse)
+        return c
+
+    def as_sql(self, compiler, connection):
+        return compiler.compile(self.col)
+
+    def setup_cols(self, query, reuse):
+        if query is None:
+            return
+        field_list = self.name.split(LOOKUP_SEP)
+        if self.name in query.annotations:
+            self.col = query.annotation_select[self.name]
+        else:
+            try:
+                field, sources, opts, join_list, path = query.setup_joins(
+                    field_list, query.get_meta(),
+                    query.get_initial_alias(), reuse)
+                self._used_joins = join_list
+                targets, _, join_list = query.trim_joins(sources, join_list, path)
+                if len(targets) > 1:
+                    raise FieldError("Referencing multicolumn fields in expressions "
+                                     "isn't supported")
+                if reuse is not None:
+                    reuse.update(join_list)
+                assert self.source is None
+                self.source = sources[0]
+                self.col = Col(join_list[-1], targets[0], sources[0])
+            except fields.FieldDoesNotExist:
+                raise FieldError("Cannot resolve keyword %r into field. "
+                                 "Choices are: %s" % (self.name,
+                                                      [f.name for f in self.opts.fields]))
+
+    def get_group_by_cols(self):
+        return self.col.get_group_by_cols()
+
+    def get_sources(self):
+        return [self.source] if self.source is not None else []
+
+    def contains_aggregate(self, existing_aggregates):
+        return refs_aggregate(self.name.split(LOOKUP_SEP), existing_aggregates)
+
+    def relabeled_clone(self, change_map):
+        clone = copy.copy(self)
+        clone.col = clone.col.relabeled_clone(change_map)
+        return clone
+
+
+class Func(ExpressionNode):
+    """
+    A SQL function call.
+    """
+    function = None
+    template = '%(function)s(%(expressions)s)'
+    arg_joiner = ', '
+
+    def __init__(self, *expressions, **extra):
+        output_field = extra.pop('output_field', None)
+        super(Func, self).__init__(output_field=output_field)
+        self.expressions = self._parse_expressions(*expressions)
+        self.extra = extra
+
+    def _parse_expressions(self, *expressions):
+        return [
+            arg if isinstance(arg, ExpressionNode) else F(arg)
+            for arg in expressions
+        ]
+
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        c = self.copy()
+        c.is_summary = summarize
+        for pos, arg in enumerate(c.expressions):
+            c.expressions[pos] = arg.prepare(query, allow_joins, reuse, summarize)
+        return c
+
+    def as_sql(self, compiler, connection):
+        sql_parts = []
+        params = []
+        for arg in self.expressions:
+            arg_sql, arg_params = compiler.compile(arg)
+            sql_parts.append(arg_sql)
+            params.extend(arg_params)
+        self.extra['function'] = self.extra.get('function', self.function)
+        self.extra['expressions'] = self.extra['field'] = self.arg_joiner.join(sql_parts)
+        template = self.extra.get('template', self.template)
+        return template % self.extra, params
+
+    def get_sources(self):
+        if self.source is not None:
+            return [self.source]
+        return [arg._output_field for arg in self.expressions]
+
+    def contains_aggregate(self, existing_aggregates):
+        for arg in self.expressions:
+            agg, lookup = arg.contains_aggregate(existing_aggregates)
+            if agg:
+                return agg, lookup
+        return False, ()
+
+    def refs_field(self, aggregate_types, field_types):
+        """
+        Helper method for check_aggregate_support on backends
+        """
+        return any(arg.refs_field(aggregate_types, field_types) for arg in self.expressions)
+
+    def relabeled_clone(self, change_map):
+        clone = copy.copy(self)
+        new_expressions = [
+            arg.relabeled_clone(change_map) for arg in clone.expressions]
+        clone.expressions = new_expressions
+        return clone
+
+
+class Value(ExpressionNode):
+    """
+    Represents a wrapped value as a node within an expression
+    """
+
+    def __init__(self, value, output_field=None):
+        """
+        Arguments:
+         * value: the value this expression represents. The value will be
+           added into the sql parameter list and properly quoted
+
+         * output_field: the Model Field type that this expression will
+           return, such as IntegerField() or CharField()
+        """
+        super(Value, self).__init__(output_field=output_field)
+        self.value = value
+
+    def as_sql(self, compiler, connection):
+        return '%s', [self.value]
+
+
+class Col(ExpressionNode):
+    def __init__(self, alias, target, source=None):
+        if source is None:
+            source = target
+        super(Col, self).__init__(output_field=source)
+        self.alias, self.target, self.source = alias, target, source
+
+    def as_sql(self, qn, connection):
+        return "%s.%s" % (qn(self.alias), qn(self.target.column)), []
+
+    def relabeled_clone(self, relabels):
+        return self.__class__(relabels.get(self.alias, self.alias), self.target, self.source)
+
+    def get_group_by_cols(self):
+        return [(self.alias, self.target.column)]
+
+
+class Ref(ExpressionNode):
+    """
+    Reference to column alias of the query. For example, Ref('sum_cost') in
+    qs.annotate(sum_cost=Sum('cost')) query.
+    """
+    def __init__(self, refs, source):
+        super(Ref, self).__init__(output_field=source)
+        self.refs, self.source = refs, source
+
+    def relabeled_clone(self, relabels):
+        return self
+
+    def as_sql(self, compiler, connection):
+        return "%s" % compiler(self.refs), []
+
+    def get_group_by_cols(self):
+        return [(None, self.refs)]
+
+
+class Date(ExpressionNode):
+    """
+    Add a date selection column.
+    """
+    def __init__(self, col, lookup_type):
+        super(Date, self).__init__(output_field=fields.DateField())
+        self.col = col
+        self.lookup_type = lookup_type
+
+    def relabeled_clone(self, change_map):
+        return self.__class__(
+            self.col.relabeled_clone(change_map),
+            self.lookup_type)
+
+    def as_sql(self, qn, connection):
+        sql, params = self.col.as_sql(qn, connection)
+        assert not(params)
+        return connection.ops.date_trunc_sql(self.lookup_type, sql), []
+
+
+class DateTime(ExpressionNode):
+    """
+    Add a datetime selection column.
+    """
+    def __init__(self, col, lookup_type, tzname):
+        super(DateTime, self).__init__(output_field=fields.DateTimeField())
+        self.col = col
+        self.lookup_type = lookup_type
+        self.tzname = tzname
+
+    def relabeled_clone(self, change_map):
+        return self.__class__(
+            self.col.relabeled_clone(change_map),
+            self.lookup_type,
+            self.tzname)
+
+    def as_sql(self, qn, connection):
+        sql, params = self.col.as_sql(qn, connection)
+        assert not(params)
+        return connection.ops.datetime_trunc_sql(self.lookup_type, sql, self.tzname)
