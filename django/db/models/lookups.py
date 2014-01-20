@@ -309,9 +309,15 @@ default_lookups['search'] = Search
 
 class Regex(BuiltinLookup):
     lookup_name = 'regex'
+
+    def get_rhs_op(self, connection, rhs):
+        if self.lookup_name in connection.opertors:
+            return connection.operators[self.lookup_name] % rhs
+        else:
+            return connection.ops.regex_lookup(self.lookup_name) % rhs
 default_lookups['regex'] = Regex
 
 
-class IRegex(BuiltinLookup):
+class IRegex(Regex):
     lookup_name = 'iregex'
 default_lookups['iregex'] = IRegex
