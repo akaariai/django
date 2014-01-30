@@ -3,6 +3,7 @@ Regression tests for defer() / only() behavior.
 """
 
 from django.db import models
+from django.contrib.auth.models import User
 from django.utils.encoding import python_2_unicode_compatible
 
 
@@ -81,3 +82,30 @@ class Request(models.Model):
     request2 = models.CharField(default='request2', max_length=1000)
     request3 = models.CharField(default='request3', max_length=1000)
     request4 = models.CharField(default='request4', max_length=1000)
+
+
+class A(models.Model):
+    dspam = models.TextField()
+    eggs = models.BooleanField(default=False)
+
+
+class B(models.Model):
+    a = models.ForeignKey(A)
+
+
+class C(models.Model):
+    b = models.ForeignKey(B)
+
+
+class D(models.Model):
+    c = models.ForeignKey(C)
+    dfoo = models.TextField()
+    dbar = models.TextField()
+
+    user = models.ForeignKey(User, null=True)
+    time = models.DateTimeField(null=True)
+
+
+class E(models.Model):
+    d = models.ForeignKey(D)
+    dbaz = models.TextField()

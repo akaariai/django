@@ -2,16 +2,19 @@ from __future__ import absolute_import
 
 from operator import attrgetter
 
+from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.sessions.backends.db import SessionStore
 from django.db.models import Count
 from django.db.models.loading import cache
 from django.test import TestCase
 from django.test.utils import override_settings
+from django.utils import six
 
 from .models import (
     ResolveThis, Item, RelatedItem, Child, Leaf, Proxy, SimpleItem, Feature,
-    ItemAndSimpleItem, OneToOneItem, SpecialFeature, Location, Request)
+    ItemAndSimpleItem, OneToOneItem, SpecialFeature, Location, Request, A,
+    B, C, D, E)
 
 
 class DeferRegressionTest(TestCase):
@@ -258,3 +261,22 @@ class DeferAnnotateSelectRelatedTest(TestCase):
         self.assertIsInstance(list(Request.objects
             .annotate(Count('items')).select_related('profile', 'location')
             .defer('request1', 'request2', 'request3', 'request4')), list)
+
+
+class Ticket21093Tests(TestCase):
+    def test_ticket_21093(self):
+        self.a = A.objects.create()
+        self.b = B.objects.create(a=self.a)
+        self.c = C.objects.create(b=self.b)
+        self.user = User.objects.create_user("foo", "foo.bar@example.com", password="424242", id=1)
+        self.d = D.objects.create(c=self.c, user=self.user)
+        self.e = E.objects.create(d=self.d)
+        qs = (E.objects
+              .select_related('d__user', 'd__c__b__a')
+              .filter(d__c__b=self.b, d__user_id=1)
+              .defer('dbaz', 'd__dfoo', 'd__dbar',
+                     'd__c__b__a__dspam'))
+        user = qs[0].d.user
+        # It should be 1 (and not True which happens to be equal to 1)
+        self.assertEqual(user.id, 1)
+        self.assertIsNot(user.id, True)
