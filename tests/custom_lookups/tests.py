@@ -3,10 +3,11 @@ from __future__ import unicode_literals
 from datetime import date
 import unittest
 
-from django.test import TestCase
-from .models import Author
+from django.core.exceptions import FieldError
 from django.db import models
 from django.db import connection
+from django.test import TestCase
+from .models import Author
 
 
 class Div3Lookup(models.Lookup):
@@ -289,3 +290,50 @@ class YearLteTests(TestCase):
         finally:
             YearTransform._unregister_lookup(CustomYearExact)
             YearTransform.register_lookup(YearExact)
+
+
+class TrackCallsYearTransform(YearTransform):
+    lookup_name = 'year'
+    call_order = []
+
+    def as_sql(self, qn, connection):
+        lhs_sql, params = qn.compile(self.lhs)
+        return connection.ops.date_extract_sql('year', lhs_sql), params
+
+    @property
+    def output_type(self):
+        return models.IntegerField()
+
+    def get_lookup(self, lookup_name):
+        self.call_order.append('lookup')
+        return super(TrackCallsYearTransform, self).get_lookup(lookup_name)
+    
+    def get_transform(self, lookup_name):
+        self.call_order.append('transform')
+        return super(TrackCallsYearTransform, self).get_transform(lookup_name)
+
+
+class LookupTransformCallOrderTests(TestCase):
+    def test_call_order(self):
+        models.DateField.register_lookup(TrackCallsYearTransform)
+        try:
+            # div3, first with transform, then with lookup
+            with self.assertRaises(FieldError):
+                Author.objects.filter(birthdate__year__div3=2012)
+            self.assertEqual(TrackCallsYearTransform.call_order,
+                             ['lookup', 'transform'])
+            TrackCallsYearTransform.call_order = []
+            # year with get_transform() only
+            with self.assertRaises(FieldError):
+                Author.objects.filter(birthdate__year__year__div3=2012)
+            self.assertEqual(TrackCallsYearTransform.call_order,
+                             ['transform'])
+            TrackCallsYearTransform.call_order = []
+            # exact with get_lookup() only
+            Author.objects.filter(birthdate__year=2012)
+            self.assertEqual(TrackCallsYearTransform.call_order,
+                             ['lookup'])
+
+        finally:
+            models.DateField._unregister_lookup(TrackCallsYearTransform)
+
