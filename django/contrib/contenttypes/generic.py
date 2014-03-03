@@ -35,7 +35,8 @@ class GenericForeignKey(six.with_metaclass(RenameGenericForeignKeyMethods)):
     fields.
     """
 
-    def __init__(self, ct_field="content_type", fk_field="object_id", for_concrete_model=True, related_name=None):
+    def __init__(self, ct_field="content_type", fk_field="object_id", for_concrete_model=True,
+                 related_name=None):
         self.ct_field = ct_field
         self.fk_field = fk_field
         self.for_concrete_model = for_concrete_model
@@ -155,8 +156,8 @@ class GenericRelation(ForeignObject):
     """Provides an accessor to generic related objects (e.g. comments)"""
 
     def __init__(self, to, **kwargs):
-        if kwargs.get('related_name'):
-            self.generate_reverse_relation = True
+        if not kwargs.get('related_name'):
+            self.generate_reverse_relation = False
         kwargs['verbose_name'] = kwargs.get('verbose_name', None)
         kwargs['rel'] = GenericRel(
             self, to, related_name=kwargs.pop('related_name', None),
