@@ -20,3 +20,6 @@ Bugfixes
 * Fixed the ``object_id`` of the ``LogEntry`` that's created after a user
   password change in the admin
   (`#22515 <http://code.djangoproject.com/ticket/22515>`_).
+
+* Fixed the SQL generated when filtering by a negated ``Q`` object that contains
+  a ``F`` object. (`#22429 <http://code.djangoproject.com/ticket/22429>`_).
