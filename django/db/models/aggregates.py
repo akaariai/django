@@ -2,7 +2,6 @@
 Classes to represent the definitions of aggregate functions.
 """
 from django.core.exceptions import FieldError
-from django.db.models.constants import LOOKUP_SEP
 from django.db.models.expressions import WrappedExpression, Value
 from django.db.models.fields import IntegerField, FloatField
 
@@ -33,12 +32,11 @@ class Aggregate(WrappedExpression):
     def prepare(self, query=None, allow_joins=True, reuse=None):
         if self.expression.validate_name:  # simple lookup
             name = self.expression.name
-            field_list = name.split(LOOKUP_SEP)
-            if len(field_list) == 1 and name in query.annotations:
-                if query.annotations[name].is_aggregate and not self.is_summary:
-                    raise FieldError("Cannot compute %s('%s'): '%s' is an aggregate" % (
-                        self.name, name, name))
-
+            reffed, _ = self.expression.contains_aggregate(query.annotations)
+            if reffed and not self.is_summary:
+                raise FieldError("Cannot compute %s('%s'): '%s' is an aggregate" % (
+                    self.name, name, name))
+            if name in query.annotations:
                 annotation = query.annotations[name]
                 if self.source is None:
                     self.source = annotation.output_type

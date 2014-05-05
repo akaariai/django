@@ -169,12 +169,6 @@ class ExpressionNode(tree.Node):
         # this method is here for compatability purposes
         return self.as_sql(compiler, connection)
 
-    def get_cols(self):
-        cols = []
-        for child in self.children:
-            cols.extend(child.get_cols())
-        return cols
-
     def get_group_by_cols(self):
         cols = []
         for child in self.children:
@@ -338,14 +332,6 @@ class F(ExpressionNode):
                 raise FieldError("Cannot resolve keyword %r into field. "
                                  "Choices are: %s" % (self.name,
                                                       [f.name for f in self.opts.fields]))
-
-    def get_cols(self):
-        cols = []
-        if isinstance(self.col, tuple):
-            cols.append(self.col)
-        elif hasattr(self.col, 'get_cols'):
-            cols.extend(self.col.get_cols())
-        return cols
 
     def get_group_by_cols(self):
         cols = []
@@ -531,10 +517,10 @@ class ColumnNode(Value):
     def as_sql(self, compiler, connection):
         return compiler.compile(self.name)
 
-    def get_cols(self):
+    def get_group_by_cols(self):
         cols = []
         if isinstance(self.col, tuple):
             cols.append(self.col)
-        elif hasattr(self.col, 'get_cols'):
-            cols.extend(self.col.get_cols())
+        elif hasattr(self.col, 'get_group_by_cols'):
+            cols.extend(self.col.get_group_by_cols())
         return cols

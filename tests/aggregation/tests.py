@@ -828,6 +828,10 @@ class ComplexAggregateTestCase(TestCase):
 
         self.assertEqual(author.sum_age, other_author.sum_age)
 
+    def test_annotated_aggregate_over_annotated_aggregate(self):
+        with self.assertRaises(FieldError):
+            Book.objects.annotate(Max('id')).annotate(Sum('id__max'))
+
     def test_add_implementation(self):
         try:
             # test completely changing how the output is rendered

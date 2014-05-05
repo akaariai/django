@@ -240,7 +240,7 @@ class QuerySet(object):
                     load_fields.append(field.name)
 
         index_start = len(extra_select)
-        annotaion_start = index_start + len(load_fields or self.model._meta.concrete_fields)
+        annotation_start = index_start + len(load_fields or self.model._meta.concrete_fields)
 
         skip = None
         if load_fields and not fill_cache:
@@ -268,7 +268,7 @@ class QuerySet(object):
                                         offset=len(annotation_select))
             else:
                 # Omit annotaions in object creation.
-                row_data = row[index_start:annotaion_start]
+                row_data = row[index_start:annotation_start]
                 if skip:
                     obj = model_cls(**dict(zip(init_list, row_data)))
                 else:
@@ -286,7 +286,7 @@ class QuerySet(object):
             # Add the annotaions to the model
             if annotation_select:
                 for i, annotation in enumerate(annotation_select):
-                    setattr(obj, annotation, row[i + annotaion_start])
+                    setattr(obj, annotation, row[i + annotation_start])
 
             # Add the known related objects to the model, if there are any
             if self._known_related_objects:

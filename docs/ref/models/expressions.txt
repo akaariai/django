@@ -358,13 +358,6 @@ delegating the methods.
     ``aggregate_types`` is a tuple of aggregate classes, while
     ``field_types`` is a tuple of model fields.
 
-.. method:: get_cols()
-
-    Responsible for returning the list of columns references by
-    this expression. ``get_cols()`` should be called on any nested
-    expressions. ``F()`` objects, in particular, hold a reference to
-    a column.
-
 .. method:: get_group_by_cols()
 
     Responsible for returning the list of columns references by
@@ -463,12 +456,6 @@ to play nice with other Query Expressions::
     def refs_field(self, aggregate_types, field_types):
         return any(expr.refs_field(aggregate_types, field_types)
                    for expr in self.expressions)
-
-    def get_cols(self):
-        cols = []
-        for child in self.expressions:
-            cols.extend(child.get_cols())
-        return cols
 
     def get_group_by_cols(self):
         cols = []
