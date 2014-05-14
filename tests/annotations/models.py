@@ -55,3 +55,16 @@ class DepartmentStore(Store):
 
     def __str__(self):
         return '%s - %s ' % (self.chain, self.name)
+
+
+@python_2_unicode_compatible
+class Company(models.Model):
+    name = models.CharField(max_length=200)
+    motto = models.CharField(max_length=200, null=True, blank=True)
+    ticker_name = models.CharField(max_length=10, null=True, blank=True)
+    description = models.CharField(max_length=200, null=True, blank=True)
+
+    def __str__(self):
+        return ('Company(name=%s, motto=%s, ticker_name=%s, description=%s)'
+            % (self.name, self.motto, self.ticker_name, self.description)
+        )

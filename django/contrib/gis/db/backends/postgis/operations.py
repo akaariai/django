@@ -566,7 +566,7 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
         agg_name = agg_name.lower()
         if agg_name == 'union':
             agg_name += 'agg'
-        sql_template = '%(function)s(%(field)s)'
+        sql_template = '%(function)s(%(expressions)s)'
         sql_function = getattr(self, agg_name)
         return sql_template, sql_function
 

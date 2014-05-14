@@ -14,7 +14,7 @@ warnings.warn(
 
 class GeoAggregate(Aggregate):
     # Default SQL template for spatial aggregates.
-    sql_template = '%(function)s(%(field)s)'
+    sql_template = '%(function)s(%(expressions)s)'
 
     # Conversion class, if necessary.
     conversion_class = None
@@ -51,7 +51,7 @@ class GeoAggregate(Aggregate):
 
         substitutions = {
             'function': sql_function,
-            'field': field_name
+            'expressions': field_name
         }
         substitutions.update(self.extra)
 

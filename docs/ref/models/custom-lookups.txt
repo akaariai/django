@@ -278,8 +278,8 @@ The Query Expression API
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 A lookup can assume that the lhs responds to the query expression API.
-Currently direct field references, aggregates and ``Transform`` instances respond
-to this API.
+Currently direct field references, :ref:`expressions <expressions>` and
+``Transform`` instances respond to this API.
 
 .. method:: as_sql(qn, connection)
 

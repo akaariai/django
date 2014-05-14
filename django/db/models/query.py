@@ -315,6 +315,8 @@ class QuerySet(object):
         if self.query.distinct_fields:
             raise NotImplementedError("aggregate() + distinct(fields) not implemented.")
         for arg in args:
+            if not hasattr(arg, 'default_alias'):
+                raise TypeError("Complex aggregates require an alias")
             kwargs[arg.default_alias] = arg
 
         query = self.query.clone()
@@ -776,6 +778,8 @@ class QuerySet(object):
         with extra data or aggregations.
         """
         for arg in args:
+            if not hasattr(arg, 'default_alias'):
+                raise TypeError("Complex annotations require an alias")
             if arg.default_alias in kwargs:
                 raise ValueError("The named annotation '%s' conflicts with the "
                                  "default name for another annotation."

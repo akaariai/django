@@ -2,7 +2,7 @@
 Classes to represent the definitions of aggregate functions.
 """
 from django.core.exceptions import FieldError
-from django.db.models.expressions import WrappedExpression, Value
+from django.db.models.expressions import Func, Value
 from django.db.models.fields import IntegerField, FloatField
 
 __all__ = [
@@ -13,12 +13,17 @@ integer_field = IntegerField()
 float_field = FloatField()
 
 
-class Aggregate(WrappedExpression):
+class Aggregate(Func):
     is_aggregate = True
     name = None
 
     def __init__(self, expression, output_type=None, **extra):
-        super(Aggregate, self).__init__(expression, output_type, **extra)
+        super(Aggregate, self).__init__(
+            expression,
+            output_type=output_type,
+            **extra)
+
+        self.expression = self.expressions[0]
         if self.expression.is_aggregate:
             raise FieldError("Cannot compute %s(%s(..)): aggregates cannot be nested" % (
                 self.name, expression.name))
@@ -29,8 +34,9 @@ class Aggregate(WrappedExpression):
             elif self.is_computed:
                 self.source = float_field
 
-    def prepare(self, query=None, allow_joins=True, reuse=None):
-        if self.expression.validate_name:  # simple lookup
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarise=False):
+        self.is_summary = summarise
+        if hasattr(self.expression, 'name'):  # simple lookup
             name = self.expression.name
             reffed, _ = self.expression.contains_aggregate(query.annotations)
             if reffed and not self.is_summary:
@@ -45,22 +51,22 @@ class Aggregate(WrappedExpression):
                     self.expression.col = (None, name)
                     return
         self._patch_aggregate(query)  # backward-compatibility support
-        super(Aggregate, self).prepare(query, allow_joins, reuse)
+        super(Aggregate, self).prepare(query, allow_joins, reuse, summarise)
 
     def refs_field(self, aggregate_types, field_types):
         return (isinstance(self, aggregate_types) and
                 isinstance(self.expression.source, field_types))
 
-    def _default_alias(self):
-        if hasattr(self.expression, 'name') and self.expression.validate_name:
+    @property
+    def default_alias(self):
+        if hasattr(self.expression, 'name'):
             return '%s__%s' % (self.expression.name, self.name.lower())
         raise TypeError("Complex expressions require an alias")
-    default_alias = property(_default_alias)
 
     def _patch_aggregate(self, query):
         """
         Helper method for patching 3rd party aggregates that do not yet support
-        the new way of subclassing.
+        the new way of subclassing. This method should be removed in 2.0
 
         add_to_query(query, alias, col, source, is_summary) will be defined on
         legacy aggregates which, in turn, instantiates the SQL implementation of
@@ -76,32 +82,30 @@ class Aggregate(WrappedExpression):
         By supplying a known alias, we can get the SQLAggregate out of the aggregates
         dict,  and use the sql_function and sql_template attributes to patch *this* aggregate.
         """
-        if not hasattr(self, 'add_to_query') or self.sql_function is not None:
+        if not hasattr(self, 'add_to_query') or self.function is not None:
             return
-
-        # raise a deprecation warning?
 
         placeholder_alias = "_XXXXXXXX_"
         self.add_to_query(query, placeholder_alias, None, None, None)
         sql_aggregate = query.aggregates.pop(placeholder_alias)
         if 'sql_function' not in self.extra and hasattr(sql_aggregate, 'sql_function'):
-            self.extra['sql_function'] = sql_aggregate.sql_function
+            self.extra['function'] = sql_aggregate.sql_function
 
         if hasattr(sql_aggregate, 'sql_template'):
-            self.extra['sql_template'] = sql_aggregate.sql_template
+            self.extra['template'] = sql_aggregate.sql_template
 
 
 class Avg(Aggregate):
     is_computed = True
-    sql_function = 'AVG'
+    function = 'AVG'
     name = 'Avg'
 
 
 class Count(Aggregate):
     is_ordinal = True
-    sql_function = 'COUNT'
+    function = 'COUNT'
     name = 'Count'
-    sql_template = '%(function)s(%(distinct)s%(field)s)'
+    template = '%(function)s(%(distinct)s%(expressions)s)'
 
     def __init__(self, expression, distinct=False, **extra):
         if expression == '*':
@@ -111,12 +115,12 @@ class Count(Aggregate):
 
 
 class Max(Aggregate):
-    sql_function = 'MAX'
+    function = 'MAX'
     name = 'Max'
 
 
 class Min(Aggregate):
-    sql_function = 'MIN'
+    function = 'MIN'
     name = 'Min'
 
 
@@ -125,12 +129,12 @@ class StdDev(Aggregate):
     name = 'StdDev'
 
     def __init__(self, expression, sample=False, **extra):
+        self.function = 'STDDEV_SAMP' if sample else 'STDDEV_POP'
         super(StdDev, self).__init__(expression, **extra)
-        self.sql_function = 'STDDEV_SAMP' if sample else 'STDDEV_POP'
 
 
 class Sum(Aggregate):
-    sql_function = 'SUM'
+    function = 'SUM'
     name = 'Sum'
 
 
@@ -139,5 +143,5 @@ class Variance(Aggregate):
     name = 'Variance'
 
     def __init__(self, expression, sample=False, **extra):
+        self.function = 'VAR_SAMP' if sample else 'VAR_POP'
         super(Variance, self).__init__(expression, **extra)
-        self.sql_function = 'VAR_SAMP' if sample else 'VAR_POP'

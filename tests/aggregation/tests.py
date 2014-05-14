@@ -837,9 +837,9 @@ class ComplexAggregateTestCase(TestCase):
             # test completely changing how the output is rendered
             def lower_case_function_override(self, qn, connection):
                 sql, params = qn.compile(self.expression)
-                substitutions = dict(function=self.sql_function.lower(), field=sql)
+                substitutions = dict(function=self.function.lower(), expressions=sql)
                 substitutions.update(self.extra)
-                return self.sql_template % substitutions, params
+                return self.template % substitutions, params
             setattr(Sum, 'as_' + connection.vendor, lower_case_function_override)
 
             qs = Book.objects.annotate(sums=Sum(F('rating') + F('pages') + F('price'),
@@ -850,7 +850,7 @@ class ComplexAggregateTestCase(TestCase):
 
             # test changing the dict and delegating
             def lower_case_function_super(self, qn, connection):
-                self.extra['sql_function'] = self.extra['sql_function'].lower()
+                self.extra['function'] = self.function.lower()
                 return super(Sum, self).as_sql(qn, connection)
             setattr(Sum, 'as_' + connection.vendor, lower_case_function_super)
 
@@ -862,9 +862,9 @@ class ComplexAggregateTestCase(TestCase):
 
             # test overriding all parts of the template
             def be_evil(self, qn, connection):
-                substitutions = dict(function='MAX', field='2')
+                substitutions = dict(function='MAX', expressions='2')
                 substitutions.update(self.extra)
-                return self.sql_template % substitutions, ()
+                return self.template % substitutions, ()
             setattr(Sum, 'as_' + connection.vendor, be_evil)
 
             qs = Book.objects.annotate(sums=Sum(F('rating') + F('pages') + F('price'),

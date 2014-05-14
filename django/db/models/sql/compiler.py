@@ -972,8 +972,7 @@ class SQLUpdateCompiler(SQLCompiler):
             else:
                 placeholder = '%s'
 
-            if hasattr(val, 'evaluate'):
-                # If val is a query expression, prepare it
+            if isinstance(val, ExpressionNode):
                 val.prepare(self.query, allow_joins=False)
             name = field.column
             if hasattr(val, 'as_sql'):

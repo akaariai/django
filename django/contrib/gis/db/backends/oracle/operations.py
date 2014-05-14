@@ -282,9 +282,9 @@ class OracleOperations(DatabaseOperations, BaseSpatialOperations):
         if agg_name == 'union':
             agg_name += 'agg'
         if agg.is_extent:
-            sql_template = '%(function)s(%(field)s)'
+            sql_template = '%(function)s(%(expressions)s)'
         else:
-            sql_template = '%(function)s(SDOAGGRTYPE(%(field)s,%(tolerance)s))'
+            sql_template = '%(function)s(SDOAGGRTYPE(%(expressions)s,%(tolerance)s))'
         sql_function = getattr(self, agg_name)
         return self.select % sql_template, sql_function
 

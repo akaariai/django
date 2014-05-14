@@ -14,14 +14,14 @@ import warnings
 from django.core.exceptions import FieldError
 from django.db import connections, DEFAULT_DB_ALIAS
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.expressions import ExpressionNode
+from django.db.models.expressions import ExpressionNode, Col
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.query_utils import Q, refs_aggregate
 from django.db.models.related import PathInfo
 from django.db.models.aggregates import Count
 from django.db.models.sql.constants import (QUERY_TERMS, ORDER_DIR, SINGLE,
         ORDER_PATTERN, JoinInfo, SelectInfo)
-from django.db.models.sql.datastructures import EmptyResultSet, Empty, MultiJoin, Col
+from django.db.models.sql.datastructures import EmptyResultSet, Empty, MultiJoin
 from django.db.models.sql.where import (WhereNode, Constraint, EverythingNode,
     ExtraWhere, AND, OR, EmptyWhere)
 from django.utils import six
@@ -1002,8 +1002,7 @@ class Query(object):
         """
         Adds a single annotation expression to the Query
         """
-        annotation.is_summary = is_summary
-        annotation.prepare(self)
+        annotation.prepare(self, summarise=is_summary)
         self.append_annotation_mask([alias])
         self.annotations[alias] = annotation
 
@@ -1160,9 +1159,9 @@ class Query(object):
             lookup_type = lookups[-1]
         else:
             assert(len(targets) == 1)
-            if hasattr(field, 'as_sql'):
+            if hasattr(targets[0], 'as_sql'):
                 # handle Expressions as annotations
-                col = field
+                col = targets[0]
             else:
                 col = Col(alias, targets[0], field)
             condition = self.build_lookup(lookups, col, value)
@@ -1669,10 +1668,11 @@ class Query(object):
         Converts the query to do count(...) or count(distinct(pk)) in order to
         get its size.
         """
+        summarise = False
         if not self.distinct:
             if not self.select:
                 count = Count('*')
-                count.is_summary = True
+                summarise = True
             else:
                 assert len(self.select) == 1, \
                     "Cannot add count col with multiple cols in 'select': %r" % self.select
@@ -1687,7 +1687,7 @@ class Query(object):
             if not self.select:
                 lookup = self.join((None, opts.db_table, None)), opts.pk.column
                 count = Count(lookup[1], distinct=True)
-                count.is_summary = True
+                summarise = True
             else:
                 # Because of SQL portability issues, multi-column, distinct
                 # counts need a sub-query -- see get_count() for details.
@@ -1704,7 +1704,7 @@ class Query(object):
 
         # Set only aggregate to be the count column.
         # Clear out the select cache to reflect the new unmasked annotations.
-        count.prepare(self)
+        count.prepare(self, summarise=summarise)
         self._annotations = {None: count}
         self.set_annotation_mask(None)
         self.group_by = None
