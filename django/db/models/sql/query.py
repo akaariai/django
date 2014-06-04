@@ -1002,7 +1002,7 @@ class Query(object):
         """
         Adds a single annotation expression to the Query
         """
-        annotation.prepare(self, summarise=is_summary)
+        annotation.prepare(self, summarize=is_summary)
         self.append_annotation_mask([alias])
         self.annotations[alias] = annotation
 
@@ -1668,11 +1668,11 @@ class Query(object):
         Converts the query to do count(...) or count(distinct(pk)) in order to
         get its size.
         """
-        summarise = False
+        summarize = False
         if not self.distinct:
             if not self.select:
                 count = Count('*')
-                summarise = True
+                summarize = True
             else:
                 assert len(self.select) == 1, \
                     "Cannot add count col with multiple cols in 'select': %r" % self.select
@@ -1687,7 +1687,7 @@ class Query(object):
             if not self.select:
                 lookup = self.join((None, opts.db_table, None)), opts.pk.column
                 count = Count(lookup[1], distinct=True)
-                summarise = True
+                summarize = True
             else:
                 # Because of SQL portability issues, multi-column, distinct
                 # counts need a sub-query -- see get_count() for details.
@@ -1704,7 +1704,7 @@ class Query(object):
 
         # Set only aggregate to be the count column.
         # Clear out the select cache to reflect the new unmasked annotations.
-        count.prepare(self, summarise=summarise)
+        count.prepare(self, summarize=summarize)
         self._annotations = {None: count}
         self.set_annotation_mask(None)
         self.group_by = None

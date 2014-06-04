@@ -15,7 +15,7 @@ __all__ = ['Aggregate', 'Avg', 'Count', 'Max', 'Min', 'StdDev', 'Sum', 'Variance
 
 warnings.warn(
     "django.db.models.sql.aggregates is deprecated. Use "
-    "django.db.models.aggregates only. ",
+    "django.db.models.aggregates instead.",
     RemovedInDjango20Warning, stacklevel=2)
 
 
@@ -52,7 +52,6 @@ class Aggregate(RegisterLookupMixin):
            type.
 
         """
-
         self.col = col
         self.source = source
         self.is_summary = is_summary

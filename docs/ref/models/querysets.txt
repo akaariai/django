@@ -222,7 +222,7 @@ computed over the objects that are related to the objects in the
 
 .. versionadded:: 1.8
 
-    Previous versions of Django only allowed Aggregation functions
+    Previous versions of Django only allowed aggregate functions
     to be used as annotations. It is now possible to annotate a model
     with all kinds of expressions.
 
@@ -2656,32 +2656,35 @@ how to write your own Aggregate functions, see the
 
 All aggregates have the following parameters in common:
 
-.. attribute:: expression
+``expression``
+~~~~~~~~~~~~~~
 
-    A string that references a field on the model, or
-    a :doc:`Query Expression </ref/models/expressions>`.
+A string that references a field on the model, or
+a :doc:`Query Expression </ref/models/expressions>`.
 
-    .. versionadded:: 1.8
+.. versionadded:: 1.8
 
-      Aggregate functions are now able to reference multiple fields in complex
-      computations.
+  Aggregate functions are now able to reference multiple fields in complex
+  computations.
 
-.. attribute:: output_type
+``output_type``
+~~~~~~~~~~~~~~~
 
-    Is an optional argument that represents the
-    :doc:`Model Field </ref/models/fields>` of the return
-    value.
+Is an optional argument that represents the
+:doc:`Model Field </ref/models/fields>` of the return
+value.
 
-    .. note::
+.. note::
 
-      When combining multiple field types, Django can only determine the
-      ``output_type`` if all fields are of the same type. Otherwise, you
-      must provide the ``output_type`` yourself.
+  When combining multiple field types, Django can only determine the
+  ``output_type`` if all fields are of the same type. Otherwise, you
+  must provide the ``output_type`` yourself.
 
-.. attribute:: **extra
+``**extra``
+~~~~~~~~~~~
 
-    Keyword arguments that can provide extra context for the SQL generated
-    by the aggregate.
+Keyword arguments that can provide extra context for the SQL generated
+by the aggregate.
 
 Avg
 ~~~

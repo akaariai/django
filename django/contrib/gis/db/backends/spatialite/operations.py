@@ -364,7 +364,7 @@ class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
                 op = tmp
                 geom = value
             # Calling the `as_sql` function on the operation instance.
-            return op.as_sql(geo_col, self.get_geom_placeholder(field, geom))
+            return op.as_sql(geo_col, self.get_geom_placeholder(field, geom, qn))
         elif lookup_type == 'isnull':
             # Handling 'isnull' lookup type
             return "%s IS %sNULL" % (geo_col, ('' if value else 'NOT ')), []

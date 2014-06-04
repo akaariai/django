@@ -23,8 +23,8 @@ class GeoAggregate(Aggregate):
         self.extra['function'] = self.extra.get('function', function)
         return super(GeoAggregate, self).as_sql(compiler, connection)
 
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarise=False):
-        self.is_summary = summarise
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        self.is_summary = summarize
         super(GeoAggregate, self).prepare(query, allow_joins, reuse)
         if not isinstance(self.expression.output_type, GeometryField):
             raise ValueError('Geospatial aggregates only allowed on geometry fields.')

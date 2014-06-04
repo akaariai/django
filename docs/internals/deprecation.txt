@@ -41,7 +41,7 @@ about each item can often be found in the release notes of two versions prior.
 
 * ``django.db.models.sql.query.aggregates`` property will be removed.
 
-* ``django.db.models.sql.query.add_aggregate`` function wll be removed.
+* ``django.db.models.sql.query.add_aggregate`` function will be removed.
 
 * ``django.db.models.sql.query.set_aggregate_mask`` function will be removed.
 

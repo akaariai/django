@@ -1,11 +1,8 @@
-.. _expressions:
-
-=====================
+=================
 Query Expressions
-=====================
+=================
 
-.. module:: django.db.models
-   :synopsis: Query Expressions
+.. currentmodule:: django.db.models
 
 Query expressions describe a value or a computation that can be used
 as part of a filter, an annotation, or an aggregation. There are a
@@ -17,13 +14,12 @@ Supported operations
 ~~~~~~~~~~~~~~~~~~~~
 
 As well as addition, Django supports subtraction, multiplication, division,
-and modulo arithmetic with Query Expressions, using Python constants,
+and modulo arithmetic with query expressions, using Python constants,
 variables, and even other expressions.
 
 .. versionadded:: 1.7
 
     The power operator ``**`` is also supported.
-
 
 Some examples
 ~~~~~~~~~~~~~
@@ -165,13 +161,7 @@ This is documented in :ref:`using F() expressions in queries
 =======================
 
 .. class:: Value(value, output_type=None)
-
-The ``value`` argument describes the value to be included in the expression,
-such as ``1``, ``True``, or ``None``. Django knows how to convert these python
-values into their corresponding database type.
-
-The ``output_type`` argument requires a model field type for django to load the
-database value into, like ``IntegerField()`` or ``BooleanField()``.
+.. versionadded: 1.8
 
 A ``Value()`` object represents the smallest possible component of an expression;
 a simple value. When you need to represent the value of an integer, boolean, or
@@ -181,34 +171,43 @@ When you write the expression ``F('field') + 1``, Django will implicitly wrap
 the ``1`` in a ``Value()``, allowing simple values to be used in more complex
 expressions.
 
+The ``value`` argument describes the value to be included in the expression,
+such as ``1``, ``True``, or ``None``. Django knows how to convert these Python
+values into their corresponding database type.
+
+The ``output_type`` argument requires a model field type for Django to load the
+database value into, like ``IntegerField()`` or ``BooleanField()``.
+
 .. _func-expressions:
 
 ``Func()`` expressions
 ======================
 
+.. versionadded:: 1.8
+
 .. class:: Func(*expressions, **extra)
 
-  .. attribute:: function
+    .. attribute:: function
 
-    A class-level attribute describing the function that will be
-    generated. Specifically, the ``function`` will be interpolated as the
-    ``function`` placeholder within ``template``. Default::
+        A class-level attribute describing the function that will be
+        generated. Specifically, the ``function`` will be interpolated as the
+        ``function`` placeholder within ``template``. Default::
 
-      function = None
+            function = None
 
-  .. attribute:: template
+    .. attribute:: template
 
-    A class-level attribute, as a format string, that describes the SQL that
-    is generated for this function. Default::
+        A class-level attribute, as a format string, that describes the SQL that
+        is generated for this function. Default::
 
-      template = '%(function)s(%(expressions)s)'
+            template = '%(function)s(%(expressions)s)'
 
-  .. attribute:: arg_joiner
+    .. attribute:: arg_joiner
 
-    A class-level attribute that denotes the character used to join the list
-    of ``expressions`` together. Default::
+        A class-level attribute that denotes the character used to join the list
+        of ``expressions`` together. Default::
 
-      arg_joiner = ', '
+            arg_joiner = ', '
 
 The ``*expressions`` is a list of positional expressions that the function
 will be applied to. The expressions will be converted to strings, joined
@@ -221,11 +220,7 @@ into the ``template`` attribute. Note that the keywords ``function`` and
 attributes respectively, without having to define your own class.
 ``output_type`` can be used to define the expected django return type.
 
-.. versionadded:: 1.8
-
-    User-defined functions can now be created and used.
-
-Func expressions are the base type of all expressions that involve database
+``Func()`` expressions are the base type of all expressions that involve database
 functions, like ``COALESCE``, ``LOWER``, or aggregates like ``SUM``. They
 can be used directly::
 
@@ -238,7 +233,7 @@ or they can be used to build a library of database functions::
 
     .annotate(field_lower=Lower(F('field')))
 
-But both cases will result in a queryset where each model is annoated with an
+But both cases will result in a queryset where each model is annotated with an
 extra attribute ``field_lower`` produced, roughly, from the following SQL::
 
     SELECT
@@ -250,20 +245,20 @@ extra attribute ``field_lower`` produced, roughly, from the following SQL::
 
 .. class:: Aggregate(expression, output_type=None, **extra)
 
-  .. attribute:: template
+      .. attribute:: template
 
-    A class-level attribute, as a format string, that describes the SQL that
-    is generated for this aggregate. Default::
+        A class-level attribute, as a format string, that describes the SQL that
+        is generated for this aggregate. Default::
 
-        template = '%(function)s( %(expressions)s )'
+            template = '%(function)s( %(expressions)s )'
 
-  .. attribute:: function
+      .. attribute:: function
 
-    A class-level attribute describing the aggregate function that will be
-    generated. Specifically, the ``function`` will be interpolated as the
-    ``function`` placeholder within ``template``. Default::
+        A class-level attribute describing the aggregate function that will be
+        generated. Specifically, the ``function`` will be interpolated as the
+        ``function`` placeholder within ``template``. Default::
 
-        function = None
+            function = None
 
 The ``expression`` argument can be the name of a field on the model, or another
 expression. It will be converted to a string and used as the ``expressions``
@@ -271,6 +266,10 @@ placeholder within the ``template``.
 
 The ``output_type`` argument requires a model field type for django to load the
 database value into, like ``IntegerField()`` or ``FloatField()``.
+
+.. versionchanged:: 1.8
+
+output_type is a new parameter.
 
 .. note::
     ``output_type`` is only required when Django is unable to determine what
@@ -311,7 +310,7 @@ SQL that is generated. See a brief example below::
 
         def __init__(self, expression, output_type=None, comment=None, **extra):
             if comment is None:
-                comment = 'Customise aggregate example'
+                comment = 'Customize aggregate example'
             extra.update(comment=comment)
             super(LowercaseSum, self).__init__(expression, output_type=output_type, **extra)
 
@@ -329,7 +328,7 @@ Expression API
 Query Expressions implement the :ref:`query expression API <query-expression>`,
 but also expose a number of extra methods and attributes listed below. All
 query expressions must derive from ``ExpressionNode()`` or a relevant
-sub-class.
+subclass.
 
 When a Query Expression wraps another expression, it is responsible for
 delegating the methods.
@@ -412,9 +411,9 @@ delegating the methods.
         field. Generally speaking, you will not need to override ``get_lookup()``
         or ``get_transform()``, and can use ``register_lookup()`` instead.
 
-    .. method:: prepare(query=None, allow_joins=True, reuse=None, summarise=False)
+    .. method:: prepare(query=None, allow_joins=True, reuse=None, summarize=False)
 
-        Provides the chance to do any preprocessing or validation of
+        Provides the chance to do any pre-processing or validation of
         the expression before being added to the query. ``prepare()``
         should also be called on any nested expressions.
 
@@ -423,9 +422,9 @@ delegating the methods.
         ``allow_joins`` is a boolean that allows or denies the use of
         joins in the query.
 
-        ``reuse`` is a set of reusable joins for multijoin scenarios.
+        ``reuse`` is a set of reusable joins for multi-join scenarios.
 
-        ``summarise`` is a boolean that, when ``True``, signals that the
+        ``summarize`` is a boolean that, when ``True``, signals that the
         query being computed is a terminal aggregate query.
 
     .. method:: relabeled_clone(change_map)
@@ -514,13 +513,13 @@ We do some basic validation on the parameters, including requiring at least
 ``output_type`` here so that Django knows what kind of model field to assign
 the eventual result to.
 
-Now we implement the preprocessing and validation. Since we do not have
+Now we implement the pre-processing and validation. Since we do not have
 any of our own validation at this point, we just delegate to the nested
 expressions::
 
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarise=False):
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
         for expression in self.expressions:
-            expression.prepare(query, allow_joins, reuse, summarise)
+            expression.prepare(query, allow_joins, reuse, summarize)
         return self
 
 Next, we write the method responsible for generating the SQL::

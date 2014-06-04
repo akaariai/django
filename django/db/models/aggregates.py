@@ -9,19 +9,13 @@ __all__ = [
     'Aggregate', 'Avg', 'Count', 'Max', 'Min', 'StdDev', 'Sum', 'Variance',
 ]
 
-integer_field = IntegerField()
-float_field = FloatField()
-
 
 class Aggregate(Func):
     is_aggregate = True
     name = None
 
     def __init__(self, expression, output_type=None, **extra):
-        super(Aggregate, self).__init__(
-            expression,
-            output_type=output_type,
-            **extra)
+        super(Aggregate, self).__init__(expression, output_type=output_type, **extra)
 
         self.expression = self.expressions[0]
         if self.expression.is_aggregate:
@@ -30,12 +24,12 @@ class Aggregate(Func):
 
         if self.source is None:
             if self.is_ordinal:
-                self.source = integer_field
+                self.source = IntegerField()
             elif self.is_computed:
-                self.source = float_field
+                self.source = FloatField()
 
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarise=False):
-        self.is_summary = summarise
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        self.is_summary = summarize
         if hasattr(self.expression, 'name'):  # simple lookup
             name = self.expression.name
             reffed, _ = self.expression.contains_aggregate(query.annotations)
@@ -51,7 +45,7 @@ class Aggregate(Func):
                     self.expression.col = (None, name)
                     return
         self._patch_aggregate(query)  # backward-compatibility support
-        super(Aggregate, self).prepare(query, allow_joins, reuse, summarise)
+        super(Aggregate, self).prepare(query, allow_joins, reuse, summarize)
 
     def refs_field(self, aggregate_types, field_types):
         return (isinstance(self, aggregate_types) and
@@ -80,7 +74,7 @@ class Aggregate(Func):
             query.aggregates[alias] = aggregate
 
         By supplying a known alias, we can get the SQLAggregate out of the aggregates
-        dict,  and use the sql_function and sql_template attributes to patch *this* aggregate.
+        dict, and use the sql_function and sql_template attributes to patch *this* aggregate.
         """
         if not hasattr(self, 'add_to_query') or self.function is not None:
             return
@@ -110,7 +104,7 @@ class Count(Aggregate):
     def __init__(self, expression, distinct=False, **extra):
         if expression == '*':
             expression = Value(expression)
-            expression.source = integer_field
+            expression.source = IntegerField()
         super(Count, self).__init__(expression, distinct='DISTINCT ' if distinct else '', **extra)
 
 

@@ -62,7 +62,7 @@ class ExpressionNode(object):
 
         ```
         def override_as_sql(self, compiler, connection):
-            print('override')
+            # custom logic
             return super(ExpressionNode, self).as_sql(compiler, connection)
         setattr(ExpressionNode, 'as_' + connection.vendor, override_as_sql)
         ```
@@ -80,7 +80,7 @@ class ExpressionNode(object):
         """
         raise NotImplementedError("Subclasses must implement as_sql()")
 
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarise=False):
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
         """
         Provides the chance to do any preprocessing or validation before being
         added to the query.
@@ -90,11 +90,11 @@ class ExpressionNode(object):
          * allow_joins: boolean allowing or denying use of joins
            in this query
          * reuse: a set of reusable joins for multijoins
-         * summarise: a terminal aggregate clause
+         * summarize: a terminal aggregate clause
 
         Returns: self
         """
-        self.is_summary = summarise
+        self.is_summary = summarize
         return self
 
     @property
@@ -255,10 +255,10 @@ class Expression(ExpressionNode):
         sql = connection.ops.combine_expression(self.connector, expressions)
         return expression_wrapper % sql, expression_params
 
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarise=False):
-        self.is_summary = summarise
-        self.lhs.prepare(query, allow_joins, reuse, summarise)
-        self.rhs.prepare(query, allow_joins, reuse, summarise)
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        self.is_summary = summarize
+        self.lhs.prepare(query, allow_joins, reuse, summarize)
+        self.rhs.prepare(query, allow_joins, reuse, summarize)
         return self
 
     @cached_property
@@ -352,8 +352,8 @@ class F(ExpressionNode):
         super(F, self).__init__()
         self.name = name
 
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarise=False):
-        self.is_summary = summarise
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        self.is_summary = summarize
         if not allow_joins and LOOKUP_SEP in self.name:
             raise FieldError("Joined field references are not permitted in this query")
         self.setup_cols(query, reuse)
@@ -433,10 +433,10 @@ class Func(ExpressionNode):
             for arg in expressions
         ]
 
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarise=False):
-        self.is_summary = summarise
+    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        self.is_summary = summarize
         for arg in self.expressions:
-            arg.prepare(query, allow_joins, reuse, summarise)
+            arg.prepare(query, allow_joins, reuse, summarize)
         return self
 
     def as_sql(self, compiler, connection):
