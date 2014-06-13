@@ -293,9 +293,7 @@ class Expression(ExpressionNode):
     def get_sources(self):
         if self.source is not None:
             return [self.source]
-        return [
-            source for node in (self.lhs, self.rhs)
-            for source in node.get_sources()]
+        return [self.lhs.output_type, self.rhs.output_type]
 
 
 class DateModifierNode(Expression):
@@ -443,9 +441,7 @@ class Func(ExpressionNode):
     def get_sources(self):
         if self.source is not None:
             return [self.source]
-        return [
-            source for arg in self.expressions
-            for source in arg.get_sources()]
+        return [arg.output_type for arg in self.expressions]
 
     def contains_aggregate(self, existing_aggregates):
         for arg in self.expressions:
