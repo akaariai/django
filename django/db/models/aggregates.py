@@ -2,7 +2,7 @@
 Classes to represent the definitions of aggregate functions.
 """
 from django.core.exceptions import FieldError
-from django.db.models.expressions import Func, Value
+from django.db.models.expressions import Func, Value, Ref
 from django.db.models.fields import IntegerField, FloatField
 
 __all__ = [
@@ -42,7 +42,7 @@ class Aggregate(Func):
                     self.source = annotation.output_type
                 if self.is_summary:
                     # force subquery relabel
-                    self.expression.col = (None, name)
+                    self.expression.col = Ref(name, annotation)
                     return
         self._patch_aggregate(query)  # backward-compatibility support
         super(Aggregate, self).prepare(query, allow_joins, reuse, summarize)

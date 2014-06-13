@@ -360,10 +360,7 @@ class F(ExpressionNode):
         return self
 
     def as_sql(self, compiler, connection):
-        if hasattr(self.col, 'as_sql'):
-            return compiler.compile(self.col)
-        qn = compiler
-        return '%s.%s' % (qn(self.col[0]), qn(self.col[1])), []
+        return compiler.compile(self.col)
 
     def setup_cols(self, query, reuse):
         if query is None:
@@ -391,12 +388,7 @@ class F(ExpressionNode):
                                                       [f.name for f in self.opts.fields]))
 
     def get_group_by_cols(self):
-        cols = []
-        if isinstance(self.col, tuple):
-            cols.append(self.col)
-        elif hasattr(self.col, 'get_group_by_cols'):
-            cols.extend(self.col.get_group_by_cols())
-        return cols
+        return self.col.get_group_by_cols()
 
     def get_sources(self):
         return [self.source] if self.source is not None else []
@@ -406,10 +398,7 @@ class F(ExpressionNode):
 
     def relabeled_clone(self, change_map):
         clone = copy.copy(self)
-        if hasattr(clone.col, 'relabeled_clone'):
-            clone.col = clone.col.relabeled_clone(change_map)
-        elif clone.col:
-            clone.col = (change_map.get(clone.col[0], clone.col[0]), clone.col[1])
+        clone.col = clone.col.relabeled_clone(change_map)
         return clone
 
 
@@ -501,7 +490,9 @@ class Value(ExpressionNode):
 
 
 class Col(ExpressionNode):
-    def __init__(self, alias, target, source):
+    def __init__(self, alias, target, source=None):
+        if source is None:
+            source = target
         super(Col, self).__init__(output_type=source)
         self.alias, self.target, self.source = alias, target, source
 
@@ -515,6 +506,25 @@ class Col(ExpressionNode):
         return [(self.alias, self.target.column)]
 
 
+class Ref(ExpressionNode):
+    """
+    Reference to column alias of the query. For example, Ref('sum_cost') in
+    qs.annotate(sum_cost=Sum('cost')) query.
+    """
+    def __init__(self, refs, source):
+        super(Ref, self).__init__(output_type=source)
+        self.refs, self.source = refs, source
+
+    def relabeled_clone(self, relabels):
+        return self
+
+    def as_sql(self, compiler, connection):
+        return "%s" % (compiler(self.refs)), []
+
+    def get_group_by_cols(self):
+        return [(None, self.refs)]
+
+
 class Date(ExpressionNode):
     """
     Add a date selection column.
@@ -526,15 +536,13 @@ class Date(ExpressionNode):
 
     def relabeled_clone(self, change_map):
         return self.__class__(
-            (change_map.get(self.col[0], self.col[0]), self.col[1]),
+            self.col.relabeled_clone(change_map),
             self.lookup_type)
 
     def as_sql(self, qn, connection):
-        if isinstance(self.col, (list, tuple)):
-            col = '%s.%s' % tuple(qn(c) for c in self.col)
-        else:
-            col = self.col
-        return connection.ops.date_trunc_sql(self.lookup_type, col), []
+        sql, params = self.col.as_sql(qn, connection)
+        assert not(params)
+        return connection.ops.date_trunc_sql(self.lookup_type, sql), []
 
 
 class DateTime(ExpressionNode):
@@ -549,13 +557,11 @@ class DateTime(ExpressionNode):
 
     def relabeled_clone(self, change_map):
         return self.__class__(
-            (change_map.get(self.col[0], self.col[0]), self.col[1]),
+            self.col.relabeled_clone(change_map),
             self.lookup_type,
             self.tzname)
 
     def as_sql(self, qn, connection):
-        if isinstance(self.col, (list, tuple)):
-            col = '%s.%s' % tuple(qn(c) for c in self.col)
-        else:
-            col = self.col
-        return connection.ops.datetime_trunc_sql(self.lookup_type, col, self.tzname)
+        sql, params = self.col.as_sql(qn, connection)
+        assert not(params)
+        return connection.ops.datetime_trunc_sql(self.lookup_type, sql, self.tzname)
