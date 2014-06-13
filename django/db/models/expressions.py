@@ -92,10 +92,11 @@ class ExpressionNode(object):
          * reuse: a set of reusable joins for multijoins
          * summarize: a terminal aggregate clause
 
-        Returns: self
+        Returns: a copy of self prepared for the query
         """
-        self.is_summary = summarize
-        return self
+        c = self.copy()
+        c.is_summary = summarize
+        return c
 
     @property
     def field(self):
@@ -103,6 +104,13 @@ class ExpressionNode(object):
 
     @cached_property
     def output_type(self):
+        ot = self._output_type
+        if ot is None:
+            raise FieldError("Cannot resolve expression type, unknown output_type")
+        return ot
+
+    @cached_property
+    def _output_type(self):
         self._resolve_source()
         return self.source
 
@@ -111,14 +119,14 @@ class ExpressionNode(object):
             sources = self.get_sources()
             num_sources = len(sources)
             if num_sources == 0:
-                raise FieldError("Cannot resolve expression type, unknown output_type")
+                self.source = None
             elif num_sources == 1:
                 self.source = sources[0]
             else:
                 # this could be smarter by allowing certain combinations
                 self.source = sources[0]
                 for source in sources:
-                    if not isinstance(self.source, source.__class__):
+                    if source is not None and not isinstance(self.source, source.__class__):
                         raise FieldError(
                             "Expression contains mixed types. You must set output_type")
 
@@ -129,7 +137,12 @@ class ExpressionNode(object):
         return self.output_type.get_transform(name)
 
     def relabeled_clone(self, change_map):
-        return copy.copy(self)
+        return self.copy()
+
+    def copy(self):
+        c = copy.copy(self)
+        c.copied = True
+        return c
 
     def contains_aggregate(self, existing_aggregates):
         return False, ()
@@ -256,15 +269,11 @@ class Expression(ExpressionNode):
         return expression_wrapper % sql, expression_params
 
     def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
-        self.is_summary = summarize
-        self.lhs.prepare(query, allow_joins, reuse, summarize)
-        self.rhs.prepare(query, allow_joins, reuse, summarize)
-        return self
-
-    @cached_property
-    def output_type(self):
-        self._resolve_source()
-        return self.source
+        c = self.copy()
+        c.is_summary = summarize
+        c.lhs = c.lhs.prepare(query, allow_joins, reuse, summarize)
+        c.rhs = c.rhs.prepare(query, allow_joins, reuse, summarize)
+        return c
 
     def relabeled_clone(self, change_map):
         clone = copy.copy(self)
@@ -293,7 +302,7 @@ class Expression(ExpressionNode):
     def get_sources(self):
         if self.source is not None:
             return [self.source]
-        return [self.lhs.output_type, self.rhs.output_type]
+        return [self.lhs._output_type, self.rhs._output_type]
 
 
 class DateModifierNode(Expression):
@@ -351,11 +360,12 @@ class F(ExpressionNode):
         self.name = name
 
     def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
-        self.is_summary = summarize
-        if not allow_joins and LOOKUP_SEP in self.name:
+        c = self.copy()
+        c.is_summary = summarize
+        if not allow_joins and LOOKUP_SEP in c.name:
             raise FieldError("Joined field references are not permitted in this query")
-        self.setup_cols(query, reuse)
-        return self
+        c.setup_cols(query, reuse)
+        return c
 
     def as_sql(self, compiler, connection):
         return compiler.compile(self.col)
@@ -422,10 +432,11 @@ class Func(ExpressionNode):
         ]
 
     def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
-        self.is_summary = summarize
-        for arg in self.expressions:
-            arg.prepare(query, allow_joins, reuse, summarize)
-        return self
+        c = self.copy()
+        c.is_summary = summarize
+        for pos, arg in enumerate(c.expressions):
+            c.expressions[pos] = arg.prepare(query, allow_joins, reuse, summarize)
+        return c
 
     def as_sql(self, compiler, connection):
         sql_parts = []
@@ -442,7 +453,7 @@ class Func(ExpressionNode):
     def get_sources(self):
         if self.source is not None:
             return [self.source]
-        return [arg.output_type for arg in self.expressions]
+        return [arg._output_type for arg in self.expressions]
 
     def contains_aggregate(self, existing_aggregates):
         for arg in self.expressions:
@@ -516,7 +527,7 @@ class Ref(ExpressionNode):
         return self
 
     def as_sql(self, compiler, connection):
-        return "%s" % (compiler(self.refs)), []
+        return "%s" % compiler(self.refs), []
 
     def get_group_by_cols(self):
         return [(None, self.refs)]

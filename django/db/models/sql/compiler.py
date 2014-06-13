@@ -973,7 +973,7 @@ class SQLUpdateCompiler(SQLCompiler):
                 placeholder = '%s'
 
             if isinstance(val, ExpressionNode):
-                val.prepare(self.query, allow_joins=False)
+                val = val.prepare(self.query, allow_joins=False)
             name = field.column
             if hasattr(val, 'as_sql'):
                 sql, params = self.compile(val)

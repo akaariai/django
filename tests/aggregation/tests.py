@@ -836,7 +836,7 @@ class ComplexAggregateTestCase(TestCase):
         try:
             # test completely changing how the output is rendered
             def lower_case_function_override(self, qn, connection):
-                sql, params = qn.compile(self.expression)
+                sql, params = qn.compile(self.expressions[0])
                 substitutions = dict(function=self.function.lower(), expressions=sql)
                 substitutions.update(self.extra)
                 return self.template % substitutions, params

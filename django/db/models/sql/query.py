@@ -397,7 +397,6 @@ class Query(object):
         query.select_for_update = False
         query.select_related = False
         query.related_select_cols = []
-
         result = query.get_compiler(using).execute_sql(SINGLE)
         if result is None:
             result = [None for q in query.annotation_select.items()]
@@ -1002,7 +1001,7 @@ class Query(object):
         """
         Adds a single annotation expression to the Query
         """
-        annotation.prepare(self, summarize=is_summary)
+        annotation = annotation.prepare(self, summarize=is_summary)
         self.append_annotation_mask([alias])
         self.annotations[alias] = annotation
 
@@ -1024,7 +1023,7 @@ class Query(object):
             value = value()
         elif isinstance(value, ExpressionNode):
             # If value is a query expression, prepare it
-            value.prepare(self, reuse=can_reuse)
+            value = value.prepare(self, reuse=can_reuse)
         if hasattr(value, 'query') and hasattr(value.query, 'bump_prefix'):
             value = value._clone()
             value.query.bump_prefix(self)
@@ -1704,7 +1703,7 @@ class Query(object):
 
         # Set only aggregate to be the count column.
         # Clear out the select cache to reflect the new unmasked annotations.
-        count.prepare(self, summarize=summarize)
+        count = count.prepare(self, summarize=summarize)
         self._annotations = {None: count}
         self.set_annotation_mask(None)
         self.group_by = None

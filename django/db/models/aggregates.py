@@ -16,9 +16,8 @@ class Aggregate(Func):
 
     def __init__(self, expression, output_type=None, **extra):
         super(Aggregate, self).__init__(expression, output_type=output_type, **extra)
-
-        self.expression = self.expressions[0]
-        if self.expression.is_aggregate:
+        assert len(self.expressions) == 1
+        if self.expressions[0].is_aggregate:
             raise FieldError("Cannot compute %s(%s(..)): aggregates cannot be nested" % (
                 self.name, expression.name))
 
@@ -29,32 +28,34 @@ class Aggregate(Func):
                 self.source = FloatField()
 
     def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
-        self.is_summary = summarize
-        if hasattr(self.expression, 'name'):  # simple lookup
-            name = self.expression.name
-            reffed, _ = self.expression.contains_aggregate(query.annotations)
-            if reffed and not self.is_summary:
+        c = super(Aggregate, self).prepare(query, allow_joins, reuse, summarize)
+        if hasattr(c.expressions[0], 'name'):  # simple lookup
+            c.expressions[0] = c.expressions[0].copy()
+            expr = c.expressions[0]
+            name = expr.name
+            reffed, _ = expr.contains_aggregate(query.annotations)
+            if reffed and not c.is_summary:
                 raise FieldError("Cannot compute %s('%s'): '%s' is an aggregate" % (
-                    self.name, name, name))
+                    c.name, name, name))
             if name in query.annotations:
                 annotation = query.annotations[name]
-                if self.source is None:
-                    self.source = annotation.output_type
-                if self.is_summary:
+                if c.source is None:
+                    c.source = annotation.output_type
+                if c.is_summary:
                     # force subquery relabel
-                    self.expression.col = Ref(name, annotation)
-                    return
-        self._patch_aggregate(query)  # backward-compatibility support
-        super(Aggregate, self).prepare(query, allow_joins, reuse, summarize)
+                    expr.col = Ref(name, annotation)
+                    return c
+        c._patch_aggregate(query)  # backward-compatibility support
+        return c
 
     def refs_field(self, aggregate_types, field_types):
         return (isinstance(self, aggregate_types) and
-                isinstance(self.expression.source, field_types))
+                isinstance(self.expressions[0].source, field_types))
 
     @property
     def default_alias(self):
-        if hasattr(self.expression, 'name'):
-            return '%s__%s' % (self.expression.name, self.name.lower())
+        if hasattr(self.expressions[0], 'name'):
+            return '%s__%s' % (self.expressions[0].name, self.name.lower())
         raise TypeError("Complex expressions require an alias")
 
     def _patch_aggregate(self, query):
