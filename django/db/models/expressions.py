@@ -373,13 +373,14 @@ class F(ExpressionNode):
                     query.get_initial_alias(), reuse)
                 self._used_joins = join_list
                 targets, _, join_list = query.trim_joins(sources, join_list, path)
+                if len(targets) > 1:
+                    raise FieldError("Referencing multicolumn fields in expressions "
+                                     "isn't supported")
                 if reuse is not None:
                     reuse.update(join_list)
-                for t in targets:
-                    source = self.source if self.source is not None else sources[0]
-                    self.col = Col(join_list[-1], t, source)
-                if self.source is None:
-                    self.source = sources[0]
+                assert self.source is None
+                self.source = sources[0]
+                self.col = Col(join_list[-1], targets[0], sources[0])
             except fields.FieldDoesNotExist:
                 raise FieldError("Cannot resolve keyword %r into field. "
                                  "Choices are: %s" % (self.name,
