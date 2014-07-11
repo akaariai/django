@@ -260,7 +260,7 @@ class QuerySet(object):
                     load_fields.append(field.name)
 
         skip = None
-        if load_fields and not fill_cache:
+        if load_fields:
             # Some fields have been deferred, so we have to initialize
             # via keyword arguments.
             skip = set()
@@ -282,7 +282,7 @@ class QuerySet(object):
         aggregate_start = index_start + len(init_list)
 
         if fill_cache:
-            klass_info = get_klass_info(model_cls, max_depth=max_depth,
+            klass_info = get_klass_info(self.model, max_depth=max_depth,
                                         requested=requested, only_load=only_load)
         for row in compiler.results_iter():
             if fill_cache:
