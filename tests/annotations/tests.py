@@ -5,11 +5,11 @@ from decimal import Decimal
 from django.db.models import (
     Sum, Count,
     F, Value, Func,
-    IntegerField, BooleanField, CharField, DecimalField)
+    IntegerField, BooleanField, CharField)
 from django.db.models.fields import FieldDoesNotExist
 from django.test import TestCase
 
-from .models import Author, Publisher, Book, Store, DepartmentStore, Company, Employee  # NOQA
+from .models import Author, Book, Store, DepartmentStore, Company, Employee
 
 
 class NonAggregateAnnotationTestCase(TestCase):
@@ -166,8 +166,11 @@ class NonAggregateAnnotationTestCase(TestCase):
         Employee.objects.create(id=2, first_name='Buffy', manager=False, last_name='Summers',
                                 store=store, age=18, salary=Decimal(40000.00))
 
-        qs = Employee.objects.extra(select={'random_value': '42'}).select_related('store'
-            ).annotate(annotated_value=Value(17, output_field=IntegerField()))
+        qs = Employee.objects.extra(
+            select={'random_value': '42'}
+        ).select_related('store').annotate(
+            annotated_value=Value(17, output_field=IntegerField())
+        )
 
         rows = [
             (1, 'Max', True, 42, 'Paine', 23, Decimal(50000.00), store.name, 17),
@@ -187,8 +190,11 @@ class NonAggregateAnnotationTestCase(TestCase):
         Employee.objects.create(id=2, first_name='Buffy', manager=False, last_name='Summers',
                                 store=store, age=18, salary=Decimal(40000.00))
 
-        qs = Employee.objects.extra(select={'random_value': '42'}).select_related('store'
-            ).annotate(annotated_value=Value(17, output_field=IntegerField()))
+        qs = Employee.objects.extra(
+            select={'random_value': '42'}
+        ).select_related('store').annotate(
+            annotated_value=Value(17, output_field=IntegerField())
+        )
 
         rows = [
             (1, 'Max', True, 42, 'Paine', 23, Decimal(50000.00), store.name, 17),

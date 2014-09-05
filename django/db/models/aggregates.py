@@ -64,12 +64,12 @@ class Aggregate(Func):
 
         def add_to_query(self, query, alias, col, source, is_summary):
             klass = SQLImplementationAggregate
-            aggregate = klass(
-                col, source=source, is_summary=is_summary, **self.extra)
+            aggregate = klass(col, source=source, is_summary=is_summary, **self.extra)
             query.aggregates[alias] = aggregate
 
-        By supplying a known alias, we can get the SQLAggregate out of the aggregates
-        dict, and use the sql_function and sql_template attributes to patch *this* aggregate.
+        By supplying a known alias, we can get the SQLAggregate out of the
+        aggregates dict, and use the sql_function and sql_template attributes
+        to patch *this* aggregate.
         """
         if not hasattr(self, 'add_to_query') or self.function is not None:
             return

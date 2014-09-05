@@ -6,8 +6,6 @@ from django.contrib.gis.db.models.fields import GeometryField
 from django.contrib.gis.db.models.lookups import GISLookup
 from django.contrib.gis.db.models import aggregates as gis_aggregates
 from django.contrib.gis.db.models.sql.conversion import GeomField
-from django.contrib.gis.geometry.backend import Geometry
-from django.contrib.gis.measure import Area, Distance
 
 
 class GeoQuery(sql.Query):

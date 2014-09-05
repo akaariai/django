@@ -8,7 +8,6 @@ class GeoAggregate(Aggregate):
     template = None
     function = None
     is_extent = False
-    conversion_class = None  # TODO: is this still used?
 
     def as_sql(self, compiler, connection):
         if connection.ops.oracle:

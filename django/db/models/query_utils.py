@@ -222,6 +222,7 @@ def deferred_class_factory(model, attrs):
 # fields.
 deferred_class_factory.__safe_for_unpickling__ = True
 
+
 def refs_aggregate(lookup_parts, aggregates):
     """
     A little helper method to check if the lookup_parts contains references

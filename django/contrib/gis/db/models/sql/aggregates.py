@@ -16,9 +16,6 @@ class GeoAggregate(Aggregate):
     # Default SQL template for spatial aggregates.
     sql_template = '%(function)s(%(expressions)s)'
 
-    # Conversion class, if necessary.
-    conversion_class = None
-
     # Flags for indicating the type of the aggregate.
     is_extent = False
 

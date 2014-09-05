@@ -1340,11 +1340,11 @@ class Query(object):
             if name == 'pk':
                 name = opts.pk.name
             try:
-                field, model, direct, m2m = opts.get_field_by_name(name)
+                field, model, _, _ = opts.get_field_by_name(name)
             except FieldDoesNotExist:
                 # is it an annotation?
                 if self._annotations and name in self._annotations:
-                    field, model, direct, m2m = self._annotations[name], None, None, None
+                    field, model = self._annotations[name], None
                     if not field.is_aggregate:
                         # Local non-relational field.
                         final_field = field

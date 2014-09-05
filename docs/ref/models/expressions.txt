@@ -4,11 +4,11 @@ Query Expressions
 
 .. currentmodule:: django.db.models
 
-Query expressions describe a value or a computation that can be used
-as part of a filter, an annotation, or an aggregation. There are a
-number of built-in expressions that can be used to help you write
-queries which are documented below. Expressions can be combined, or
-in some cases nested, to form more complex computations.
+Query expressions describe a value or a computation that can be used as part of
+a filter, an annotation, or an aggregation. There are a number of built-in
+expressions that can be used to help you write queries which are documented
+below. Expressions can be combined, or in some cases nested, to form more
+complex computations.
 
 Supported operations
 ~~~~~~~~~~~~~~~~~~~~

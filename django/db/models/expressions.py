@@ -56,7 +56,7 @@ class ExpressionNode(object):
         in the current query.
 
         Different backends can provide their own implementation, by
-        providing an `as_{vendor}` method, and patching the Expression:
+        providing an `as_{vendor}` method and patching the Expression:
 
         ```
         def override_as_sql(self, compiler, connection):
@@ -68,9 +68,9 @@ class ExpressionNode(object):
         Arguments:
          * compiler: the query compiler responsible for generating the query.
            Must have a compile method, returning a (sql, [params]) tuple.
-           Calling compiler(value) will return a quoted `value`
+           Calling compiler(value) will return a quoted `value`.
 
-         * connection: the database connection used for the current query
+         * connection: the database connection used for the current query.
 
         Returns: (sql, params)
           Where `sql` is a string containing ordered sql parameters to be
@@ -366,7 +366,6 @@ class F(ExpressionNode):
     """
     An expression representing the value of the given field.
     """
-
     def __init__(self, name):
         """
         Arguments:
@@ -496,15 +495,14 @@ class Value(ExpressionNode):
     """
     Represents a wrapped value as a node within an expression
     """
-
     def __init__(self, value, output_field=None):
         """
         Arguments:
          * value: the value this expression represents. The value will be
-           added into the sql parameter list and properly quoted
+           added into the sql parameter list and properly quoted.
 
          * output_field: the Model Field type that this expression will
-           return, such as IntegerField() or CharField()
+           return, such as IntegerField() or CharField().
         """
         super(Value, self).__init__(output_field=output_field)
         self.value = value
