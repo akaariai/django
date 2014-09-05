@@ -42,15 +42,15 @@ about each item can often be found in the release notes of two versions prior.
 
 * ``django.contrib.gis.db.models.sql.aggregates`` module will be removed.
 
-* ``django.db.models.sql.query.aggregates`` property will be removed.
+* ``django.db.models.sql.query.Query.aggregates`` property will be removed.
 
-* ``django.db.models.sql.query.add_aggregate`` function will be removed.
+* ``django.db.models.sql.query.Query.add_aggregate`` method will be removed.
 
-* ``django.db.models.sql.query.set_aggregate_mask`` function will be removed.
+* ``django.db.models.sql.query.Query.set_aggregate_mask`` method will be removed.
 
-* ``django.db.models.sql.query.append_aggregate_mask`` function will be removed.
+* ``django.db.models.sql.query.Query.append_aggregate_mask`` method will be removed.
 
-* ``django.db.models.sql.query.aggregate_select`` property will be removed.
+* ``django.db.models.sql.query.Query.aggregate_select`` property will be removed.
 
 * ``django.template.resolve_variable`` will be removed.
 

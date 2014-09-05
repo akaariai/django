@@ -11,7 +11,9 @@ from django.db.models import (
     Avg, Sum, Count, Max, Min,
     Aggregate, F, Value,
     IntegerField, FloatField, DecimalField)
-from django.db.models.sql import aggregates as sql_aggregates
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    from django.db.models.sql import aggregates as sql_aggregates
 from django.test import TestCase
 from django.test.utils import Approximate
 from django.test.utils import CaptureQueriesContext
