@@ -2,6 +2,7 @@ import copy
 import datetime
 
 from django.core.exceptions import FieldError
+from django.db.backends import utils as backend_utils
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models import fields
 from django.db.models.query_utils import refs_aggregate
@@ -32,9 +33,6 @@ class ExpressionNode(object):
     # aggregate specific fields
     is_aggregate = False
     is_summary = False
-    # resolve_aggregate uses below to coerce
-    is_ordinal = False
-    is_computed = False
 
     def __init__(self, output_field=None):
         self.col = None
@@ -129,6 +127,24 @@ class ExpressionNode(object):
                     if source is not None and not isinstance(self.source, source.__class__):
                         raise FieldError(
                             "Expression contains mixed types. You must set output_field")
+
+    def convert_value(self, value, connection):
+        """
+        Expressions provide their own converters because users have the option
+        of manually specifying the output_field which may be a different type
+        from the one the database returns.
+        """
+        field = self.output_field
+        internal_type = field.get_internal_type()
+        if value is None:
+            return value
+        elif internal_type == 'FloatField':
+            return float(value)
+        elif internal_type.endswith('IntegerField'):
+            return int(value)
+        elif internal_type == 'DecimalField':
+            return backend_utils.typecast_decimal(field.format_number(value))
+        return value
 
     def get_lookup(self, lookup):
         return self.output_field.get_lookup(lookup)

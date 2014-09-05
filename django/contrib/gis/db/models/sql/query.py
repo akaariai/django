@@ -54,15 +54,8 @@ class GeoQuery(sql.Query):
         GeoAggregate objects.
         """
         if isinstance(aggregate, self.aggregates_module.GeoAggregate):
-            if aggregate.is_extent:
-                if aggregate.is_extent == '3D':
-                    return connection.ops.convert_extent3d(value)
-                else:
-                    return connection.ops.convert_extent(value)
-            else:
-                return connection.ops.convert_geom(value, aggregate.output_field)
-        else:
-            return super(GeoQuery, self).resolve_aggregate(value, aggregate, connection)
+            return aggregate.convert_value(value, connection)
+        return super(GeoQuery, self).resolve_aggregate(value, aggregate, connection)
 
     # Private API utilities, subject to change.
     def _geo_field(self, field_name=None):

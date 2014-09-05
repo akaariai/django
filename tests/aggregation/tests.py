@@ -752,7 +752,7 @@ class ComplexAggregateTestCase(TestCase):
         self.assertEqual(b2.sums, 383.69)
 
         b3 = Book.objects.annotate(sums=Sum(F('rating') + F('pages') + F('price'),
-            output_field=DecimalField(decimal_places=2))).get(pk=4)
+            output_field=DecimalField(max_digits=6, decimal_places=2))).get(pk=4)
         self.assertEqual(b3.sums, Decimal("383.69"))
 
     def test_complex_aggregations_require_kwarg(self):

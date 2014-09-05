@@ -725,10 +725,9 @@ class SQLCompiler(object):
                     # related_select_cols isn't populated until
                     # execute_sql() has been called.
 
-                    # We also include types of fields of related models that
-                    # will be included via select_related() for the benefit
-                    # of MySQL/MySQLdb when boolean fields are involved
-                    # (#15040).
+                    # If the field was deferred, exclude it from being passed
+                    # into `get_converters` because it wasn't selected.
+                    only_load = self.deferred_to_columns()
 
                     # This code duplicates the logic for the order of fields
                     # found in get_columns(). It would be nice to clean this up.
@@ -738,34 +737,45 @@ class SQLCompiler(object):
                         fields = self.query.get_meta().concrete_fields
                     else:
                         fields = []
-                    # annotations come before the related cols
-                    fields = fields + [
-                        anno.output_field for alias, anno in self.query.annotation_select.items()]
-                    fields = fields + [f.field for f in self.query.related_select_cols]
 
-                    # If the field was deferred, exclude it from being passed
-                    # into `get_converters` because it wasn't selected.
-                    only_load = self.deferred_to_columns()
                     if only_load:
-                        fields = [f for f in fields if
-                                  not hasattr(f, 'model') or  # annotation
-                                  f.model._meta.db_table not in only_load or
-                                  f.column in only_load[f.model._meta.db_table]
-                                  ]
+                        # strip deferred fields
+                        fields = [
+                            f for f in fields if
+                            f.model._meta.db_table not in only_load or
+                            f.column in only_load[f.model._meta.db_table]
+                        ]
+
+                    # annotations come before the related cols
+                    if has_annotation_select:
+                        # extra is always at the start of the field list
+                        prepended_cols = len(self.query.extra_select)
+                        annotation_start = len(fields) + prepended_cols
+                        fields = fields + [
+                            anno.output_field for alias, anno in self.query.annotation_select.items()]
+                        annotation_end = len(fields) + prepended_cols
+
+                    # add related fields
+                    fields = fields + [
+                        # strip deferred
+                        f.field for f in self.query.related_select_cols if
+                        f.field.model._meta.db_table not in only_load or
+                        f.field.column in only_load[f.field.model._meta.db_table]
+                    ]
+
                     converters = self.get_converters(fields)
+                    if has_annotation_select:
+                        for (alias, annotation), position in zip(
+                                self.query.annotation_select.items(),
+                                range(annotation_start, annotation_end + 1)):
+                            if position in converters:
+                                # annotation conversions always run first
+                                converters[position][1].insert(0, annotation.convert_value)
+                            else:
+                                converters[position] = ([], [annotation.convert_value], annotation.output_field)
+
                 if converters:
                     row = self.apply_converters(row, converters)
-
-                if has_annotation_select:
-                    loaded_fields = self.query.get_loaded_field_names().get(self.query.model, set()) or self.query.select
-                    annotation_start = len(self.query.extra_select) + len(loaded_fields)
-                    annotation_end = annotation_start + len(self.query.annotation_select)
-                    row = tuple(row[:annotation_start]) + tuple(
-                        self.query.resolve_aggregate(value, annotation, self.connection)
-                        for (alias, annotation), value
-                        in zip(self.query.annotation_select.items(), row[annotation_start:annotation_end])
-                    ) + tuple(row[annotation_end:])
-
                 yield row
 
     def has_results(self):

@@ -1,5 +1,5 @@
 from django.db.models.aggregates import Aggregate
-from django.contrib.gis.db.models.fields import GeometryField
+from django.contrib.gis.db.models.fields import GeometryField, ExtentField
 
 __all__ = ['Collect', 'Extent', 'Extent3D', 'MakeLine', 'Union']
 
@@ -29,6 +29,14 @@ class GeoAggregate(Aggregate):
             raise ValueError('Geospatial aggregates only allowed on geometry fields.')
         return c
 
+    def convert_value(self, value, connection):
+        if self.is_extent:
+            if self.is_extent == '3D':
+                return connection.ops.convert_extent3d(value)
+            else:
+                return connection.ops.convert_extent(value)
+        return connection.ops.convert_geom(value, self.output_field)
+
 
 class Collect(GeoAggregate):
     name = 'Collect'
@@ -38,10 +46,22 @@ class Extent(GeoAggregate):
     name = 'Extent'
     is_extent = '2D'
 
+    def __init__(self, expression, **extra):
+        super(Extent, self).__init__(expression, output_field=ExtentField(), **extra)
+
+    def convert_value(self, value, connection):
+        return connection.ops.convert_extent(value)
+
 
 class Extent3D(GeoAggregate):
     name = 'Extent3D'
     is_extent = '3D'
+
+    def __init__(self, expression, **extra):
+        super(Extent3D, self).__init__(expression, output_field=ExtentField(), **extra)
+
+    def convert_value(self, value, connection):
+        return connection.ops.convert_extent3d(value)
 
 
 class MakeLine(GeoAggregate):

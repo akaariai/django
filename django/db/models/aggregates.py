@@ -21,12 +21,6 @@ class Aggregate(Func):
             raise FieldError("Cannot compute %s(%s(..)): aggregates cannot be nested" % (
                 self.name, expression.name))
 
-        if self.source is None:
-            if self.is_ordinal:
-                self.source = IntegerField()
-            elif self.is_computed:
-                self.source = FloatField()
-
     def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
         c = super(Aggregate, self).prepare(query, allow_joins, reuse, summarize)
         if hasattr(c.expressions[0], 'name'):  # simple lookup
@@ -91,13 +85,19 @@ class Aggregate(Func):
 
 
 class Avg(Aggregate):
-    is_computed = True
     function = 'AVG'
     name = 'Avg'
 
+    def __init__(self, expression, **extra):
+        super(Avg, self).__init__(expression, output_field=FloatField(), **extra)
+
+    def convert_value(self, value, connection):
+        if value is None:
+            return value
+        return float(value)
+
 
 class Count(Aggregate):
-    is_ordinal = True
     function = 'COUNT'
     name = 'Count'
     template = '%(function)s(%(distinct)s%(expressions)s)'
@@ -106,7 +106,13 @@ class Count(Aggregate):
         if expression == '*':
             expression = Value(expression)
             expression.source = IntegerField()
-        super(Count, self).__init__(expression, distinct='DISTINCT ' if distinct else '', **extra)
+        super(Count, self).__init__(
+            expression, distinct='DISTINCT ' if distinct else '', output_field=IntegerField(), **extra)
+
+    def convert_value(self, value, connection):
+        if value is None:
+            return 0
+        return int(value)
 
 
 class Max(Aggregate):
@@ -120,12 +126,16 @@ class Min(Aggregate):
 
 
 class StdDev(Aggregate):
-    is_computed = True
     name = 'StdDev'
 
     def __init__(self, expression, sample=False, **extra):
         self.function = 'STDDEV_SAMP' if sample else 'STDDEV_POP'
-        super(StdDev, self).__init__(expression, **extra)
+        super(StdDev, self).__init__(expression, output_field=FloatField(), **extra)
+
+    def convert_value(self, value, connection):
+        if value is None:
+            return value
+        return float(value)
 
 
 class Sum(Aggregate):
@@ -134,9 +144,13 @@ class Sum(Aggregate):
 
 
 class Variance(Aggregate):
-    is_computed = True
     name = 'Variance'
 
     def __init__(self, expression, sample=False, **extra):
         self.function = 'VAR_SAMP' if sample else 'VAR_POP'
-        super(Variance, self).__init__(expression, **extra)
+        super(Variance, self).__init__(expression, output_field=FloatField(), **extra)
+
+    def convert_value(self, value, connection):
+        if value is None:
+            return value
+        return float(value)

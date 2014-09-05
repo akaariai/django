@@ -154,8 +154,7 @@ class QuerySet(object):
             2. sql/compiler.results_iter()
                - Returns one row at time. At this point the rows are still just
                  tuples. In some cases the return values are converted to
-                 Python values at this location (see resolve_columns(),
-                 resolve_aggregate()).
+                 Python values at this location.
             3. self.iterator()
                - Responsible for turning the rows into model objects.
         """

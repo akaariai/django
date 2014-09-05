@@ -341,17 +341,6 @@ delegating the methods.
         is an aggregate and a ``GROUP BY`` clause needs to be added to the
         query.
 
-    .. attribute:: is_ordinal
-
-        A class-level attribute that is short-hand for specifying the
-        ``output_field`` as an ``IntegerField()`` for aggregates. Will
-        ensure that any ``NULLS`` are converted to ``0``.
-
-    .. attribute:: is_computed
-
-        A class-level attribute that is short-hand for specifying the
-        ``output_field`` as a ``FloatField()`` for aggregates.
-
     .. attribute:: col
 
         If the expression resolves to one of the ``Column`` types, it

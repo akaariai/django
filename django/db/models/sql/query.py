@@ -303,33 +303,15 @@ class Query(object):
             obj._setup_query()
         return obj
 
-    def resolve_aggregate(self, value, aggregate, connection):
+    def resolve_aggregate(self, value, annotation, connection):
         """Resolve the value of aggregates returned by the database to
         consistent (and reasonable) types.
 
         This is required because of the predisposition of certain backends
         to return Decimal and long types when they are not needed.
         """
-        if value is None:
-            if aggregate.is_ordinal:
-                return 0
-            # Return None as-is
-            return value
-        elif aggregate.is_ordinal:
-            # Any ordinal aggregate (e.g., count) returns an int
-            return int(value)
-        elif aggregate.is_computed:
-            # Any computed aggregate (e.g., avg) returns a float
-            return float(value)
-        else:
-            # Return value depends on the type of the field being processed.
-            backend_converters = connection.ops.get_db_converters(aggregate.field.get_internal_type())
-            field_converters = aggregate.field.get_db_converters(connection)
-            for converter in backend_converters:
-                value = converter(value, aggregate.field)
-            for converter in field_converters:
-                value = converter(value, connection)
-            return value
+        # TODO: raise deprecation warning for this method, or just leave it as a proxy?
+        return annotation.convert_value(value, annotation.output_field)
 
     def get_aggregation(self, using, force_subq=False):
         """
@@ -389,12 +371,22 @@ class Query(object):
         query.select_for_update = False
         query.select_related = False
         query.related_select_cols = []
-        result = query.get_compiler(using).execute_sql(SINGLE)
+        compiler = query.get_compiler(using)
+        result = compiler.execute_sql(SINGLE)
         if result is None:
             result = [None for q in query.annotation_select.items()]
 
+        fields = [annotation.output_field for alias, annotation in query.annotation_select.items()]
+        converters = compiler.get_converters(fields)
+        for position, (alias, annotation) in enumerate(query.annotation_select.items()):
+            if position in converters:
+                converters[position][1].insert(0, annotation.convert_value)
+            else:
+                converters[position] = ([], [annotation.convert_value], annotation.output_field)
+        result = compiler.apply_converters(result, converters)
+
         return dict(
-            (alias, self.resolve_aggregate(val, annotation, connection=connections[using]))
+            (alias, val)
             for (alias, annotation), val
             in zip(query.annotation_select.items(), result)
         )

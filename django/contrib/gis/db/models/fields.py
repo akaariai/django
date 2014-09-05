@@ -337,3 +337,15 @@ class GeometryCollectionField(GeometryField):
     geom_type = 'GEOMETRYCOLLECTION'
     form_class = forms.GeometryCollectionField
     description = _("Geometry collection")
+
+
+class ExtentField(Field):
+    "Used as a return value from an extent aggregate"
+
+    description = _("Extent Aggregate Field")
+
+    def __init__(self, *args, **kwargs):
+        super(ExtentField, self).__init__(*args, **kwargs)
+
+    def get_internal_type(self):
+        return "ExtentField"
