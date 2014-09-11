@@ -333,9 +333,9 @@ class QuerySet(object):
         query = self.query.clone()
         force_subq = query.low_mark != 0 or query.high_mark is not None
         for (alias, aggregate_expr) in kwargs.items():
-            if not aggregate_expr.is_aggregate:
-                raise TypeError("%s is not an aggregate expression", alias)
             query.add_annotation(aggregate_expr, self.model, alias, is_summary=True)
+            if not query.annotations[alias].is_aggregate:
+                raise TypeError("%s is not an aggregate expression", alias)
         return query.get_aggregation(using=self.db, force_subq=force_subq)
 
     def count(self):
@@ -802,29 +802,22 @@ class QuerySet(object):
         names = getattr(self, '_fields', None)
         if names is None:
             names = set(self.model._meta.get_all_field_names())
-        aggregate_annotations = {}
-        other_annotations = {}
         for (field, annotation) in kwargs.items():
             if field in names:
                 raise ValueError("The annotation '%s' conflicts with a field on "
-                    "the model." % field)
-            if kwargs[field].is_aggregate:
-                aggregate_annotations[field] = annotation
-            else:
-                other_annotations[field] = annotation
+                                 "the model." % field)
 
         obj = self._clone()
 
         # Add the aggregates to the query
-        for (alias, aggregate_expr) in aggregate_annotations.items():
+        for (alias, aggregate_expr) in kwargs.items():
             obj.query.add_annotation(aggregate_expr, self.model, alias, is_summary=False)
-
-        # Add annotations to the query
-        for (alias, annotate_expr) in other_annotations.items():
-            obj.query.add_annotation(annotate_expr, self.model, alias, is_summary=False)
-
-        if aggregate_annotations:
-            obj._setup_aggregate_query(list(aggregate_annotations))
+        added_aggregates = []
+        for key, value in obj.query.annotations.items():
+            if key in kwargs and value.is_aggregate:
+                added_aggregates.append(key)
+        if added_aggregates:
+            obj._setup_aggregate_query(list(added_aggregates))
 
         return obj
 

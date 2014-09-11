@@ -8,10 +8,10 @@ from django.db.models import fields
 from django.db.models.query_utils import refs_aggregate
 from django.utils.functional import cached_property
 
-
-class ExpressionNode(object):
+class CombinableMixin(object):
     """
-    Base class for all query expressions.
+    Provides the ability to combine one or two objects with
+    some connector. For example F('foo') + F('bar').
     """
 
     # Arithmetic connectors
@@ -30,163 +30,17 @@ class ExpressionNode(object):
     BITAND = '&'
     BITOR = '|'
 
-    # aggregate specific fields
-    is_aggregate = False
-    is_summary = False
-
-    def __init__(self, output_field=None):
-        self.col = None
-        self.source = output_field
-
     def _combine(self, other, connector, reversed, node=None):
         if isinstance(other, datetime.timedelta):
             return DateModifierNode(self, connector, other)
 
-        if not isinstance(other, ExpressionNode):
-            # everything must be some kind of ExpressionNode, so Value is the fallback
+        if not hasattr(other, 'resolve_expression'):
+            # everything must be something that can be resolved to expression
             other = Value(other)
 
         if reversed:
             return Expression(other, connector, self)
         return Expression(self, connector, other)
-
-    def as_sql(self, compiler, connection):
-        """
-        Responsible for returning a (sql, [params]) tuple to be included
-        in the current query.
-
-        Different backends can provide their own implementation, by
-        providing an `as_{vendor}` method and patching the Expression:
-
-        ```
-        def override_as_sql(self, compiler, connection):
-            # custom logic
-            return super(ExpressionNode, self).as_sql(compiler, connection)
-        setattr(ExpressionNode, 'as_' + connection.vendor, override_as_sql)
-        ```
-
-        Arguments:
-         * compiler: the query compiler responsible for generating the query.
-           Must have a compile method, returning a (sql, [params]) tuple.
-           Calling compiler(value) will return a quoted `value`.
-
-         * connection: the database connection used for the current query.
-
-        Returns: (sql, params)
-          Where `sql` is a string containing ordered sql parameters to be
-          replaced with the elements of the list `params`
-        """
-        raise NotImplementedError("Subclasses must implement as_sql()")
-
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
-        """
-        Provides the chance to do any preprocessing or validation before being
-        added to the query.
-
-        Arguments:
-         * query: the backend query implementation
-         * allow_joins: boolean allowing or denying use of joins
-           in this query
-         * reuse: a set of reusable joins for multijoins
-         * summarize: a terminal aggregate clause
-
-        Returns: a copy of self prepared for the query
-        """
-        c = self.copy()
-        c.is_summary = summarize
-        return c
-
-    @property
-    def field(self):
-        return self.output_field
-
-    @cached_property
-    def output_field(self):
-        ot = self._output_field
-        if ot is None:
-            raise FieldError("Cannot resolve expression type, unknown output_field")
-        return ot
-
-    @cached_property
-    def _output_field(self):
-        self._resolve_source()
-        return self.source
-
-    def _resolve_source(self):
-        if self.source is None:
-            sources = self.get_sources()
-            num_sources = len(sources)
-            if num_sources == 0:
-                self.source = None
-            elif num_sources == 1:
-                self.source = sources[0]
-            else:
-                # this could be smarter by allowing certain combinations
-                self.source = sources[0]
-                for source in sources:
-                    if source is not None and not isinstance(self.source, source.__class__):
-                        raise FieldError(
-                            "Expression contains mixed types. You must set output_field")
-
-    def convert_value(self, value, connection):
-        """
-        Expressions provide their own converters because users have the option
-        of manually specifying the output_field which may be a different type
-        from the one the database returns.
-        """
-        field = self.output_field
-        internal_type = field.get_internal_type()
-        if value is None:
-            return value
-        elif internal_type == 'FloatField':
-            return float(value)
-        elif internal_type.endswith('IntegerField'):
-            return int(value)
-        elif internal_type == 'DecimalField':
-            return backend_utils.typecast_decimal(field.format_number(value))
-        return value
-
-    def get_lookup(self, lookup):
-        return self.output_field.get_lookup(lookup)
-
-    def get_transform(self, name):
-        return self.output_field.get_transform(name)
-
-    def relabeled_clone(self, change_map):
-        return self.copy()
-
-    def copy(self):
-        c = copy.copy(self)
-        c.copied = True
-        return c
-
-    def contains_aggregate(self, existing_aggregates):
-        return False, ()
-
-    def refs_field(self, aggregate_types, field_types):
-        """
-        Helper method for check_aggregate_support on backends
-        """
-        return False
-
-    def prepare_database_save(self, field):
-        return self
-
-    def get_group_by_cols(self):
-        if self.col is not None:
-            return [self.col]
-        return []
-
-    def get_sources(self):
-        if self.source is not None:
-            return [self.source]
-        return []
-
-    def __bool__(self):
-        """
-        For truth value testing.
-        """
-        return True
 
     #############
     # OPERATORS #
@@ -261,14 +115,218 @@ class ExpressionNode(object):
         )
 
 
+class ExpressionNode(CombinableMixin):
+    """
+    Base class for all query expressions.
+    """
+
+    # aggregate specific fields
+    is_summary = False
+
+    def __init__(self, output_field=None):
+        self._output_field = output_field
+
+    def get_source_expressions(self):
+        return []
+
+    def set_source_expressions(self, exprs):
+        assert len(exprs) == 0
+
+    def as_sql(self, compiler, connection):
+        """
+        Responsible for returning a (sql, [params]) tuple to be included
+        in the current query.
+
+        Different backends can provide their own implementation, by
+        providing an `as_{vendor}` method and patching the Expression:
+
+        ```
+        def override_as_sql(self, compiler, connection):
+            # custom logic
+            return super(ExpressionNode, self).as_sql(compiler, connection)
+        setattr(ExpressionNode, 'as_' + connection.vendor, override_as_sql)
+        ```
+
+        Arguments:
+         * compiler: the query compiler responsible for generating the query.
+           Must have a compile method, returning a (sql, [params]) tuple.
+           Calling compiler(value) will return a quoted `value`.
+
+         * connection: the database connection used for the current query.
+
+        Returns: (sql, params)
+          Where `sql` is a string containing ordered sql parameters to be
+          replaced with the elements of the list `params`
+        """
+        raise NotImplementedError("Subclasses must implement as_sql()")
+
+    @cached_property
+    def is_aggregate(self):
+        for expr in self.get_source_expressions():
+            if expr and expr.is_aggregate:
+                return True
+        return False
+
+    def resolve_expression(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        """
+        Provides the chance to do any preprocessing or validation before being
+        added to the query.
+
+        Arguments:
+         * query: the backend query implementation
+         * allow_joins: boolean allowing or denying use of joins
+           in this query
+         * reuse: a set of reusable joins for multijoins
+         * summarize: a terminal aggregate clause
+
+        Returns: an ExpressionNode to be added to the query.
+        """
+        c = self.copy()
+        c.is_summary = summarize
+        return c
+
+    def _prepare(self):
+        """
+        Hook used by Field.get_prep_lookup() to do custom preparation.
+        """
+        return self
+
+    @property
+    def field(self):
+        return self.output_field
+
+    @cached_property
+    def output_field(self):
+        """
+        Returns the output type of this expressions.
+        """
+        if self._output_field_or_none is None:
+            self._resolve_output_field()
+            raise FieldError("Cannot resolve expression type, unknown output_field")
+        return self._output_field_or_none
+
+    @cached_property
+    def _output_field_or_none(self):
+        """
+        Returns the output field of this expression, or None if no output type
+        can be resolved. Note that the 'output_field' property will raise
+        FieldError if no type can be resolved, but this attribute allows for
+        None values..
+        """
+        if self._output_field is None:
+            self._resolve_output_field()
+        return self._output_field
+
+    def _resolve_output_field(self):
+        if self._output_field is None:
+            sources = self.get_source_fields()
+            num_sources = len(sources)
+            if num_sources == 0:
+                self._output_field = None
+            else:
+                self._output_field = sources[0]
+                for source in sources:
+                    if source is not None and not isinstance(self._output_field, source.__class__):
+                        raise FieldError(
+                            "Expression contains mixed types. You must set output_field")
+
+    def convert_value(self, value, connection):
+        """
+        Expressions provide their own converters because users have the option
+        of manually specifying the output_field which may be a different type
+        from the one the database returns.
+        """
+        field = self.output_field
+        internal_type = field.get_internal_type()
+        if value is None:
+            return value
+        elif internal_type == 'FloatField':
+            return float(value)
+        elif internal_type.endswith('IntegerField'):
+            return int(value)
+        elif internal_type == 'DecimalField':
+            return backend_utils.typecast_decimal(field.format_number(value))
+        return value
+
+    def get_lookup(self, lookup):
+        return self.output_field.get_lookup(lookup)
+
+    def get_transform(self, name):
+        return self.output_field.get_transform(name)
+
+    def relabeled_clone(self, change_map):
+        copy = self.copy()
+        copy.set_source_expressions(
+            [e.relabeled_clone(change_map) for e in self.get_source_expressions()])
+        return copy
+
+    def copy(self):
+        c = copy.copy(self)
+        c.copied = True
+        return c
+
+    def contains_aggregate(self, existing_aggregates):
+        """
+        Does this expression contain a reference to some of the
+        existing aggregates. If so, returns the aggregate and also
+        the lookup parts that *weren't* found. So, assume
+            exsiting_aggregates = {'max_id': Max('id')}
+            self.name = 'max_id'
+        then this method will return Max('id') and those parts of the
+        name that weren't found. In this case all parts of the name
+        are found, so the second part of the return value will be
+        ().
+        """
+        for node in self.get_source_expressions():
+            agg, lookup = node.contains_aggregate(existing_aggregates)
+            if agg:
+                return agg, lookup
+        return False, ()
+
+    def refs_field(self, aggregate_types, field_types):
+        """
+        Helper method for check_aggregate_support on backends
+        """
+        return any(
+            node.refs_field(aggregate_types, field_types)
+            for node in self.get_source_expressions())
+
+    def prepare_database_save(self, field):
+        return self
+
+    def get_group_by_cols(self):
+        cols = []
+        for source in self.get_source_expressions():
+            cols.extend(source.get_group_by_cols())
+        return cols
+
+    def get_source_fields(self):
+        """
+        Returns the underlying field types used by this
+        aggregate.
+        """
+        return [e._output_field_or_none for e in self.get_source_expressions()]
+
+    def __bool__(self):
+        """
+        For truth value testing.
+        """
+        return True
+
+
 class Expression(ExpressionNode):
 
     def __init__(self, lhs, connector, rhs, output_field=None):
         super(Expression, self).__init__(output_field=output_field)
+        self.connector = connector
         self.lhs = lhs
         self.rhs = rhs
-        self.connector = connector
-        self.is_aggregate = self.lhs.is_aggregate or self.rhs.is_aggregate
+
+    def get_source_expressions(self):
+        return [self.lhs, self.rhs]
+
+    def set_source_expressions(self, exprs):
+        self.lhs, self.rhs = exprs
 
     def as_sql(self, compiler, connection):
         expressions = []
@@ -284,41 +342,12 @@ class Expression(ExpressionNode):
         sql = connection.ops.combine_expression(self.connector, expressions)
         return expression_wrapper % sql, expression_params
 
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
+    def resolve_expression(self, query=None, allow_joins=True, reuse=None, summarize=False):
         c = self.copy()
         c.is_summary = summarize
-        c.lhs = c.lhs.prepare(query, allow_joins, reuse, summarize)
-        c.rhs = c.rhs.prepare(query, allow_joins, reuse, summarize)
+        c.lhs = c.lhs.resolve_expression(query, allow_joins, reuse, summarize)
+        c.rhs = c.rhs.resolve_expression(query, allow_joins, reuse, summarize)
         return c
-
-    def relabeled_clone(self, change_map):
-        clone = copy.copy(self)
-        clone.lhs = self.lhs.relabeled_clone(change_map)
-        clone.rhs = self.rhs.relabeled_clone(change_map)
-        return clone
-
-    def contains_aggregate(self, existing_aggregates):
-        for node in (self.lhs, self.rhs):
-            agg, lookup = node.contains_aggregate(existing_aggregates)
-            if agg:
-                return agg, lookup
-        return False, ()
-
-    def refs_field(self, aggregate_types, field_types):
-        """
-        Helper method for check_aggregate_support on backends
-        """
-        return any(
-            node.refs_field(aggregate_types, field_types)
-            for node in (self.lhs, self.rhs))
-
-    def get_group_by_cols(self):
-        return self.lhs.get_group_by_cols() + self.rhs.get_group_by_cols()
-
-    def get_sources(self):
-        if self.source is not None:
-            return [self.source]
-        return [self.lhs._output_field, self.rhs._output_field]
 
 
 class DateModifierNode(Expression):
@@ -362,69 +391,47 @@ class DateModifierNode(Expression):
         return connection.ops.date_interval_sql(sql, self.connector, timedelta), params
 
 
-class F(ExpressionNode):
+class F(CombinableMixin):
     """
-    An expression representing the value of the given field.
+    An object capable of resolving references to existing query objects.
     """
     def __init__(self, name):
         """
         Arguments:
          * name: the name of the field this expression references
         """
-        super(F, self).__init__()
         self.name = name
 
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
-        c = self.copy()
-        c.is_summary = summarize
-        if not allow_joins and LOOKUP_SEP in c.name:
+    def resolve_expression(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        if not allow_joins and LOOKUP_SEP in self.name:
             raise FieldError("Joined field references are not permitted in this query")
-        c.setup_cols(query, reuse)
-        return c
-
-    def as_sql(self, compiler, connection):
-        return compiler.compile(self.col)
-
-    def setup_cols(self, query, reuse):
-        if query is None:
-            return
         field_list = self.name.split(LOOKUP_SEP)
         if self.name in query.annotations:
-            self.col = query.annotation_select[self.name]
+            if summarize:
+                return Ref(self.name, query.annotation_select[self.name])
+            else:
+                return query.annotation_select[self.name]
         else:
             try:
                 field, sources, opts, join_list, path = query.setup_joins(
                     field_list, query.get_meta(),
                     query.get_initial_alias(), reuse)
-                self._used_joins = join_list
                 targets, _, join_list = query.trim_joins(sources, join_list, path)
                 if len(targets) > 1:
-                    raise FieldError("Referencing multicolumn fields in expressions "
+                    raise FieldError("Referencing multicolumn fields with F() objects "
                                      "isn't supported")
                 if reuse is not None:
                     reuse.update(join_list)
-                assert self.source is None
-                self.source = sources[0]
-                self.col = Col(join_list[-1], targets[0], sources[0])
+                col = Col(join_list[-1], targets[0], sources[0])
+                col._used_joins = join_list
+                return col
             except fields.FieldDoesNotExist:
                 raise FieldError("Cannot resolve keyword %r into field. "
                                  "Choices are: %s" % (self.name,
                                                       [f.name for f in self.opts.fields]))
 
-    def get_group_by_cols(self):
-        return self.col.get_group_by_cols()
-
-    def get_sources(self):
-        return [self.source] if self.source is not None else []
-
     def contains_aggregate(self, existing_aggregates):
         return refs_aggregate(self.name.split(LOOKUP_SEP), existing_aggregates)
-
-    def relabeled_clone(self, change_map):
-        clone = copy.copy(self)
-        clone.col = clone.col.relabeled_clone(change_map)
-        return clone
-
 
 class Func(ExpressionNode):
     """
@@ -437,58 +444,48 @@ class Func(ExpressionNode):
     def __init__(self, *expressions, **extra):
         output_field = extra.pop('output_field', None)
         super(Func, self).__init__(output_field=output_field)
-        self.expressions = self._parse_expressions(*expressions)
+        self.source_expressions = self._parse_expressions(*expressions)
         self.extra = extra
+
+    def get_source_expressions(self):
+        return self.source_expressions
+
+    def set_source_expressions(self, exprs):
+        self.source_expressions = exprs
 
     def _parse_expressions(self, *expressions):
         return [
-            arg if isinstance(arg, ExpressionNode) else F(arg)
+            arg if hasattr(arg, 'resolve_expression') else F(arg)
             for arg in expressions
         ]
 
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
+    def resolve_expression(self, query=None, allow_joins=True, reuse=None, summarize=False):
         c = self.copy()
         c.is_summary = summarize
-        for pos, arg in enumerate(c.expressions):
-            c.expressions[pos] = arg.prepare(query, allow_joins, reuse, summarize)
+        for pos, arg in enumerate(c.source_expressions):
+            c.source_expressions[pos] = arg.resolve_expression(query, allow_joins, reuse, summarize)
         return c
 
-    def as_sql(self, compiler, connection):
+    def as_sql(self, compiler, connection, function=None, template=None):
         sql_parts = []
         params = []
-        for arg in self.expressions:
+        for arg in self.source_expressions:
             arg_sql, arg_params = compiler.compile(arg)
             sql_parts.append(arg_sql)
             params.extend(arg_params)
-        self.extra['function'] = self.extra.get('function', self.function)
+        if function is None:
+            self.extra['function'] = self.extra.get('function', self.function)
+        else:
+            self.extra['function'] = function
         self.extra['expressions'] = self.extra['field'] = self.arg_joiner.join(sql_parts)
-        template = self.extra.get('template', self.template)
+        template = template or self.extra.get('template', self.template)
         return template % self.extra, params
 
-    def get_sources(self):
-        if self.source is not None:
-            return [self.source]
-        return [arg._output_field for arg in self.expressions]
-
-    def contains_aggregate(self, existing_aggregates):
-        for arg in self.expressions:
-            agg, lookup = arg.contains_aggregate(existing_aggregates)
-            if agg:
-                return agg, lookup
-        return False, ()
-
-    def refs_field(self, aggregate_types, field_types):
-        """
-        Helper method for check_aggregate_support on backends
-        """
-        return any(arg.refs_field(aggregate_types, field_types) for arg in self.expressions)
-
-    def relabeled_clone(self, change_map):
-        clone = copy.copy(self)
-        new_expressions = [
-            arg.relabeled_clone(change_map) for arg in clone.expressions]
-        clone.expressions = new_expressions
-        return clone
+    def copy(self):
+        copy = super(Func, self).copy()
+        copy.source_expressions = self.source_expressions[:]
+        copy.extra = self.extra.copy()
+        return copy
 
 
 class Value(ExpressionNode):
@@ -516,13 +513,13 @@ class Col(ExpressionNode):
         if source is None:
             source = target
         super(Col, self).__init__(output_field=source)
-        self.alias, self.target, self.source = alias, target, source
+        self.alias, self.target = alias, target
 
     def as_sql(self, qn, connection):
         return "%s.%s" % (qn(self.alias), qn(self.target.column)), []
 
     def relabeled_clone(self, relabels):
-        return self.__class__(relabels.get(self.alias, self.alias), self.target, self.source)
+        return self.__class__(relabels.get(self.alias, self.alias), self.target, self.output_field)
 
     def get_group_by_cols(self):
         return [(self.alias, self.target.column)]
@@ -534,8 +531,15 @@ class Ref(ExpressionNode):
     qs.annotate(sum_cost=Sum('cost')) query.
     """
     def __init__(self, refs, source):
-        super(Ref, self).__init__(output_field=source)
-        self.refs, self.source = refs, source
+        super(Ref, self).__init__()
+        self.source = source
+        self.refs = refs
+
+    def get_source_expressions(self):
+        return [self.source]
+
+    def set_source_expressions(self, exprs):
+        self.source, = exprs
 
     def relabeled_clone(self, relabels):
         return self
@@ -556,10 +560,11 @@ class Date(ExpressionNode):
         self.col = col
         self.lookup_type = lookup_type
 
-    def relabeled_clone(self, change_map):
-        return self.__class__(
-            self.col.relabeled_clone(change_map),
-            self.lookup_type)
+    def get_source_expressions(self):
+        return [self.col]
+
+    def set_source_expressions(self, exprs):
+        self.col, = self.exprs
 
     def as_sql(self, qn, connection):
         sql, params = self.col.as_sql(qn, connection)
@@ -577,11 +582,11 @@ class DateTime(ExpressionNode):
         self.lookup_type = lookup_type
         self.tzname = tzname
 
-    def relabeled_clone(self, change_map):
-        return self.__class__(
-            self.col.relabeled_clone(change_map),
-            self.lookup_type,
-            self.tzname)
+    def get_source_expressions(self):
+        return [self.col]
+
+    def set_source_expressions(self, exprs):
+        self.col, = exprs
 
     def as_sql(self, qn, connection):
         sql, params = self.col.as_sql(qn, connection)

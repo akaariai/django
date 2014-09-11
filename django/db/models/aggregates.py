@@ -2,7 +2,7 @@
 Classes to represent the definitions of aggregate functions.
 """
 from django.core.exceptions import FieldError
-from django.db.models.expressions import Func, Value, Ref
+from django.db.models.expressions import Func, Value
 from django.db.models.fields import IntegerField, FloatField
 
 __all__ = [
@@ -14,43 +14,39 @@ class Aggregate(Func):
     is_aggregate = True
     name = None
 
-    def __init__(self, expression, output_field=None, **extra):
-        super(Aggregate, self).__init__(expression, output_field=output_field, **extra)
-        assert len(self.expressions) == 1
-        if self.expressions[0].is_aggregate:
-            raise FieldError("Cannot compute %s(%s(..)): aggregates cannot be nested" % (
-                self.name, expression.name))
-
-    def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
-        c = super(Aggregate, self).prepare(query, allow_joins, reuse, summarize)
-        if hasattr(c.expressions[0], 'name'):  # simple lookup
-            c.expressions[0] = c.expressions[0].copy()
-            expr = c.expressions[0]
-            name = expr.name
-            reffed, _ = expr.contains_aggregate(query.annotations)
-            if reffed and not c.is_summary:
-                raise FieldError("Cannot compute %s('%s'): '%s' is an aggregate" % (
-                    c.name, name, name))
-            if name in query.annotations:
-                annotation = query.annotations[name]
-                if c.source is None:
-                    c.source = annotation.output_field
-                if c.is_summary:
-                    # force subquery relabel
-                    expr.col = Ref(name, annotation)
-                    return c
+    def resolve_expression(self, query=None, allow_joins=True, reuse=None, summarize=False):
+        assert len(self.source_expressions) == 1
+        c = super(Aggregate, self).resolve_expression(query, allow_joins, reuse, summarize)
+        if c.source_expressions[0].is_aggregate and not summarize:
+            name = self.source_expressions[0].name
+            raise FieldError("Cannot compute %s('%s'): '%s' is an aggregate" % (
+                c.name, name, name))
         c._patch_aggregate(query)  # backward-compatibility support
         return c
 
     def refs_field(self, aggregate_types, field_types):
-        return (isinstance(self, aggregate_types) and
-                isinstance(self.expressions[0].source, field_types))
+        try:
+            return (isinstance(self, aggregate_types) and
+                    isinstance(self.input_field._output_field_or_none, field_types))
+        except FieldError:
+            # Sometimes we don't know the input_field's output type (for example,
+            # doing Sum(F('datetimefield') + F('datefield'), output_type=DateTimeField())
+            # is OK, but the Expression(F('datetimefield') + F('datefield')) doesn't
+            # have any output field.
+            return False
+
+    @property
+    def input_field(self):
+        return self.source_expressions[0]
 
     @property
     def default_alias(self):
-        if hasattr(self.expressions[0], 'name'):
-            return '%s__%s' % (self.expressions[0].name, self.name.lower())
+        if hasattr(self.source_expressions[0], 'name'):
+            return '%s__%s' % (self.source_expressions[0].name, self.name.lower())
         raise TypeError("Complex expressions require an alias")
+
+    def get_group_by_cols(self):
+        return []
 
     def _patch_aggregate(self, query):
         """
@@ -105,7 +101,7 @@ class Count(Aggregate):
     def __init__(self, expression, distinct=False, **extra):
         if expression == '*':
             expression = Value(expression)
-            expression.source = IntegerField()
+            expression._output_field = IntegerField()
         super(Count, self).__init__(
             expression, distinct='DISTINCT ' if distinct else '', output_field=IntegerField(), **extra)
 

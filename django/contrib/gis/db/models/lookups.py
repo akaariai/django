@@ -1,7 +1,7 @@
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.lookups import Lookup
-from django.db.models.expressions import ExpressionNode, F
+from django.db.models.expressions import ExpressionNode, Col
 
 
 class GISLookup(Lookup):
@@ -49,11 +49,11 @@ class GISLookup(Lookup):
         # We use the same approach as was used by GeoWhereNode. It would
         # be a good idea to upgrade GIS to use similar code that is used
         # for other lookups.
-        if isinstance(self.rhs, F):
+        if isinstance(self.rhs, Col):
             # Make sure the F Expression destination field exists, and
             # set an `srid` attribute with the same as that of the
             # destination.
-            geo_fld = self.rhs.field
+            geo_fld = self.rhs.output_field
             if not hasattr(geo_fld, 'srid'):
                 raise ValueError('No geographic field found in expression.')
             self.rhs.srid = geo_fld.srid

@@ -991,8 +991,10 @@ class SQLUpdateCompiler(SQLCompiler):
         result.append('SET')
         values, update_params = [], []
         for field, model, val in self.query.values:
-            if hasattr(val, 'prepare_database_save'):
-                if field.rel or isinstance(val, ExpressionNode):
+            if hasattr(val, 'resolve_expression'):
+                val = val.resolve_expression(self.query, allow_joins=False)
+            elif hasattr(val, 'prepare_database_save'):
+                if field.rel:
                     val = val.prepare_database_save(field)
                 else:
                     raise TypeError("Database is trying to update a relational field "
@@ -1007,9 +1009,6 @@ class SQLUpdateCompiler(SQLCompiler):
                 placeholder = field.get_placeholder(val, self, self.connection)
             else:
                 placeholder = '%s'
-
-            if isinstance(val, ExpressionNode):
-                val = val.prepare(self.query, allow_joins=False)
             name = field.column
             if hasattr(val, 'as_sql'):
                 sql, params = self.compile(val)

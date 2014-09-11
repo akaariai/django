@@ -14,7 +14,7 @@ import warnings
 from django.core.exceptions import FieldError
 from django.db import connections, DEFAULT_DB_ALIAS
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.expressions import ExpressionNode, Col
+from django.db.models.expressions import Col
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.query_utils import Q, refs_aggregate
 from django.db.models.related import PathInfo
@@ -207,7 +207,7 @@ class Query(object):
         memo[id(self)] = result
         return result
 
-    def prepare(self):
+    def _prepare(self):
         return self
 
     def get_compiler(self, using=None, connection=None):
@@ -323,7 +323,7 @@ class Query(object):
         # annotations must be forced into subquery
         has_annotation = any(
             annotation for alias, annotation
-            in self.annotations.items()
+            in self.annotation_select.items()
             if not annotation.is_aggregate)
 
         # If there is a group by clause, aggregating does not add useful
@@ -332,53 +332,55 @@ class Query(object):
         if self.group_by is not None or force_subq or has_annotation:
 
             from django.db.models.sql.subqueries import AggregateQuery
-            query = AggregateQuery(self.model)
-            obj = self.clone()
+            outer_query = AggregateQuery(self.model)
+            inner_query = self.clone()
             if not force_subq:
                 # In forced subq case the ordering and limits will likely
                 # affect the results.
-                obj.clear_ordering(True)
-                obj.clear_limits()
-            obj.select_for_update = False
-            obj.select_related = False
-            obj.related_select_cols = []
+                inner_query.clear_ordering(True)
+                inner_query.clear_limits()
+            inner_query.select_for_update = False
+            inner_query.select_related = False
+            inner_query.related_select_cols = []
 
-            relabels = dict((t, 'subquery') for t in self.tables)
+            relabels = dict((t, 'subquery') for t in inner_query.tables)
             relabels[None] = 'subquery'
             # Remove any aggregates marked for reduction from the subquery
             # and move them to the outer AggregateQuery.
-            for alias, annotation in self.annotation_select.items():
+            for alias, annotation in inner_query.annotation_select.items():
                 if annotation.is_summary:
-                    query.annotations[alias] = annotation.relabeled_clone(relabels)
-                    del obj.annotation_select[alias]
-
+                    # The annotation is already referring the subquery alias, so we
+                    # just need to move the annotation to the outer query.
+                    outer_query.annotations[alias] = annotation.relabeled_clone(relabels)
+                    del inner_query.annotation_select[alias]
             try:
-                query.add_subquery(obj, using)
+                outer_query.add_subquery(inner_query, using)
             except EmptyResultSet:
                 return dict(
                     (alias, None)
-                    for alias in query.annotation_select
+                    for alias in outer_query.annotation_select
                 )
         else:
-            query = self
+            outer_query = self
             self.select = []
             self.default_cols = False
             self._extra = {}
             self.remove_inherited_models()
 
-        query.clear_ordering(True)
-        query.clear_limits()
-        query.select_for_update = False
-        query.select_related = False
-        query.related_select_cols = []
-        compiler = query.get_compiler(using)
+        outer_query.clear_ordering(True)
+        outer_query.clear_limits()
+        outer_query.select_for_update = False
+        outer_query.select_related = False
+        outer_query.related_select_cols = []
+        compiler = outer_query.get_compiler(using)
         result = compiler.execute_sql(SINGLE)
         if result is None:
-            result = [None for q in query.annotation_select.items()]
+            result = [None for q in outer_query.annotation_select.items()]
 
-        fields = [annotation.output_field for alias, annotation in query.annotation_select.items()]
+        fields = [annotation.output_field
+                  for alias, annotation in outer_query.annotation_select.items()]
         converters = compiler.get_converters(fields)
-        for position, (alias, annotation) in enumerate(query.annotation_select.items()):
+        for position, (alias, annotation) in enumerate(outer_query.annotation_select.items()):
             if position in converters:
                 converters[position][1].insert(0, annotation.convert_value)
             else:
@@ -388,7 +390,7 @@ class Query(object):
         return dict(
             (alias, val)
             for (alias, annotation), val
-            in zip(query.annotation_select.items(), result)
+            in zip(outer_query.annotation_select.items(), result)
         )
 
     def get_count(self, using):
@@ -985,7 +987,7 @@ class Query(object):
         """
         Adds a single annotation expression to the Query
         """
-        annotation = annotation.prepare(self, summarize=is_summary)
+        annotation = annotation.resolve_expression(self, summarize=is_summary)
         self.append_annotation_mask([alias])
         self.annotations[alias] = annotation
 
@@ -1005,9 +1007,8 @@ class Query(object):
                 "Passing callable arguments to queryset is deprecated.",
                 RemovedInDjango19Warning, stacklevel=2)
             value = value()
-        elif isinstance(value, ExpressionNode):
-            # If value is a query expression, prepare it
-            value = value.prepare(self, reuse=can_reuse)
+        elif hasattr(value, 'resolve_expression'):
+            value = value.resolve_expression(self, reuse=can_reuse)
         if hasattr(value, 'query') and hasattr(value.query, 'bump_prefix'):
             value = value._clone()
             value.query.bump_prefix(self)
@@ -1728,7 +1729,7 @@ class Query(object):
 
         # Set only aggregate to be the count column.
         # Clear out the select cache to reflect the new unmasked annotations.
-        count = count.prepare(self, summarize=summarize)
+        count = count.resolve_expression(self, summarize=summarize)
         self._annotations = {None: count}
         self.set_annotation_mask(None)
         self.group_by = None
