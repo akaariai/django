@@ -16,16 +16,16 @@ class Aggregate(Func):
 
     def __init__(self, expression, output_field=None, **extra):
         super(Aggregate, self).__init__(expression, output_field=output_field, **extra)
-        assert len(self.expressions) == 1
-        if self.expressions[0].is_aggregate:
+        assert len(self.source_expressions) == 1
+        if self.source_expressions[0].is_aggregate:
             raise FieldError("Cannot compute %s(%s(..)): aggregates cannot be nested" % (
                 self.name, expression.name))
 
     def prepare(self, query=None, allow_joins=True, reuse=None, summarize=False):
         c = super(Aggregate, self).prepare(query, allow_joins, reuse, summarize)
-        if hasattr(c.expressions[0], 'name'):  # simple lookup
-            c.expressions[0] = c.expressions[0].copy()
-            expr = c.expressions[0]
+        if hasattr(c.source_expressions[0], 'name'):  # simple lookup
+            c.source_expressions[0] = c.source_expressions[0].copy()
+            expr = c.source_expressions[0]
             name = expr.name
             reffed, _ = expr.contains_aggregate(query.annotations)
             if reffed and not c.is_summary:
@@ -33,8 +33,8 @@ class Aggregate(Func):
                     c.name, name, name))
             if name in query.annotations:
                 annotation = query.annotations[name]
-                if c.source is None:
-                    c.source = annotation.output_field
+                if c._output_field is None:
+                    c._output_field = annotation.output_field
                 if c.is_summary:
                     # force subquery relabel
                     expr.col = Ref(name, annotation)
@@ -43,14 +43,28 @@ class Aggregate(Func):
         return c
 
     def refs_field(self, aggregate_types, field_types):
-        return (isinstance(self, aggregate_types) and
-                isinstance(self.expressions[0].source, field_types))
+        try:
+            return (isinstance(self, aggregate_types) and
+                    isinstance(self.source._output_field_or_none, field_types))
+        except FieldError:
+            # Sometimes we don't know the source's output type (for example,
+            # doing Sum(F('datetimefield') + F('datefield'), output_type=DateTimeField())
+            # is OK, but the Expression(F('datetimefield') + F('datefield')) doesn't
+            # have any output field.
+            return False
+
+    @property
+    def source(self):
+        return self.source_expressions[0]
 
     @property
     def default_alias(self):
-        if hasattr(self.expressions[0], 'name'):
-            return '%s__%s' % (self.expressions[0].name, self.name.lower())
+        if hasattr(self.source_expressions[0], 'name'):
+            return '%s__%s' % (self.source_expressions[0].name, self.name.lower())
         raise TypeError("Complex expressions require an alias")
+
+    def get_group_by_cols(self):
+        return []
 
     def _patch_aggregate(self, query):
         """
@@ -105,7 +119,7 @@ class Count(Aggregate):
     def __init__(self, expression, distinct=False, **extra):
         if expression == '*':
             expression = Value(expression)
-            expression.source = IntegerField()
+            expression._output_field = IntegerField()
         super(Count, self).__init__(
             expression, distinct='DISTINCT ' if distinct else '', output_field=IntegerField(), **extra)
 

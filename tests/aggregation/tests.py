@@ -9,7 +9,7 @@ from django.core.exceptions import FieldError
 from django.db import connection
 from django.db.models import (
     Avg, Sum, Count, Max, Min,
-    Aggregate, F, Value,
+    Aggregate, F, Value, Func,
     IntegerField, FloatField, DecimalField)
 with warnings.catch_warnings(record=True) as w:
     warnings.simplefilter("always")
@@ -863,7 +863,7 @@ class ComplexAggregateTestCase(TestCase):
         try:
             # test completely changing how the output is rendered
             def lower_case_function_override(self, qn, connection):
-                sql, params = qn.compile(self.expressions[0])
+                sql, params = qn.compile(self.source_expressions[0])
                 substitutions = dict(function=self.function.lower(), expressions=sql)
                 substitutions.update(self.extra)
                 return self.template % substitutions, params
@@ -913,6 +913,28 @@ class ComplexAggregateTestCase(TestCase):
         self.assertEqual(
             max_books_per_rating,
             {'books_per_rating__max': 3 + 5})
+
+    def test_expression_on_aggregation(self):
+
+        # Create a plain expression
+        class Greatest(Func):
+            function = 'GREATEST'
+
+            def as_sqlite(self, qn, connection):
+                return super(Greatest, self).as_sql(qn, connection, function='MAX')
+
+        qs = Publisher.objects.annotate(
+            price_or_median=Greatest(Avg('book__rating'), Avg('book__price'))
+        ).filter(price_or_median__gte=F('num_awards')).order_by('pk')
+        self.assertQuerysetEqual(
+            qs, [1, 2, 3, 4], lambda v: v.pk)
+
+        qs2 = Publisher.objects.annotate(
+            rating_or_num_awards=Greatest(Avg('book__rating'), F('num_awards'),
+                                          output_field=FloatField())
+        ).filter(rating_or_num_awards__gt=F('num_awards')).order_by('pk')
+        self.assertQuerysetEqual(
+            qs2, [1, 2], lambda v: v.pk)
 
     def test_backwards_compatibility(self):
 
