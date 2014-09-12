@@ -403,32 +403,7 @@ class F(CombinableMixin):
         self.name = name
 
     def resolve_expression(self, query=None, allow_joins=True, reuse=None, summarize=False):
-        if not allow_joins and LOOKUP_SEP in self.name:
-            raise FieldError("Joined field references are not permitted in this query")
-        field_list = self.name.split(LOOKUP_SEP)
-        if self.name in query.annotations:
-            if summarize:
-                return Ref(self.name, query.annotation_select[self.name])
-            else:
-                return query.annotation_select[self.name]
-        else:
-            try:
-                field, sources, opts, join_list, path = query.setup_joins(
-                    field_list, query.get_meta(),
-                    query.get_initial_alias(), reuse)
-                targets, _, join_list = query.trim_joins(sources, join_list, path)
-                if len(targets) > 1:
-                    raise FieldError("Referencing multicolumn fields with F() objects "
-                                     "isn't supported")
-                if reuse is not None:
-                    reuse.update(join_list)
-                col = Col(join_list[-1], targets[0], sources[0])
-                col._used_joins = join_list
-                return col
-            except fields.FieldDoesNotExist:
-                raise FieldError("Cannot resolve keyword %r into field. "
-                                 "Choices are: %s" % (self.name,
-                                                      [f.name for f in self.opts.fields]))
+        return query.resolve_ref(self.name, allow_joins, reuse, summarize)
 
     def contains_aggregate(self, existing_aggregates):
         return refs_aggregate(self.name.split(LOOKUP_SEP), existing_aggregates)

@@ -14,7 +14,7 @@ import warnings
 from django.core.exceptions import FieldError
 from django.db import connections, DEFAULT_DB_ALIAS
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.expressions import Col
+from django.db.models.expressions import Col, Ref
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.query_utils import Q, refs_aggregate
 from django.db.models.related import PathInfo
@@ -1476,6 +1476,34 @@ class Query(object):
             targets = tuple(r[0] for r in info.join_field.related_fields if r[1].column in cur_targets)
             self.unref_alias(joins.pop())
         return targets, joins[-1], joins
+
+    def resolve_ref(self, name, allow_joins, reuse, summarize):
+        if not allow_joins and LOOKUP_SEP in name:
+            raise FieldError("Joined field references are not permitted in this query")
+        if name in self.annotations:
+            if summarize:
+                return Ref(name, self.annotation_select[name])
+            else:
+                return self.annotation_select[name]
+        else:
+            field_list = name.split(LOOKUP_SEP)
+            try:
+                field, sources, opts, join_list, path = self.setup_joins(
+                    field_list, self.get_meta(),
+                    self.get_initial_alias(), reuse)
+                targets, _, join_list = self.trim_joins(sources, join_list, path)
+                if len(targets) > 1:
+                    raise FieldError("Referencing multicolumn fields with F() objects "
+                                     "isn't supported")
+                if reuse is not None:
+                    reuse.update(join_list)
+                col = Col(join_list[-1], targets[0], sources[0])
+                col._used_joins = join_list
+                return col
+            except FieldDoesNotExist:
+                raise FieldError("Cannot resolve keyword %r into field. "
+                                 "Choices are: %s" % (name,
+                                                      [f.name for f in self.opts.fields]))
 
     def split_exclude(self, filter_expr, prefix, can_reuse, names_with_path):
         """
