@@ -52,7 +52,6 @@ class SDORelate(SpatialOperator):
 
 
 class OracleOperations(DatabaseOperations, BaseSpatialOperations):
-    compiler_module = "django.contrib.gis.db.backends.oracle.compiler"
 
     name = 'oracle'
     oracle = True
@@ -111,8 +110,9 @@ class OracleOperations(DatabaseOperations, BaseSpatialOperations):
     def geo_quote_name(self, name):
         return super(OracleOperations, self).geo_quote_name(name).upper()
 
-    def get_db_converters(self, internal_type):
-        converters = super(OracleOperations, self).get_db_converters(internal_type)
+    def get_db_converters(self, expression):
+        converters = super(OracleOperations, self).get_db_converters(expression)
+        internal_type = expression.output_field.get_internal_type()
         geometry_fields = (
             'PointField', 'GeometryField', 'LineStringField',
             'PolygonField', 'MultiPointField', 'MultiLineStringField',

@@ -42,7 +42,38 @@ def get_srid_info(srid, connection):
     return _srid_cache[connection.alias][srid]
 
 
-class GeometryField(Field):
+class GeoSelectFormatMixin(object):
+    def select_format(self, compiler, sql, params):
+        """
+        Returns the selection format string, depending on the requirements
+        of the spatial backend.  For example, Oracle and MySQL require custom
+        selection formats in order to retrieve geometries in OGC WKT. For all
+        other fields a simple '%s' format string is returned.
+        """
+        connection = compiler.connection
+        srid = compiler.query.get_context('transformed_srid')
+        if srid:
+            sel_fmt = '%s(%%s, %s)' % (connection.ops.transform, srid)
+        else:
+            sel_fmt = '%s'
+        if connection.ops.select:
+            # This allows operations to be done on fields in the SELECT,
+            # overriding their values -- used by the Oracle and MySQL
+            # spatial backends to get database values as WKT, and by the
+            # `transform` method.
+            sel_fmt = connection.ops.select % sel_fmt
+
+            # Because WKT doesn't contain spatial reference information,
+            # the SRID is prefixed to the returned WKT to ensure that the
+            # transformed geometries have an SRID different than that of the
+            # field -- this is only used by `transform` for Oracle and
+            # SpatiaLite backends.
+            if srid and (connection.ops.oracle or connection.ops.spatialite):
+                sel_fmt = "'SRID=%d;'||%s" % (srid, sel_fmt)
+        return sel_fmt % sql, params
+
+
+class GeometryField(GeoSelectFormatMixin, Field):
     "The base GIS field -- maps to the OpenGIS Specification Geometry type."
 
     # The OpenGIS Geometry name.
@@ -337,7 +368,7 @@ class GeometryCollectionField(GeometryField):
     description = _("Geometry collection")
 
 
-class ExtentField(Field):
+class ExtentField(GeoSelectFormatMixin, Field):
     "Used as a return value from an extent aggregate"
 
     description = _("Extent Aggregate Field")

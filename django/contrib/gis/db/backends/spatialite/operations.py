@@ -14,7 +14,6 @@ from django.utils.functional import cached_property
 
 
 class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
-    compiler_module = 'django.contrib.gis.db.models.sql.compiler'
     name = 'spatialite'
     spatialite = True
     version_regex = re.compile(r'^(?P<major>\d)\.(?P<minor1>\d)\.(?P<minor2>\d+)')
@@ -256,7 +255,7 @@ class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
         agg_name = agg_name.lower()
         if agg_name == 'union':
             agg_name += 'agg'
-        sql_template = self.select % '%(function)s(%(expressions)s)'
+        sql_template = '%(function)s(%(expressions)s)'
         sql_function = getattr(self, agg_name)
         return sql_template, sql_function
 

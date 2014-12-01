@@ -10,7 +10,6 @@ from django.db.models import signals, FieldDoesNotExist, DO_NOTHING
 from django.db.models.base import ModelBase
 from django.db.models.fields.related import ForeignObject, ForeignObjectRel
 from django.db.models.related import PathInfo
-from django.db.models.expressions import Col
 from django.contrib.contenttypes.models import ContentType
 from django.utils.encoding import smart_text, python_2_unicode_compatible
 
@@ -347,7 +346,7 @@ class GenericRelation(ForeignObject):
         field = self.rel.to._meta.get_field_by_name(self.content_type_field_name)[0]
         contenttype_pk = self.get_content_type().pk
         cond = where_class()
-        lookup = field.get_lookup('exact')(Col(remote_alias, field, field), contenttype_pk)
+        lookup = field.get_lookup('exact')(field.get_col(remote_alias), contenttype_pk)
         cond.add(lookup, 'AND')
         return cond
 
