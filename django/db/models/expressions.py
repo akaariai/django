@@ -127,7 +127,7 @@ class ExpressionNode(CombinableMixin):
     is_summary = False
 
     def get_db_converters(self, connection):
-        return [self.convert_value]
+        return [self.convert_value] + self.output_field.get_db_converters(connection)
 
     def __init__(self, output_field=None):
         self._output_field = output_field
@@ -488,6 +488,32 @@ class Value(ExpressionNode):
         return '%s', [self.value]
 
 
+class RawSQL(ExpressionNode):
+    def __init__(self, sql):
+        self.sql, self.params = sql
+        super(RawSQL, self).__init__(output_field=fields.Field())
+
+    def as_sql(self, compiler, connection):
+        return '(%s)' % self.sql, self.params
+
+
+class Random(ExpressionNode):
+    def __init__(self):
+        super(Random, self).__init__(output_field=fields.FloatField())
+
+    def as_sql(self, compiler, connection):
+        return connection.ops.random_function_sql(), []
+
+
+class ColIndexRef(ExpressionNode):
+    def __init__(self, idx):
+        self.idx = idx
+        super(ColIndexRef, self).__init__()
+
+    def as_sql(self, compiler, connection):
+        return str(self.idx), []
+
+
 class Col(ExpressionNode):
     def __init__(self, alias, target, source=None):
         if source is None:
@@ -503,7 +529,10 @@ class Col(ExpressionNode):
         return self.__class__(relabels.get(self.alias, self.alias), self.target, self.output_field)
 
     def get_group_by_cols(self):
-        return [(self.alias, self.target.column)]
+        return [self]
+
+    def get_db_converters(self, connection):
+        return self.output_field.get_db_converters(connection)
 
 
 class Ref(ExpressionNode):
@@ -526,10 +555,10 @@ class Ref(ExpressionNode):
         return self
 
     def as_sql(self, compiler, connection):
-        return "%s" % compiler.quote_name_unless_alias(self.refs), []
+        return "%s" % connection.ops.quote_name(self.refs), []
 
     def get_group_by_cols(self):
-        return [(None, self.refs)]
+        return [self]
 
 
 class Date(ExpressionNode):

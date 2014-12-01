@@ -387,7 +387,8 @@ class DatabaseOperations(BaseDatabaseOperations):
             return 'POW(%s)' % ','.join(sub_expressions)
         return super(DatabaseOperations, self).combine_expression(connector, sub_expressions)
 
-    def get_db_converters(self, internal_type):
+    def get_db_converters(self, field):
+        internal_type = field.get_internal_type()
         converters = super(DatabaseOperations, self).get_db_converters(internal_type)
         if internal_type in ['BooleanField', 'NullBooleanField']:
             converters.append(self.convert_booleanfield_value)

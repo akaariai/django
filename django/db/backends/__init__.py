@@ -1227,7 +1227,7 @@ class BaseDatabaseOperations(object):
             second = timezone.make_aware(second, tz)
         return [first, second]
 
-    def get_db_converters(self, internal_type):
+    def get_db_converters(self, field):
         """Get a list of functions needed to convert field data.
 
         Some field types on some backends do not provide data in the correct

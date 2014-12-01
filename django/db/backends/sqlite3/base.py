@@ -262,7 +262,8 @@ class DatabaseOperations(BaseDatabaseOperations):
 
         return six.text_type(value)
 
-    def get_db_converters(self, internal_type):
+    def get_db_converters(self, field):
+        internal_type = field.get_internal_type()
         converters = super(DatabaseOperations, self).get_db_converters(internal_type)
         if internal_type == 'DateTimeField':
             converters.append(self.convert_datetimefield_value)

@@ -347,7 +347,7 @@ class GenericRelation(ForeignObject):
         field = self.rel.to._meta.get_field_by_name(self.content_type_field_name)[0]
         contenttype_pk = self.get_content_type().pk
         cond = where_class()
-        lookup = field.get_lookup('exact')(Col(remote_alias, field, field), contenttype_pk)
+        lookup = field.get_lookup('exact')(field.get_col(remote_alias), contenttype_pk)
         cond.add(lookup, 'AND')
         return cond
 
