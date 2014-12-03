@@ -49,22 +49,55 @@ class SQLCompiler(object):
     def fill_group_by(self, select, order_by, having):
         """
         Returns a list of 2-tuples of form (sql, params).
+
+        The logic of what exactly the GROUP BY clause contains is hard
+        to describe in other words than "if it passes the test suite,
+        then it is correct".
         """
+        #
+        #
+        # Some examples:
+        #     SomeModel.objects.annotate(Count('somecol'))
+        #     GROUP BY: all fields of the model
+        #
+        #    SomeModel.objects.values('name').annotate(Count('somecol'))
+        #    GROUP BY: name
+        #
+        #    SomeModel.objects.annotate(Count('somecol')).values('name')
+        #    GROUP BY: all cols of the model
+        #
+        #    SomeModel.objects.values('name', 'pk').annotate(Count('somecol')).values('pk')
+        #    GROUP BY: name, pk
+        #
+        #    SomeModel.objects.values('name').annotate(Count('somecol')).values('pk')
+        #    GROUP BY: name, pk
+        #
+        # In fact, the self.query.group_by is the minimal set to GROUP BY. It
+        # can't be ever restricted to smaller set, but additional columns in
+        # HAVING, ORDER BY and SELECT clauses are added to it. Unfortunately
+        # the end result is that it is impossible to force the query to have
+        # a chosen GROUP BY clause - you can almost do this by using the
+        #     .values(*wanted_cols).annoate(AnAggregate())
+        # form, but any later annoations, extra selects, values calls that
+        # refer some column outside of the wanted_cols, order_by or even
+        # filter calls can alter the GROUP BY clause.
         result = []
         seen = set()
         if self.query.group_by is None:
             return result
-        elif self.query.group_by is True:
-            for expr, (sql, params), alias in select:
-                cols = expr.get_group_by_cols()
-                for col in cols:
-                    sql, params = self.compile(col)
-                    if (sql, tuple(params)) not in seen:
-                        result.append((sql, params))
-                    seen.add((sql, tuple(params)))
-        else:
+        elif self.query.group_by is not True:
+            # If the group by is set to a list (by .values() call
+            # most likely), then we need to add everything in it
+            # to the GROUP BY clause.
             for expr in self.query.group_by:
                 sql, params = self.compile(expr)
+                if (sql, tuple(params)) not in seen:
+                    result.append((sql, params))
+                seen.add((sql, tuple(params)))
+        for expr, (sql, params), alias in select:
+            cols = expr.get_group_by_cols()
+            for col in cols:
+                sql, params = self.compile(col)
                 if (sql, tuple(params)) not in seen:
                     result.append((sql, params))
                 seen.add((sql, tuple(params)))
