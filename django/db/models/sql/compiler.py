@@ -161,24 +161,24 @@ class SQLCompiler(object):
         order_by = []
         for pos, field in enumerate(ordering):
             if field == '?':
-                order_by.append((Random(), asc))
+                order_by.append((Random(), asc, False))
                 continue
             if isinstance(field, int):
                 if field < 0:
                     field = -field
                     int_ord = desc
-                order_by.append((ColIndexRef(field), int_ord))
+                order_by.append((ColIndexRef(field), int_ord, True))
                 continue
             col, order = get_order_dir(field, asc)
             if col in self.query.annotation_select:
-                order_by.append((Ref(col, self.query.annotation_select[col]), order))
+                order_by.append((Ref(col, self.query.annotation_select[col]), order, True))
                 continue
             if '.' in field:
                 # This came in through an extra(order_by=...) addition. Pass it
                 # on verbatim.
                 table, col = col.split('.', 1)
                 expr = RawSQL(('%s.%s' % (self.quote_name_unless_alias(table), col), []))
-                order_by.append((expr, order))
+                order_by.append((expr, order, False))
                 continue
             if not self.query._extra or get_order_dir(field)[0] not in self.query._extra:
                 # 'col' is of the form 'field' or 'field1__field2' or
@@ -187,18 +187,18 @@ class SQLCompiler(object):
                                                         default_order=asc))
             else:
                 if col not in self.query.extra_select:
-                    order_by.append((RawSQL(self.query.extra[col]), order))
+                    order_by.append((RawSQL(self.query.extra[col]), order, False))
                 else:
-                    order_by.append((Ref(self.quote_name_unless_alias(col), None), order))
+                    order_by.append((Ref(self.quote_name_unless_alias(col), None), order, True))
         result = []
         seen = set()
         select_sql = [t[1] for t in select]
-        for expr, order in order_by:
+        for expr, order, is_ref in order_by:
             sql, params = self.compile(expr)
             if (sql, tuple(params)) in seen:
                 continue
             if self.query.distinct and not self.query.distinct_fields:
-                if (sql, params) not in select_sql:
+                if not is_ref and (sql, params) not in select_sql:
                     select.append((expr, (sql, params), None))
             seen.add((sql, tuple(params)))
             result.append((expr, (sql, params, order)))
@@ -441,7 +441,7 @@ class SQLCompiler(object):
                                                        order, already_seen))
             return results
         targets, alias, _ = self.query.trim_joins(targets, joins, path)
-        return [(t.get_col(alias), order) for t in targets]
+        return [(t.get_col(alias), order, False) for t in targets]
 
     def _setup_joins(self, pieces, opts, alias):
         """
