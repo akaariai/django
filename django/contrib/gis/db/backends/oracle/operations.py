@@ -52,7 +52,6 @@ class SDORelate(SpatialOperator):
 
 
 class OracleOperations(DatabaseOperations, BaseSpatialOperations):
-    compiler_module = "django.contrib.gis.db.backends.oracle.compiler"
 
     name = 'oracle'
     oracle = True

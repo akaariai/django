@@ -14,7 +14,6 @@ from django.utils.functional import cached_property
 
 
 class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
-    compiler_module = 'django.contrib.gis.db.models.sql.compiler'
     name = 'spatialite'
     spatialite = True
     version_regex = re.compile(r'^(?P<major>\d)\.(?P<minor1>\d)\.(?P<minor2>\d+)')

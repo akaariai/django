@@ -44,7 +44,6 @@ class PostGISDistanceOperator(PostGISOperator):
 
 
 class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
-    compiler_module = 'django.contrib.gis.db.models.sql.compiler'
     name = 'postgis'
     postgis = True
     geography = True
