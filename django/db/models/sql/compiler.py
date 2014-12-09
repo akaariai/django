@@ -135,9 +135,9 @@ class SQLCompiler(object):
         klass_info = None
         annotations = {}
         select_idx = 0
-        for alias, sql in self.query.extra_select.items():
+        for alias, (sql, params) in self.query.extra_select.items():
             annotations[alias] = select_idx
-            select.append((RawSQL(sql), alias))
+            select.append((RawSQL(sql, params), alias))
             select_idx += 1
         assert not (self.query.select and self.query.default_cols)
         if self.query.default_cols:
@@ -210,7 +210,7 @@ class SQLCompiler(object):
                 # This came in through an extra(order_by=...) addition. Pass it
                 # on verbatim.
                 table, col = col.split('.', 1)
-                expr = RawSQL(('%s.%s' % (self.quote_name_unless_alias(table), col), []))
+                expr = RawSQL('%s.%s' % (self.quote_name_unless_alias(table), col), [])
                 order_by.append((expr, order, False))
                 continue
             if not self.query._extra or get_order_dir(field)[0] not in self.query._extra:
@@ -220,7 +220,7 @@ class SQLCompiler(object):
                                                         default_order=asc))
             else:
                 if col not in self.query.extra_select:
-                    order_by.append((RawSQL(self.query.extra[col]), order, False))
+                    order_by.append((RawSQL(*self.query.extra[col]), order, False))
                 else:
                     order_by.append((Ref(self.quote_name_unless_alias(col), None), order, True))
         result = []

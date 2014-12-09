@@ -10,6 +10,9 @@ from django.contrib.gis.measure import Area, Distance
 class BaseField(object):
     empty_strings_allowed = True
 
+    def get_db_converters(self, connection):
+        return [self.from_db_value]
+
 
 class AreaField(BaseField):
     "Wrapper for Area values."

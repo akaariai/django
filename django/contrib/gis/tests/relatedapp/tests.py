@@ -60,7 +60,9 @@ class RelatedGeoModelTest(TestCase):
         for name, srid, wkt in transformed:
             # Doing this implicitly sets `select_related` select the location.
             # TODO: Fix why this breaks on Oracle.
-            qs = list(City.objects.filter(name=name).transform(srid, field_name='location__point'))
+            qs = City.objects.filter(name=name).transform(srid, field_name='location__point')
+            with self.assertNumQueries(1):
+                qs[0].location.point
             check_pnt(GEOSGeometry(wkt, srid), qs[0].location.point)
 
     @skipUnlessDBFeature("supports_extent_aggr")
@@ -230,15 +232,6 @@ class RelatedGeoModelTest(TestCase):
         self.assertEqual(2, len(names))
         self.assertIn('Aurora', names)
         self.assertIn('Kecksburg', names)
-
-    def test11_geoquery_pickle(self):
-        "Ensuring GeoQuery objects are unpickled correctly.  See #10839."
-        import pickle
-        from django.contrib.gis.db.models.sql import GeoQuery
-        qs = City.objects.all()
-        q_str = pickle.dumps(qs.query)
-        q = pickle.loads(q_str)
-        self.assertEqual(GeoQuery, q.__class__)
 
     # TODO: fix on Oracle -- get the following error because the SQL is ordered
     # by a geometry object, which Oracle apparently doesn't like:

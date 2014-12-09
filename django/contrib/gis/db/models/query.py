@@ -1,22 +1,39 @@
 from django.db import connections
+from django.db.models.expressions import RawSQL, F
 from django.db.models.query import QuerySet
+from django.db.models.fields import Field
 
 from django.contrib.gis.db.models import aggregates
-from django.contrib.gis.db.models.fields import get_srid_info, PointField, LineStringField
-from django.contrib.gis.db.models.sql import AreaField, DistanceField, GeomField, GeoQuery, GMLField
+from django.contrib.gis.db.models.fields import get_srid_info, PointField, LineStringField, GeometryField
+from django.contrib.gis.db.models.lookups import GISLookup
+from django.contrib.gis.db.models.sql import AreaField, DistanceField, GeomField, GMLField
 from django.contrib.gis.geometry.backend import Geometry
 from django.contrib.gis.measure import Area, Distance
 
 from django.utils import six
 
 
+class GeoRawSQL(RawSQL):
+
+    def convert_value(self, value, connection):
+        return value
+        if value is None:
+            # Output from spatial function is NULL (e.g., called
+            # function on a geometry field with NULL value).
+            pass
+        elif isinstance(self.output_field, DistanceField):
+            # Using the field's distance attribute, can instantiate
+            # `Distance` with the right context.
+            value = Distance(**{self.output_field.distance_att: value})
+        elif isinstance(self.output_field, AreaField):
+            value = Area(**{self.output_field.area_att: value})
+        elif isinstance(self.output_field, (GeomField, GeometryField)):
+            value = Geometry(value)
+        return value
+
+
 class GeoQuerySet(QuerySet):
     "The Geographic QuerySet."
-
-    ### Methods overloaded from QuerySet ###
-    def __init__(self, model=None, query=None, using=None, hints=None):
-        super(GeoQuerySet, self).__init__(model=model, query=query, using=using, hints=hints)
-        self.query = query or GeoQuery(self.model)
 
     ### GeoQuerySet Methods ###
     def area(self, tolerance=0.05, **kwargs):
@@ -26,7 +43,8 @@ class GeoQuerySet(QuerySet):
         """
         # Performing setup here rather than in `_spatial_attribute` so that
         # we can get the units for `AreaField`.
-        procedure_args, geo_field = self._spatial_setup('area', field_name=kwargs.get('field_name', None))
+        procedure_args, geo_field = self._spatial_setup(
+            'area', field_name=kwargs.get('field_name', None))
         s = {'procedure_args': procedure_args,
              'geo_field': geo_field,
              'setup': False,
@@ -381,22 +399,24 @@ class GeoQuerySet(QuerySet):
         tmp, geo_field = self._spatial_setup('transform', field_name=field_name)
 
         # Getting the selection SQL for the given geographic field.
-        field_col = self._geocol_select(geo_field, field_name)
+        field_col = GeoRawSQL(self._geocol_select(geo_field, field_name), [], geo_field)
+        label = geo_field.attname
 
         # Why cascading substitutions? Because spatial backends like
         # Oracle and MySQL already require a function call to convert to text, thus
         # when there's also a transformation we need to cascade the substitutions.
         # For example, 'SDO_UTIL.TO_WKTGEOMETRY(SDO_CS.TRANSFORM( ... )'
-        geo_col = self.query.custom_select.get(geo_field, field_col)
+        for key, field in self.query.annotation_select.items():
+            if key == geo_field:
+                field_col = field
+                label = key
+                break
 
-        # Setting the key for the field's column with the custom SELECT SQL to
-        # override the geometry column returned from the database.
-        custom_sel = '%s(%s, %s)' % (connections[self.db].ops.transform, geo_col, srid)
-        # TODO: Should we have this as an alias?
-        # custom_sel = '(%s(%s, %s)) AS %s' % (SpatialBackend.transform, geo_col, srid, qn(geo_field.name))
-        self.query.transformed_srid = srid  # So other GeoQuerySet methods
-        self.query.custom_select[geo_field] = custom_sel
-        return self._clone()
+        sql, params = field_col.as_sql(connections[self.db].ops.quote_name, connections[self.db])
+        custom_sel = '%s(%s, %s)' % (connections[self.db].ops.transform, sql, srid)
+        self.query.add_context('transformed_srid', srid)
+        self.query.add_annotation(GeoRawSQL(custom_sel, params, field_col.output_field), label)
+        return self
 
     def union(self, geom, **kwargs):
         """
@@ -433,7 +453,7 @@ class GeoQuerySet(QuerySet):
 
         # Is there a geographic field in the model to perform this
         # operation on?
-        geo_field = self.query._geo_field(field_name)
+        geo_field = self._geo_field(field_name)
         if not geo_field:
             raise TypeError('%s output only available on GeometryFields.' % func)
 
@@ -454,7 +474,7 @@ class GeoQuerySet(QuerySet):
         returning their result to the caller of the function.
         """
         # Getting the field the geographic aggregate will be called on.
-        geo_field = self.query._geo_field(field_name)
+        geo_field = self._geo_field(field_name)
         if not geo_field:
             raise TypeError('%s aggregate only available on GeometryFields.' % aggregate.name)
 
@@ -500,6 +520,7 @@ class GeoQuerySet(QuerySet):
           The name of the model attribute to attach the output of
           the spatial function to.
         """
+        clone = self._clone()
         # Default settings.
         settings.setdefault('desc', None)
         settings.setdefault('geom_args', ())
@@ -508,13 +529,14 @@ class GeoQuerySet(QuerySet):
         settings.setdefault('procedure_fmt', '%(geo_col)s')
         settings.setdefault('select_params', [])
 
-        connection = connections[self.db]
+        connection = connections[clone.db]
         backend = connection.ops
 
         # Performing setup for the spatial column, unless told not to.
         if settings.get('setup', True):
-            default_args, geo_field = self._spatial_setup(att, desc=settings['desc'], field_name=field_name,
-                                                          geo_field_type=settings.get('geo_field_type', None))
+            default_args, geo_field = clone._spatial_setup(
+                att, desc=settings['desc'], field_name=field_name,
+                geo_field_type=settings.get('geo_field_type', None))
             for k, v in six.iteritems(default_args):
                 settings['procedure_args'].setdefault(k, v)
         else:
@@ -546,16 +568,19 @@ class GeoQuerySet(QuerySet):
         if settings.get('select_field', False):
             sel_fld = settings['select_field']
             if isinstance(sel_fld, GeomField) and backend.select:
-                self.query.custom_select[model_att] = backend.select
+                clone.query.add_annotation(backend.select, model_att)
             if connection.ops.oracle:
                 sel_fld.empty_strings_allowed = False
-            self.query.extra_select_fields[model_att] = sel_fld
+        else:
+            sel_fld = Field()
 
         # Finally, setting the extra selection attribute with
         # the format string expanded with the stored procedure
         # arguments.
-        return self.extra(select={model_att: fmt % settings['procedure_args']},
-                          select_params=settings['select_params'])
+        clone.query.add_annotation(
+            GeoRawSQL(fmt % settings['procedure_args'], settings['select_params'], sel_fld),
+            model_att)
+        return clone
 
     def _distance_attribute(self, func, geom=None, tolerance=0.05, spheroid=False, **kwargs):
         """
@@ -616,8 +641,9 @@ class GeoQuerySet(QuerySet):
         else:
             # Getting whether this field is in units of degrees since the field may have
             # been transformed via the `transform` GeoQuerySet method.
-            if self.query.transformed_srid:
-                u, unit_name, s = get_srid_info(self.query.transformed_srid, connection)
+            srid = self.query.get_context('transformed_srid')
+            if srid:
+                u, unit_name, s = get_srid_info(srid, connection)
                 geodetic = unit_name.lower() in geo_field.geodetic_units
 
             if geodetic and not connection.features.supports_distance_geodetic:
@@ -627,20 +653,23 @@ class GeoQuerySet(QuerySet):
                 )
 
             if distance:
-                if self.query.transformed_srid:
+                if srid:
                     # Setting the `geom_args` flag to false because we want to handle
                     # transformation SQL here, rather than the way done by default
                     # (which will transform to the original SRID of the field rather
                     #  than to what was transformed to).
                     geom_args = False
-                    procedure_fmt = '%s(%%(geo_col)s, %s)' % (backend.transform, self.query.transformed_srid)
-                    if geom.srid is None or geom.srid == self.query.transformed_srid:
+                    procedure_fmt = ('%s(%%(geo_col)s, %s)' % (
+                        backend.transform, srid))
+                    if geom.srid is None or geom.srid == srid:
                         # If the geom parameter srid is None, it is assumed the coordinates
                         # are in the transformed units.  A placeholder is used for the
                         # geometry parameter.  `GeomFromText` constructor is also needed
                         # to wrap geom placeholder for SpatiaLite.
                         if backend.spatialite:
-                            procedure_fmt += ', %s(%%%%s, %s)' % (backend.from_text, self.query.transformed_srid)
+                            procedure_fmt += (
+                                ', %s(%%%%s, %s)' %
+                                (backend.from_text, srid))
                         else:
                             procedure_fmt += ', %%s'
                     else:
@@ -649,10 +678,12 @@ class GeoQuerySet(QuerySet):
                         # SpatiaLite also needs geometry placeholder wrapped in `GeomFromText`
                         # constructor.
                         if backend.spatialite:
-                            procedure_fmt += ', %s(%s(%%%%s, %s), %s)' % (backend.transform, backend.from_text,
-                                                                          geom.srid, self.query.transformed_srid)
+                            procedure_fmt += (', %s(%s(%%%%s, %s), %s)' % (
+                                backend.transform, backend.from_text,
+                                geom.srid, srid))
                         else:
-                            procedure_fmt += ', %s(%%%%s, %s)' % (backend.transform, self.query.transformed_srid)
+                            procedure_fmt += ', %s(%%%%s, %s)' % (
+                                backend.transform, srid)
                 else:
                     # `transform()` was not used on this GeoQuerySet.
                     procedure_fmt = '%(geo_col)s,%(geom)s'
@@ -743,22 +774,56 @@ class GeoQuerySet(QuerySet):
         column.  Takes into account if the geographic field is in a
         ForeignKey relation to the current model.
         """
+        compiler = self.query.get_compiler(self.db)
         opts = self.model._meta
         if geo_field not in opts.fields:
             # Is this operation going to be on a related geographic field?
             # If so, it'll have to be added to the select related information
             # (e.g., if 'location__point' was given as the field name).
+            # Note: the operation really is defined as "must add select related!"
             self.query.add_select_related([field_name])
-            compiler = self.query.get_compiler(self.db)
             compiler.pre_sql_setup()
-            for (rel_table, rel_col), field in self.query.related_select_cols:
-                if field == geo_field:
-                    return compiler._field_column(geo_field, rel_table)
-            raise ValueError("%r not in self.query.related_select_cols" % geo_field)
+            for col, _, _ in compiler.select:
+                if col.output_field == geo_field:
+                    return col.as_sql(compiler, compiler.connection)[0]
+            raise ValueError("%r not in compiler's related_select_cols" % geo_field)
         elif geo_field not in opts.local_fields:
             # This geographic field is inherited from another model, so we have to
             # use the db table for the _parent_ model instead.
             tmp_fld, parent_model, direct, m2m = opts.get_field_by_name(geo_field.name)
-            return self.query.get_compiler(self.db)._field_column(geo_field, parent_model._meta.db_table)
+            return self._field_column(compiler, geo_field, parent_model._meta.db_table)
         else:
-            return self.query.get_compiler(self.db)._field_column(geo_field)
+            return self._field_column(compiler, geo_field)
+
+    # Private API utilities, subject to change.
+    def _geo_field(self, field_name=None):
+        """
+        Returns the first Geometry field encountered; or specified via the
+        `field_name` keyword.  The `field_name` may be a string specifying
+        the geometry field on this GeoQuery's model, or a lookup string
+        to a geometry field via a ForeignKey relation.
+        """
+        if field_name is None:
+            # Incrementing until the first geographic field is found.
+            for fld in self.model._meta.fields:
+                if isinstance(fld, GeometryField):
+                    return fld
+            return False
+        else:
+            # Otherwise, check by the given field name -- which may be
+            # a lookup to a _related_ geographic field.
+            return GISLookup._check_geo_field(self.model._meta, field_name)
+
+    def _field_column(self, compiler, field, table_alias=None, column=None):
+        """
+        Helper function that returns the database column for the given field.
+        The table and column are returned (quoted) in the proper format, e.g.,
+        `"geoapp_city"."point"`.  If `table_alias` is not specified, the
+        database table associated with the model of this `GeoQuery` will be
+        used.  If `column` is specified, it will be used instead of the value
+        in `field.column`.
+        """
+        if table_alias is None:
+            table_alias = compiler.query.get_meta().db_table
+        return "%s.%s" % (compiler.quote_name_unless_alias(table_alias),
+                          compiler.connection.ops.quote_name(column or field.column))

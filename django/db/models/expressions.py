@@ -489,9 +489,11 @@ class Value(ExpressionNode):
 
 
 class RawSQL(ExpressionNode):
-    def __init__(self, sql):
-        self.sql, self.params = sql
-        super(RawSQL, self).__init__(output_field=fields.Field())
+    def __init__(self, sql, params, output_field=None):
+        if output_field is None:
+            output_field = fields.Field()
+        self.sql, self.params = sql, params
+        super(RawSQL, self).__init__(output_field=output_field)
 
     def as_sql(self, compiler, connection):
         return '(%s)' % self.sql, self.params

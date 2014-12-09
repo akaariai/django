@@ -1,5 +1,5 @@
 from django.db.models.fields import Field
-from django.db.models.expressions import ExpressionNode
+from django.db.models.expressions import ExpressionNode, Col
 from django.utils.translation import ugettext_lazy as _
 from django.contrib.gis import forms
 from django.contrib.gis.db.models.lookups import gis_lookups
@@ -11,6 +11,51 @@ from django.utils import six
 # spatial database alias. This cache exists so that the database isn't queried
 # for SRID info each time a distance query is constructed.
 _srid_cache = {}
+
+
+class GeoCol(Col):
+    def get_select_format(self, query, connection, fld):
+        """
+        Returns the selection format string, depending on the requirements
+        of the spatial backend.  For example, Oracle and MySQL require custom
+        selection formats in order to retrieve geometries in OGC WKT. For all
+        other fields a simple '%s' format string is returned.
+        """
+        if connection.ops.select and hasattr(fld, 'geom_type'):
+            # This allows operations to be done on fields in the SELECT,
+            # overriding their values -- used by the Oracle and MySQL
+            # spatial backends to get database values as WKT, and by the
+            # `transform` method.
+            sel_fmt = connection.ops.select
+
+            # Because WKT doesn't contain spatial reference information,
+            # the SRID is prefixed to the returned WKT to ensure that the
+            # transformed geometries have an SRID different than that of the
+            # field -- this is only used by `transform` for Oracle and
+            # SpatiaLite backends.
+            if query and query.get_context('transformed_srid') and (
+                    self.connection.ops.oracle or self.connection.ops.spatialite):
+                sel_fmt = "'SRID=%d;'||%s" % (query.get_context('transformed_srid'), sel_fmt)
+        else:
+            sel_fmt = '%s'
+        return sel_fmt
+
+    def as_sql(self, compiler, connection):
+        # Ugly hack - in some cases the compiler supplied as first parameter isn't
+        # actually a compiler. Instead it can be a quote_name_unless_value method!
+        # FIXME!
+        try:
+            query = compiler.query
+        except AttributeError:
+            # Set up a fake compiler class
+            # It doesn't get much uglier than this, right ;)
+            class FakeCompiler(object):
+                def quote_name_unless_alias(self, *args, **kwargs):
+                    return compiler.quote_name_unless_alias(*args, **kwargs)
+            compiler = FakeCompiler()
+            query = None
+        sql, params = super(GeoCol, self).as_sql(compiler, connection)
+        return self.get_select_format(query, connection, self.field) % sql, params
 
 
 def get_srid_info(srid, connection):
@@ -200,6 +245,9 @@ class GeometryField(Field):
         if value and not isinstance(value, Geometry):
             value = Geometry(value)
         return value
+
+    def get_col(self, alias, source=None):
+        return GeoCol(alias, self, source or self)
 
     def get_srid(self, geom):
         """

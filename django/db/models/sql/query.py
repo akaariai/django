@@ -164,6 +164,8 @@ class Query(object):
         # load.
         self.deferred_loading = (set(), True)
 
+        self.context = {}
+
     @property
     def extra(self):
         if self._extra is None:
@@ -300,7 +302,14 @@ class Query(object):
         obj.__dict__.update(kwargs)
         if hasattr(obj, '_setup_query'):
             obj._setup_query()
+        obj.context = self.context.copy()
         return obj
+
+    def add_context(self, key, value):
+        self.context[key] = value
+
+    def get_context(self, key, default=None):
+        return self.context.get(key, default)
 
     def relabeled_clone(self, change_map):
         clone = self.clone()
@@ -938,7 +947,7 @@ class Query(object):
             RemovedInDjango20Warning, stacklevel=2)
         self.add_annotation(aggregate, alias, is_summary)
 
-    def add_annotation(self, annotation, alias, is_summary):
+    def add_annotation(self, annotation, alias, is_summary=False):
         """
         Adds a single annotation expression to the Query
         """
