@@ -345,7 +345,6 @@ class SQLCompiler(object):
         for name in self.query.distinct_fields:
             parts = name.split(LOOKUP_SEP)
             _, targets, alias, joins, path, _ = self._setup_joins(parts)
-            targets, alias, _ = self.query.trim_joins(targets, joins, path)
             for target in targets:
                 result.append("%s.%s" % (qn(alias), qn2(target.column)))
         return result
@@ -451,7 +450,7 @@ class SQLCompiler(object):
         self.ordering_params = ordering_params
         return result, params, group_by
 
-    def find_ordering_name(self, name, alias=None, default_order='ASC',
+    def find_ordering_name(self, name, default_order='ASC',
                            already_seen=None):
         """
         Returns the table alias (the name might be ambiguous, the alias will
@@ -460,29 +459,28 @@ class SQLCompiler(object):
         """
         name, order = get_order_dir(name, default_order)
         pieces = name.split(LOOKUP_SEP)
-        field, targets, alias, joins, path, opts = self._setup_joins(pieces, alias)
+        field, targets, alias, joins, path, opts = self._setup_joins(pieces)
 
         # If we get to this point and the field is a relation to another model,
         # append the default ordering for that model unless the attribute name
         # of the field is specified.
         if field.rel and path and opts.ordering and name != field.attname:
-            # Firstly, avoid infinite loops.
-            if not already_seen:
-                already_seen = set()
-            join_tuple = tuple(self.query.alias_map[j].table_name for j in joins)
-            if join_tuple in already_seen:
-                raise FieldError('Infinite loop caused by ordering.')
-            already_seen.add(join_tuple)
-
             results = []
             for item in opts.ordering:
-                results.extend(self.find_ordering_name(item, alias,
-                                                       order, already_seen))
+                # Avoid infinite loops.
+                if not already_seen:
+                    already_seen = set()
+                if (opts, item) in already_seen:
+                    raise FieldError('Infinite loop caused by ordering.')
+                already_seen.add((opts, item))
+                # Resolve the order direction of the next item.
+                item, next_order = get_order_dir(item, order)
+                results.extend(self.find_ordering_name(name + LOOKUP_SEP + item,
+                                                       next_order, already_seen))
             return results
-        targets, alias, _ = self.query.trim_joins(targets, joins, path)
         return [(alias, [t.column for t in targets], order)]
 
-    def _setup_joins(self, pieces, alias):
+    def _setup_joins(self, pieces):
         """
         A helper method for get_ordering and get_distinct.
 
@@ -490,9 +488,8 @@ class SQLCompiler(object):
         columns on same input, as the prefixes of get_ordering and get_distinct
         must match. Executing SQL where this is not true is an error.
         """
-        field, targets, opts, joins, path = self.query.setup_joins(
-            pieces, alias)
-        alias = joins[-1]
+        field, targets, opts, joins, path = self.query.setup_joins(pieces)
+        targets, alias, _ = self.query.trim_joins(targets, joins, path)
         return field, targets, alias, joins, path, opts
 
     def get_from_clause(self):

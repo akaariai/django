@@ -1484,7 +1484,7 @@ class Query(object):
             self.unref_alias(joins.pop())
         return targets, joins[-1], joins
 
-    def resolve_ref(self, name, allow_joins, reuse, summarize):
+    def resolve_ref(self, name, allow_joins, reuse, summarize, from_alias=None):
         if not allow_joins and LOOKUP_SEP in name:
             raise FieldError("Joined field references are not permitted in this query")
         if name in self.annotations:
@@ -1499,7 +1499,7 @@ class Query(object):
         else:
             field_list = name.split(LOOKUP_SEP)
             field, sources, opts, join_list, path = self.setup_joins(
-                field_list, can_reuse=reuse)
+                field_list, from_alias, can_reuse=reuse)
             targets, _, join_list = self.trim_joins(sources, join_list, path)
             if len(targets) > 1:
                 raise FieldError("Referencing multicolumn fields with F() objects "
