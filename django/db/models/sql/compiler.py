@@ -341,11 +341,10 @@ class SQLCompiler(object):
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
         result = []
-        opts = self.query.get_meta()
 
         for name in self.query.distinct_fields:
             parts = name.split(LOOKUP_SEP)
-            _, targets, alias, joins, path, _ = self._setup_joins(parts, opts, None)
+            _, targets, alias, joins, path, _ = self._setup_joins(parts)
             targets, alias, _ = self.query.trim_joins(targets, joins, path)
             for target in targets:
                 result.append("%s.%s" % (qn(alias), qn2(target.column)))
@@ -424,8 +423,8 @@ class SQLCompiler(object):
             elif not self.query._extra or get_order_dir(field)[0] not in self.query._extra:
                 # 'col' is of the form 'field' or 'field1__field2' or
                 # '-field1__field2__field', etc.
-                for table, cols, order in self.find_ordering_name(field,
-                        self.query.get_meta(), default_order=asc):
+                for table, cols, order in self.find_ordering_name(
+                        field, default_order=asc):
                     for col in cols:
                         if (table, col) not in processed_pairs:
                             elt = '%s.%s' % (qn(table), qn2(col))
@@ -452,7 +451,7 @@ class SQLCompiler(object):
         self.ordering_params = ordering_params
         return result, params, group_by
 
-    def find_ordering_name(self, name, opts, alias=None, default_order='ASC',
+    def find_ordering_name(self, name, alias=None, default_order='ASC',
                            already_seen=None):
         """
         Returns the table alias (the name might be ambiguous, the alias will
@@ -461,7 +460,7 @@ class SQLCompiler(object):
         """
         name, order = get_order_dir(name, default_order)
         pieces = name.split(LOOKUP_SEP)
-        field, targets, alias, joins, path, opts = self._setup_joins(pieces, opts, alias)
+        field, targets, alias, joins, path, opts = self._setup_joins(pieces, alias)
 
         # If we get to this point and the field is a relation to another model,
         # append the default ordering for that model unless the attribute name
@@ -477,13 +476,13 @@ class SQLCompiler(object):
 
             results = []
             for item in opts.ordering:
-                results.extend(self.find_ordering_name(item, opts, alias,
+                results.extend(self.find_ordering_name(item, alias,
                                                        order, already_seen))
             return results
         targets, alias, _ = self.query.trim_joins(targets, joins, path)
         return [(alias, [t.column for t in targets], order)]
 
-    def _setup_joins(self, pieces, opts, alias):
+    def _setup_joins(self, pieces, alias):
         """
         A helper method for get_ordering and get_distinct.
 
@@ -491,10 +490,8 @@ class SQLCompiler(object):
         columns on same input, as the prefixes of get_ordering and get_distinct
         must match. Executing SQL where this is not true is an error.
         """
-        if not alias:
-            alias = self.query.get_initial_alias()
         field, targets, opts, joins, path = self.query.setup_joins(
-            pieces, opts, alias)
+            pieces, alias)
         alias = joins[-1]
         return field, targets, alias, joins, path, opts
 
@@ -626,7 +623,7 @@ class SQLCompiler(object):
                                           only_load.get(field_model)):
                 continue
             _, _, _, joins, _ = self.query.setup_joins(
-                [f.name], opts, root_alias)
+                [f.name], root_alias)
             alias = joins[-1]
             columns, _ = self.get_default_columns(start_alias=alias,
                     opts=f.rel.to._meta, as_pairs=True)
@@ -651,7 +648,7 @@ class SQLCompiler(object):
                     continue
 
                 _, _, _, joins, _ = self.query.setup_joins(
-                    [f.related_query_name()], opts, root_alias)
+                    [f.related_query_name()], root_alias)
                 alias = joins[-1]
                 from_parent = (opts.model if issubclass(model, opts.model)
                                else None)

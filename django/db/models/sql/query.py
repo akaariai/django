@@ -841,7 +841,7 @@ class Query(object):
             alias = self.tables[0]
             self.ref_alias(alias)
         else:
-            alias = self.join(BaseTable(self.get_meta().db_table, None))
+            alias = self.join(BaseTable(self.get_meta().db_table, None, self.get_meta()))
         return alias
 
     def count_active_tables(self):
@@ -941,9 +941,8 @@ class Query(object):
                 curr_opts = int_model._meta
                 continue
             link_field = curr_opts.get_ancestor_link(int_model)
-            _, _, _, joins, _ = self.setup_joins(
-                [link_field.name], curr_opts, alias)
-            curr_opts = int_model._meta
+            _, _, curr_opts, joins, _ = self.setup_joins(
+                [link_field.name], alias)
             alias = seen[int_model] = joins[-1]
         return alias or seen[None]
 
@@ -1149,13 +1148,11 @@ class Query(object):
             clause.add(condition, AND)
             return clause, []
 
-        opts = self.get_meta()
-        alias = self.get_initial_alias()
         allow_many = not branch_negated
 
         try:
             field, sources, opts, join_list, path = self.setup_joins(
-                parts, opts, alias, can_reuse=can_reuse, allow_many=allow_many)
+                parts, can_reuse=can_reuse, allow_many=allow_many)
 
             self.check_related_objects(field, value, opts)
 
@@ -1412,12 +1409,11 @@ class Query(object):
         raise FieldError("Cannot resolve keyword %r into field. "
                          "Choices are: %s" % (name, ", ".join(available)))
 
-    def setup_joins(self, names, opts, alias, can_reuse=None, allow_many=True):
+    def setup_joins(self, names, alias=None, can_reuse=None, allow_many=True):
         """
         Compute the necessary table joins for the passage through the fields
-        given in 'names'. 'opts' is the Options class for the current model
-        (which gives the table we are starting from), 'alias' is the alias for
-        the table to start the joining from.
+        given in 'names'. 'alias' is the alias for the table to start the
+        joining from.
 
         The 'can_reuse' defines the reverse foreign key joins we can reuse. It
         can be None in which case all joins are reusable or a set of aliases
@@ -1437,6 +1433,9 @@ class Query(object):
         conversions (convert 'obj' in fk__id=obj to pk val using the foreign
         key field for example).
         """
+        if not alias:
+            alias = self.get_initial_alias()
+        opts = self.alias_map[alias].opts
         joins = [alias]
         # First, generate the path for the names
         path, final_field, targets, rest = self.names_to_path(
@@ -1451,7 +1450,7 @@ class Query(object):
                 nullable = self.is_nullable(join.join_field)
             else:
                 nullable = True
-            connection = Join(opts.db_table, alias, None, INNER, join.join_field, nullable)
+            connection = Join(opts.db_table, alias, None, INNER, join.join_field, nullable, opts)
             reuse = can_reuse if join.m2m else None
             alias = self.join(connection, reuse=reuse)
             joins.append(alias)
@@ -1500,8 +1499,7 @@ class Query(object):
         else:
             field_list = name.split(LOOKUP_SEP)
             field, sources, opts, join_list, path = self.setup_joins(
-                field_list, self.get_meta(),
-                self.get_initial_alias(), reuse)
+                field_list, can_reuse=reuse)
             targets, _, join_list = self.trim_joins(sources, join_list, path)
             if len(targets) > 1:
                 raise FieldError("Referencing multicolumn fields with F() objects "
@@ -1649,15 +1647,12 @@ class Query(object):
         Adds the given (model) fields to the select set. The field names are
         added in the order specified.
         """
-        alias = self.get_initial_alias()
-        opts = self.get_meta()
-
         try:
             for name in field_names:
                 # Join promotion note - we must not remove any rows here, so
                 # if there is no existing joins, use outer join.
                 _, targets, _, joins, path = self.setup_joins(
-                    name.split(LOOKUP_SEP), opts, alias, allow_many=allow_m2m)
+                    name.split(LOOKUP_SEP), allow_many=allow_m2m)
                 targets, final_alias, joins = self.trim_joins(targets, joins, path)
                 for target in targets:
                     self.select.append(SelectInfo((final_alias, target.column), target))
@@ -1669,6 +1664,7 @@ class Query(object):
                 # from the model on which the lookup failed.
                 raise
             else:
+                opts = self.get_meta()
                 names = sorted(opts.get_all_field_names() + list(self.extra)
                                + list(self.annotation_select))
                 raise FieldError("Cannot resolve keyword %r into field. "
@@ -1989,7 +1985,8 @@ class Query(object):
         # But the first entry in the query's FROM clause must not be a JOIN.
         for table in self.tables:
             if self.alias_refcount[table] > 0:
-                self.alias_map[table] = BaseTable(self.alias_map[table].table_name, table)
+                self.alias_map[table] = BaseTable(self.alias_map[table].table_name, table,
+                                                  self.alias_map[table].opts)
                 break
         self.select = [SelectInfo((select_alias, f.column), f) for f in select_fields]
         return trimmed_prefix, contains_louter

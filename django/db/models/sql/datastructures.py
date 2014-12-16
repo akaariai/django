@@ -3,6 +3,7 @@ Useful auxiliary data structures for query construction. Not useful outside
 the SQL domain.
 """
 from django.db.models.sql.constants import INNER, LOUTER
+from django.apps import apps
 
 
 class EmptyResultSet(Exception):
@@ -39,12 +40,13 @@ class Join(object):
           anything)
         - parent_alias (which table is this join's parent, can be None similarly
           to join_type)
+        - opts
         - as_sql()
         - relabeled_clone()
 
     """
     def __init__(self, table_name, parent_alias, table_alias, join_type,
-                 join_field, nullable):
+                 join_field, nullable, opts):
         # Join table
         self.table_name = table_name
         self.parent_alias = parent_alias
@@ -59,6 +61,7 @@ class Join(object):
         self.join_field = join_field
         # Is this join nullabled?
         self.nullable = nullable
+        self.opts = opts
 
     def as_sql(self, compiler, connection):
         """
@@ -96,7 +99,7 @@ class Join(object):
         new_table_alias = change_map.get(self.table_alias, self.table_alias)
         return self.__class__(
             self.table_name, new_parent_alias, new_table_alias, self.join_type,
-            self.join_field, self.nullable)
+            self.join_field, self.nullable, self.opts)
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -117,6 +120,17 @@ class Join(object):
         new.join_type = LOUTER
         return new
 
+    def __getstate__(self):
+        # Autocreated models and their options aren't pickleable, so store a reference
+        # to app_label, model_name instead.
+        data = self.__dict__.copy()
+        data['opts'] = (self.opts.app_label, self.opts.model_name)
+        return data
+
+    def __setstate__(self, data):
+        data['opts'] = apps.get_model(data['opts'][0], data['opts'][1])._meta
+        self.__dict__ = data
+
 
 class BaseTable(object):
     """
@@ -128,9 +142,10 @@ class BaseTable(object):
     join_type = None
     parent_alias = None
 
-    def __init__(self, table_name, alias):
+    def __init__(self, table_name, alias, opts):
         self.table_name = table_name
         self.table_alias = alias
+        self.opts = opts
 
     def as_sql(self, compiler, connection):
         alias_str = '' if self.table_alias == self.table_name else (' %s' % self.table_alias)
@@ -138,4 +153,15 @@ class BaseTable(object):
         return base_sql + alias_str, []
 
     def relabeled_clone(self, change_map):
-        return self.__class__(self.table_name, change_map.get(self.table_alias, self.table_alias))
+        return self.__class__(self.table_name,
+                              change_map.get(self.table_alias, self.table_alias),
+                              self.opts)
+
+    def __getstate__(self):
+        data = self.__dict__.copy()
+        data['opts'] = (self.opts.app_label, self.opts.model_name)
+        return data
+
+    def __setstate__(self, data):
+        data['opts'] = apps.get_model(data['opts'][0], data['opts'][1])._meta
+        self.__dict__ = data
