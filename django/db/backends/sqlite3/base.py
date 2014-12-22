@@ -147,6 +147,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
 
 
 class DatabaseOperations(BaseDatabaseOperations):
+
     def bulk_batch_size(self, fields, objs):
         """
         SQLite has a compile-time default (SQLITE_LIMIT_VARIABLE_NUMBER) of
@@ -321,6 +322,10 @@ class DatabaseOperations(BaseDatabaseOperations):
 
 
 class DatabaseWrapper(BaseDatabaseWrapper):
+
+    node_to_sql_cache = {}
+    node_to_converters_cache = {}
+
     vendor = 'sqlite'
     # SQLite requires LIKE statements to include an ESCAPE clause if the value
     # being escaped has a percent or underscore in it.

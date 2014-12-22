@@ -47,6 +47,7 @@ class WhereNode(tree.Node):
     variable.
     """
     default = AND
+    _cacheable = False
 
     def _prepare_data(self, data):
         """
@@ -322,6 +323,7 @@ class EverythingNode(object):
     """
     A node that matches everything.
     """
+    _cacheable = False
 
     def as_sql(self, compiler=None, connection=None):
         return '', []
@@ -331,11 +333,15 @@ class NothingNode(object):
     """
     A node that matches nothing.
     """
+    _cacheable = False
+
     def as_sql(self, compiler=None, connection=None):
         raise EmptyResultSet
 
 
 class ExtraWhere(object):
+    _cacheable = False
+
     def __init__(self, sqls, params):
         self.sqls = sqls
         self.params = params
@@ -396,6 +402,8 @@ class Constraint(object):
 
 
 class SubqueryConstraint(object):
+    _cacheable = False
+
     def __init__(self, alias, columns, targets, query_object):
         self.alias = alias
         self.columns = columns

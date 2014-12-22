@@ -303,7 +303,9 @@ class Field(RegisterLookupMixin):
     @cached_property
     def cached_col(self):
         from django.db.models.expressions import Col
-        return Col(self.model._meta.db_table, self)
+        ret = Col(self.model._meta.db_table, self)
+        ret._cacheable = True
+        return ret
 
     def select_format(self, compiler, sql, params):
         """

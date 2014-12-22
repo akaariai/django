@@ -43,6 +43,8 @@ class Join(object):
         - relabeled_clone()
 
     """
+    _cacheable = False
+
     def __init__(self, table_name, parent_alias, table_alias, join_type,
                  join_field, nullable):
         # Join table
@@ -127,6 +129,7 @@ class BaseTable(object):
     """
     join_type = None
     parent_alias = None
+    _cacheable = False
 
     def __init__(self, table_name, alias):
         self.table_name = table_name

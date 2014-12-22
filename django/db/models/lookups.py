@@ -59,6 +59,7 @@ class RegisterLookupMixin(object):
 
 class Transform(RegisterLookupMixin):
 
+    _cacheable = False
     bilateral = False
 
     def __init__(self, lhs, lookups):
@@ -90,6 +91,7 @@ class Transform(RegisterLookupMixin):
 
 class Lookup(RegisterLookupMixin):
     lookup_name = None
+    _cacheable = False
 
     def __init__(self, lhs, rhs):
         self.lhs, self.rhs = lhs, rhs

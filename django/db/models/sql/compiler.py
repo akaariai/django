@@ -15,6 +15,8 @@ from django.utils.six.moves import zip
 
 
 class SQLCompiler(object):
+    _cacheable = False
+
     def __init__(self, query, connection, using):
         self.query = query
         self.connection = connection
@@ -304,6 +306,12 @@ class SQLCompiler(object):
         return r
 
     def compile(self, node, select_format=False):
+        if node._cacheable:
+            try:
+                sql, params = self.connection.node_to_sql_cache[(node, select_format)]
+                return sql, params[:]
+            except KeyError:
+                pass
         vendor_impl = getattr(
             node, 'as_' + self.connection.vendor, None)
         if vendor_impl:
@@ -311,7 +319,9 @@ class SQLCompiler(object):
         else:
             sql, params = node.as_sql(self, self.connection)
         if select_format:
-            return node.output_field.select_format(self, sql, params)
+            sql, params = node.output_field.select_format(self, sql, params)
+        if node._cacheable:
+            self.connection.node_to_sql_cache[(node, select_format)] = (sql, params[:])
         return sql, params
 
     def as_sql(self, with_limits=True, with_col_aliases=False):
@@ -731,10 +741,19 @@ class SQLCompiler(object):
         converters = {}
         for i, expression in enumerate(expressions):
             if expression:
-                backend_converters = self.connection.ops.get_db_converters(expression)
-                field_converters = expression.get_db_converters(self.connection)
+                if expression._cacheable:
+                    try:
+                        backend_converters, field_converters = self.connection.node_to_converters_cache[expression]
+                    except KeyError:
+                        backend_converters = self.connection.ops.get_db_converters(expression)
+                        field_converters = expression.get_db_converters(self.connection)
+                        self.connection.node_to_converters_cache[expression] = backend_converters, field_converters
+                else:
+                    backend_converters = self.connection.ops.get_db_converters(expression)
+                    field_converters = expression.get_db_converters(self.connection)
                 if backend_converters or field_converters:
                     converters[i] = (backend_converters, field_converters, expression)
+
         return converters
 
     def apply_converters(self, row, converters):

@@ -125,6 +125,10 @@ class ExpressionNode(CombinableMixin):
 
     # aggregate specific fields
     is_summary = False
+    # Is it worth it to cache the result of this expression? Both SQL and
+    # db_converters will be cached. The caching happens per instance. Mostly
+    # usable for base columns which are reused a lot.
+    _cacheable = False
 
     def get_db_converters(self, connection):
         return [self.convert_value] + self.output_field.get_db_converters(connection)
