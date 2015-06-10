@@ -22,7 +22,7 @@ from django.test.utils import Approximate
 from django.utils import six
 from django.utils.timezone import utc
 
-from .models import UUID, Company, Employee, Experiment, Number, Time
+from .models import UUID, Company, Employee, Experiment, Number, Time, Product, Price, PriceTier
 
 
 class BasicExpressionsTests(TestCase):
@@ -92,6 +92,17 @@ class BasicExpressionsTests(TestCase):
         with self.assertNumQueries(1):
             ceo = qs2[0]
             self.assertEqual(ceo.ceo_in_large_company.ceo, ceo)
+
+    def test_model_annotation_deep(self):
+        qs = Product.objects.annotate(
+            price_tier1=ModelAnnotation('tier_prices', only=Q(tier_prices__tier=1)),
+            price_tier2=ModelAnnotation('tier_prices', only=Q(tier_prices__tier=2)),
+            price_tier3=ModelAnnotation('tier_prices', only=Q(tier_prices__tier=3))
+        ).annotate(
+            best_price=Coalesce('price_tier1__price__price', 'price_tier2__price__price',
+                                'price_tier3__price__price'))
+        print(qs.query)
+
 
     def test_update(self):
         # We can set one field to have the value of another field

@@ -73,3 +73,17 @@ class UUID(models.Model):
 
     def __str__(self):
         return "%s" % self.uuid
+
+
+class Product(models.Model):
+    pass
+
+
+class Price(models.Model):
+    price = models.IntegerField()
+
+
+class PriceTier(models.Model):
+    product = models.ForeignKey(Product, related_name='tier_prices')
+    price = models.ForeignKey(Price)
+    tier = models.IntegerField()
