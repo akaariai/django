@@ -982,7 +982,7 @@ class ModelAnnotation(object):
             final_field, targets, opts, joins, path = query.setup_joins(
                 clone.model_ref.split(LOOKUP_SEP), query.get_meta(), query.get_initial_alias(),
                 can_reuse=set())
-            condition, promotable_joins = query._add_q(clone.only, used_aliases=None)
+            condition, promotable_joins = query._add_q(clone.only, used_aliases=set(joins))
             query.promote_joins(promotable_joins)
             final = query.alias_map[joins[-1]]
             final.extra_cond = condition

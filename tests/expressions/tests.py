@@ -94,15 +94,26 @@ class BasicExpressionsTests(TestCase):
             self.assertEqual(ceo.ceo_in_large_company.ceo, ceo)
 
     def test_model_annotation_deep(self):
+        pro1 = Product.objects.create()
+        pro2 = Product.objects.create()
+        pri1 = Price.objects.create(price=1000)
+        pri2 = Price.objects.create(price=900)
+        pri3 = Price.objects.create(price=800)
+        PriceTier.objects.create(product=pro1, price=pri1, tier=3)
+        PriceTier.objects.create(product=pro2, price=pri1, tier=3)
+        PriceTier.objects.create(product=pro2, price=pri2, tier=2)
+        PriceTier.objects.create(product=pro2, price=pri3, tier=1)
         qs = Product.objects.annotate(
             price_tier1=ModelAnnotation('tier_prices', only=Q(tier_prices__tier=1)),
             price_tier2=ModelAnnotation('tier_prices', only=Q(tier_prices__tier=2)),
             price_tier3=ModelAnnotation('tier_prices', only=Q(tier_prices__tier=3))
         ).annotate(
             best_price=Coalesce('price_tier1__price__price', 'price_tier2__price__price',
-                                'price_tier3__price__price'))
+                                'price_tier3__price__price')
+        ).order_by('best_price')
         print(qs.query)
-
+        print(qs[0].pk, pro1.pk)
+        print(qs[0].best_price, qs[1].best_price)
 
     def test_update(self):
         # We can set one field to have the value of another field
