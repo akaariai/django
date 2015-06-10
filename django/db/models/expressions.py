@@ -953,3 +953,47 @@ class OrderBy(BaseExpression):
 
     def desc(self):
         self.descending = True
+
+
+class CacheNameWrapper(object):
+    def __init__(self, obj):
+        self.obj = obj
+
+    def get_cache_name(self):
+        return self.obj.final_field.remote_field.get_cache_name()
+
+
+class ModelAnnotation(object):
+    contains_aggregate = False
+    unique = False
+
+    def __init__(self, model_ref, only=None, connection=None):
+        self.model_ref = model_ref
+        self.only = only
+        self.connection = connection
+
+    def resolve_expression(self, query=None, allow_joins=True, reuse=None, summarize=False, for_save=False):
+        # 1. If self.model_ref is a str, then resolve where it refers (with names_to_path)
+        #    - Also, setup joins for prefixes
+        #    - Finally, fetch the connection from the names_to_path
+        # 2. Add final join, add only to its extra join restriction (Join subclass maybe?)
+        clone = ModelAnnotation(self.model_ref, self.only, self.connection)
+        if isinstance(clone.model_ref, six.text_type):
+            final_field, targets, opts, joins, path = query.setup_joins(
+                clone.model_ref.split(LOOKUP_SEP), query.get_meta(), query.get_initial_alias(),
+                can_reuse=set())
+            condition, promotable_joins = query._add_q(clone.only, used_aliases=None)
+            query.promote_joins(promotable_joins)
+            final = query.alias_map[joins[-1]]
+            final.extra_cond = condition
+            clone.opts = opts
+            clone.join = final
+            clone.final_field = final_field
+            return clone
+
+    def get_cache_name(self):
+        return self.query_alias
+
+    @property
+    def remote_field(self):
+        return CacheNameWrapper(self)

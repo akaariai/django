@@ -6,13 +6,13 @@ from copy import deepcopy
 
 from django.core.exceptions import FieldError
 from django.db import DatabaseError, connection, models, transaction
-from django.db.models import TimeField, UUIDField
+from django.db.models import TimeField, UUIDField, Q
 from django.db.models.aggregates import (
     Avg, Count, Max, Min, StdDev, Sum, Variance,
 )
 from django.db.models.expressions import (
     F, Case, Col, Date, DateTime, ExpressionWrapper, Func, OrderBy, Random,
-    RawSQL, Ref, Value, When,
+    RawSQL, Ref, Value, When, ModelAnnotation
 )
 from django.db.models.functions import (
     Coalesce, Concat, Length, Lower, Substr, Upper,
@@ -76,6 +76,22 @@ class BasicExpressionsTests(TestCase):
             ],
             lambda o: o
         )
+
+    def test_model_annotation(self):
+        qs = Employee.objects.annotate(
+            ceo_in_large_company=ModelAnnotation('company_ceo_set', only=Q(company_ceo_set__num_employees__gte=2000)))
+        self.assertTrue(' LEFT OUTER ' in str(qs.query))
+        qs2 = Employee.objects.annotate(
+            ceo_in_large_company=ModelAnnotation('company_ceo_set', only=Q(company_ceo_set__num_employees__gte=2000))
+        ).filter(ceo_in_large_company__num_chairs__gte=5)
+        self.assertTrue(' INNER JOIN ' in str(qs2.query))
+        self.assertEqual(qs2.count(), 1)
+        with self.assertNumQueries(1):
+            self.assertEqual(qs2[0].ceo_in_large_company.name, 'Example Inc.')
+        qs2.select_related('ceo_in_large_company__ceo')
+        with self.assertNumQueries(1):
+            ceo = qs2[0]
+            self.assertEqual(ceo.ceo_in_large_company.ceo, ceo)
 
     def test_update(self):
         # We can set one field to have the value of another field

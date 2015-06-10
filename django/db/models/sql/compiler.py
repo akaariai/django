@@ -671,6 +671,28 @@ class SQLCompiler(object):
         def get_related_klass_infos(klass_info, related_klass_infos):
             klass_info['related_klass_infos'] = related_klass_infos
 
+        for name, model_annotation in self.query.model_annotations.items():
+            if name not in requested:
+                continue
+            fields_found.add(name)
+            next = requested.get(name, {})
+            klass_info = {
+                'model': model_annotation.opts.model,
+                'reverse': False,
+                'field': model_annotation,
+                'from_parent': False
+            }
+            related_klass_infos.append(klass_info)
+            columns = self.get_default_columns(start_alias=model_annotation.join.table_alias, opts=model_annotation.opts)
+            select_fields = []
+            for col in columns:
+                select_fields.append(len(select))
+                select.append((col, None))
+            klass_info['select_fields'] = select_fields
+            next_klass_infos = self.get_related_selections(
+                select, model_annotation.opts, model_annotation.join.table_alias, cur_depth + 1, next, restricted)
+            get_related_klass_infos(klass_info, next_klass_infos)
+
         for f in opts.fields:
             field_model = f.model._meta.concrete_model
             fields_found.add(f.name)

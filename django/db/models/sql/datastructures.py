@@ -59,6 +59,7 @@ class Join(object):
         self.join_field = join_field
         # Is this join nullabled?
         self.nullable = nullable
+        self.extra_cond = None
 
     def as_sql(self, compiler, connection):
         """
@@ -87,16 +88,24 @@ class Join(object):
             extra_sql, extra_params = compiler.compile(extra_cond)
             extra_sql = 'AND (%s)' % extra_sql
             params.extend(extra_params)
-            sql.append('%s' % extra_sql)
+            sql.append(extra_sql)
+        if self.extra_cond:
+            extra_sql, extra_params = compiler.compile(self.extra_cond)
+            extra_sql = 'AND (%s)' % extra_sql
+            params.extend(extra_params)
+            sql.append(extra_sql)
         sql.append(')')
         return ' '.join(sql), params
 
     def relabeled_clone(self, change_map):
         new_parent_alias = change_map.get(self.parent_alias, self.parent_alias)
         new_table_alias = change_map.get(self.table_alias, self.table_alias)
-        return self.__class__(
+        new = self.__class__(
             self.table_name, new_parent_alias, new_table_alias, self.join_type,
             self.join_field, self.nullable)
+        if self.extra_cond:
+            new.extra_cond = self.extra_cond.relabeled_clone(change_map)
+        return new
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):

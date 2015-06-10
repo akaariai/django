@@ -16,7 +16,7 @@ from django.core.exceptions import FieldDoesNotExist, FieldError
 from django.db import DEFAULT_DB_ALIAS, connections
 from django.db.models.aggregates import Count
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.expressions import Col, Ref
+from django.db.models.expressions import Col, Ref, ModelAnnotation
 from django.db.models.fields.related_lookups import MultiColSource
 from django.db.models.query_utils import Q, PathInfo, refs_expression
 from django.db.models.sql.constants import (
@@ -181,6 +181,7 @@ class Query(object):
         self._annotations = None  # Maps alias -> Annotation Expression
         self.annotation_select_mask = None
         self._annotation_select_cache = None
+        self.model_annotations = {}
 
         # These are for extensions. The contents are more or less appended
         # verbatim to the appropriate clause.
@@ -294,6 +295,7 @@ class Query(object):
         obj.select_related = self.select_related
         obj.values_select = self.values_select[:]
         obj._annotations = self._annotations.copy() if self._annotations is not None else None
+        obj.model_annotations = self.model_annotations.copy()
         if self.annotation_select_mask is None:
             obj.annotation_select_mask = None
         else:
@@ -982,8 +984,13 @@ class Query(object):
         """
         annotation = annotation.resolve_expression(self, allow_joins=True, reuse=None,
                                                    summarize=is_summary)
-        self.append_annotation_mask([alias])
-        self.annotations[alias] = annotation
+        if isinstance(annotation, ModelAnnotation):
+            self.model_annotations[alias] = annotation
+            annotation.query_alias = alias
+            self.add_select_related([alias])
+        else:
+            self.append_annotation_mask([alias])
+            self.annotations[alias] = annotation
 
     def prepare_lookup_value(self, value, lookups, can_reuse, allow_joins=True):
         # Default lookup if none given is exact.
@@ -1027,7 +1034,7 @@ class Query(object):
         lookup_splitted = lookup.split(LOOKUP_SEP)
         if self._annotations:
             aggregate, aggregate_lookups = refs_expression(lookup_splitted, self.annotations)
-            if aggregate:
+            if aggregate and not isinstance(aggregate, ModelAnnotation):
                 return aggregate_lookups, (), aggregate
         _, field, _, lookup_parts = self.names_to_path(lookup_splitted, self.get_meta())
         field_parts = lookup_splitted[0:len(lookup_splitted) - len(lookup_parts)]
@@ -1288,6 +1295,11 @@ class Query(object):
         final lookup).
         """
         path, names_with_path = [], []
+        if names[0] in self.model_annotations and isinstance(self.model_annotations[names[0]], ModelAnnotation):
+            annotation = self.model_annotations[names[0]]
+            names = names[1:]
+            opts = annotation.opts
+            path.append(annotation.join)
         for pos, name in enumerate(names):
             cur_names_with_path = (name, [])
             if name == 'pk':
@@ -1395,6 +1407,10 @@ class Query(object):
         # joins at this stage - we will need the information about join type
         # of the trimmed joins.
         for join in path:
+            if isinstance(join, Join):
+                alias = join.table_alias
+                joins.append(alias)
+                continue
             opts = join.to_opts
             if join.direct:
                 nullable = self.is_nullable(join.join_field)
@@ -1422,6 +1438,8 @@ class Query(object):
         """
         joins = joins[:]
         for pos, info in enumerate(reversed(path)):
+            if isinstance(info, Join):
+                break
             if len(joins) == 1 or not info.direct:
                 break
             join_targets = set(t.column for t in info.join_field.foreign_related_fields)
