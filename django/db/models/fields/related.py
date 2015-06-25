@@ -1720,12 +1720,15 @@ class ForeignObject(RelatedField):
             raise exceptions.FieldError('Relation fields do not support nested lookups')
         lookup_type = lookups[0]
 
-        def get_normalized_value(value):
+        def get_normalized_value(value, output_field):
             from django.db.models import Model
             if isinstance(value, Model):
                 value_list = []
+                # A case like Restaurant.objects.filter(place=restaurant_instance),
+                # where place is a OneToOneField and the primary key of Restaurant.
+                if getattr(output_field, 'primary_key', False):
+                    return (value.pk,)
                 for source in sources:
-                    # Account for one-to-one relations when sent a different model
                     while not isinstance(value, source.model) and source.rel:
                         source = source.rel.to._meta.get_field(source.rel.field_name)
                     value_list.append(getattr(value, source.attname))
@@ -1737,25 +1740,29 @@ class ForeignObject(RelatedField):
         is_multicolumn = len(self.related_fields) > 1
         if (hasattr(raw_value, '_as_sql') or
                 hasattr(raw_value, 'get_compiler')):
+            if self.primary_key and self.one_to_one:
+                sources = ['pk']
+            else:
+                sources = [source.name for source in sources]
             root_constraint.add(SubqueryConstraint(alias, [target.column for target in targets],
-                                                   [source.name for source in sources], raw_value),
+                                                   sources, raw_value),
                                 AND)
         elif lookup_type == 'isnull':
             root_constraint.add(IsNull(targets[0].get_col(alias, sources[0]), raw_value), AND)
         elif (lookup_type == 'exact' or (lookup_type in ['gt', 'lt', 'gte', 'lte']
                                          and not is_multicolumn)):
-            value = get_normalized_value(raw_value)
+            value = get_normalized_value(raw_value, self)
             for target, source, val in zip(targets, sources, value):
                 lookup_class = target.get_lookup(lookup_type)
                 root_constraint.add(
                     lookup_class(target.get_col(alias, source), val), AND)
         elif lookup_type in ['range', 'in'] and not is_multicolumn:
-            values = [get_normalized_value(value) for value in raw_value]
+            values = [get_normalized_value(value, self) for value in raw_value]
             value = [val[0] for val in values]
             lookup_class = targets[0].get_lookup(lookup_type)
             root_constraint.add(lookup_class(targets[0].get_col(alias, sources[0]), value), AND)
         elif lookup_type == 'in':
-            values = [get_normalized_value(value) for value in raw_value]
+            values = [get_normalized_value(value, self) for value in raw_value]
             for value in values:
                 value_constraint = constraint_class()
                 for source, target, val in zip(sources, targets, value):

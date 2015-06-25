@@ -19,7 +19,7 @@ from django.db.models.deletion import Collector
 from django.db.models.expressions import F, Date, DateTime
 from django.db.models.fields import AutoField, Empty
 from django.db.models.query_utils import (
-    Q, InvalidQuery, deferred_class_factory,
+    Q, InvalidQuery, check_rel_lookup_compatibility, deferred_class_factory,
 )
 from django.db.models.sql.constants import CURSOR
 from django.utils import six, timezone
@@ -1034,13 +1034,16 @@ class QuerySet(object):
         """
         return self.query.has_filters()
 
-    def is_compatible_query_object_type(self, opts):
-        model = self.model
-        return (
-            model == opts.concrete_model or
-            opts.concrete_model in model._meta.get_parent_list() or
-            model in opts.get_parent_list()
-        )
+    def is_compatible_query_object_type(self, opts, field):
+        """
+        Check that using this queryset as the rhs value for a lookup is
+        allowed. The opts are the options of the relation's target we are
+        querying against. For example in .filter(author__in=Author.objects.all())
+        the opts would be Author's (from the author field) and self.model would
+        be Author.objects.all() queryset's .model (Author also). The field is
+        the related field on the lhs side.
+        """
+        return check_rel_lookup_compatibility(self.model, opts, field)
     is_compatible_query_object_type.queryset_only = True
 
 
@@ -1202,7 +1205,7 @@ class ValuesQuerySet(QuerySet):
                     % self.__class__.__name__)
         return self
 
-    def is_compatible_query_object_type(self, opts):
+    def is_compatible_query_object_type(self, opts, field):
         """
         ValueQuerySets do not need to be checked for compatibility.
         We trust that users of ValueQuerySets know what they are doing.
