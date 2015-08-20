@@ -789,7 +789,6 @@ class Query(object):
         relabelling any references to them in select columns and the where
         clause.
         """
-        assert set(change_map.keys()).intersection(set(change_map.values())) == set()
 
         def relabel_column(col):
             if isinstance(col, (list, tuple)):
