@@ -122,3 +122,25 @@ class M2MRegressionTests(TestCase):
         post.secondary_lines.add(bar)
         self.assertQuerysetEqual(post.primary_lines.all(), ['<Line: foo>'])
         self.assertQuerysetEqual(post.secondary_lines.all(), ['<Line: bar>'])
+
+    def test_add_value_conversion(self):
+        l = Line.objects.create(name='foo')
+        w = Worksheet.objects.create(id='id1')
+        # It is ok to add both as str or as int. But duplicate checking
+        # works only when you add as int.
+        w.lines.add(str(l.pk))
+        # So, this works ok.
+        w.lines.add(l.pk)
+        # This shouldn't fail.
+        w.lines.add(str(l.pk))
+
+    def test_add_value_conversion_string(self):
+        # Similar to test_add_value_conversion, adding to m2m set by primary
+        # key, where the primary key is CharField, should work similarly both
+        # with strings and values that coerce to strings.
+        l = Line.objects.create(name='foo')
+        w = Worksheet.objects.create(id='1')
+        l.worksheet_set.add(int(w.pk))
+        l.worksheet_set.add(w.pk)
+        # This shouldn't fail.
+        l.worksheet_set.add(int(w.pk))
