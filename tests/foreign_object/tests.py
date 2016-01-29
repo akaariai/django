@@ -467,3 +467,13 @@ class TestModelCheckTests(SimpleTestCase):
                 apps = test_apps
 
         self.assertEqual(Child._meta.get_field('parent').check(from_model=Child), [])
+
+
+class TestExtraJoinFilterQ(TestCase):
+    @translation.activate('fi')
+    def test_extra_join_filter_q(self):
+        a = Article.objects.create(pub_date=datetime.datetime.today())
+        ArticleTranslation.objects.create(article=a, lang='fi', title='title', body='body')
+        qs = Article.objects.select_related('active_translation_q')
+        with self.assertNumQueries(1):
+            self.assertEqual(qs[0].active_translation_q.title, 'title')
